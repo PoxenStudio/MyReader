@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore } from '@/store/bookDataStore';
-import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
+import { useMyBooksSyncAllowed } from '@/store/mybooksStatusStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -38,7 +38,7 @@ export const useNativeSync = (bookKey: string) => {
   const { settings } = useSettingsStore();
   const { getProgress } = useReaderStore();
   const { getConfig, setConfig, getBookData, saveConfig } = useBookDataStore();
-  const isSyncAllowed = useMyBooksStatusStore((state) => state.isSyncAllowed);
+  const isSyncAllowed = useMyBooksSyncAllowed();
   const progress = getProgress(bookKey);
 
   const isReady = ENABLE_SYNC_FEATURE && status === 'logged_in' && !isGuest && isSyncAllowed;

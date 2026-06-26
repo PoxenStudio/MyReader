@@ -1,5 +1,6 @@
 'use client';
 
+import clsx from 'clsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   MdContentCopy,
@@ -21,7 +22,7 @@ import {
   signOut,
   type MyBooksUserDetailInfo,
 } from '@/services/mybooksService';
-import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
+import { useMyBooksStatusStore, useMyBooksSyncAllowed } from '@/store/mybooksStatusStore';
 import { BoxedList, SettingsRow } from '@/components/settings/primitives';
 import Dialog from '@/components/Dialog';
 import UserAvatar from '@/components/UserAvatar';
@@ -36,7 +37,8 @@ interface UserSettingsDialogProps {
 const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose }) => {
   const _ = useTranslation();
   const { logout } = useAuth();
-  const isSyncAllowed = useMyBooksStatusStore((state) => state.isSyncAllowed);
+  const isSyncAllowed = useMyBooksSyncAllowed();
+  const sysInfo = useMyBooksStatusStore((state) => state.sysInfo);
 
   const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>('loading');
   const [saving, setSaving] = useState(false);
@@ -63,11 +65,11 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
     if (!isOpen) return;
     setRefreshStatus('loading');
     getUserDetailInfo()
-      .then((info) => {
-        if (info) {
-          setUserInfo(info);
-          setNickname(info.nickname || '');
-          setPodcastToken(info.podcast_token || '');
+      .then((result) => {
+        if (result) {
+          setUserInfo(result.user);
+          setNickname(result.user.nickname || '');
+          setPodcastToken(result.user.podcast_token || '');
         }
         setRefreshStatus('idle');
       })
@@ -291,7 +293,9 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
 
             {/* Podcast / Audiobook Token */}
             <BoxedList title={_('Podcast / Audiobook Token')}>
-              <SettingsRow label={_('Token')}>
+              <SettingsRow
+                label={<span className='block truncate font-mono text-[10px]'>{podcastToken}</span>}
+              >
                 <div className='flex items-center gap-1'>
                   <button
                     type='button'
@@ -312,13 +316,27 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
                   </button>
                 </div>
               </SettingsRow>
-              {podcastToken && (
-                <div className='px-3 pb-3 text-right'>
-                  <span className='text-base-content/55 break-all font-mono text-[0.7em]'>
-                    {podcastToken}
-                  </span>
-                </div>
-              )}
+            </BoxedList>
+
+            {/* Server Info */}
+            <BoxedList title={_('Server Info')}>
+              <div className='grid grid-cols-[auto_auto] items-center gap-x-3 gap-y-2 px-4 py-3'>
+                <span className='text-end text-sm text-base-content/70'>{_('Version')}</span>
+                <span className='justify-self-start rounded-full bg-[#003153] px-2.5 py-0.5 text-[0.7rem] font-medium text-white'>
+                  {sysInfo?.version || '-'}
+                </span>
+                <span className='text-end text-sm text-base-content/70'>{_('Sync')}</span>
+                <span
+                  className={clsx(
+                    'justify-self-start rounded-full px-2.5 py-0.5 text-[0.7rem] font-medium',
+                    isSyncAllowed
+                      ? 'bg-success text-success-content'
+                      : 'bg-base-300 text-base-content/60',
+                  )}
+                >
+                  {isSyncAllowed ? _('Enabled') : _('Disabled')}
+                </span>
+              </div>
             </BoxedList>
 
             {/* Save */}

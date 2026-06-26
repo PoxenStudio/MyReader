@@ -436,15 +436,20 @@ export async function getRatings(): Promise<{
 
 const MYBOOKS_USER_INFO_CACHE_KEY = 'mybooks_user_info';
 
-function updateSyncAllowedFromSysInfo(sys?: MyBooksSysInfo): void {
-  if (typeof sys?.allow?.sync !== 'boolean') return;
-  useMyBooksStatusStore.getState().setSyncAllowed(sys.allow.sync);
+function updateSysInfo(sys?: MyBooksSysInfo): void {
+  if (!sys) return;
+  // Merge rather than overwrite: different /user/info call sites (plain vs.
+  // ?detail=1) can return a `sys` object with a different subset of fields,
+  // and a full overwrite would let a leaner response clobber fields (e.g.
+  // `version`) already known from an earlier, fuller response.
+  const current = useMyBooksStatusStore.getState().sysInfo;
+  useMyBooksStatusStore.getState().setSysInfo({ ...current, ...sys });
 }
 
 export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
   try {
     const response = await fetchMyBooks('/user/info');
-    updateSyncAllowedFromSysInfo(response.sys);
+    updateSysInfo(response.sys);
     const user = response.user;
     if (typeof window !== 'undefined') {
       if (user?.is_login) {
@@ -553,11 +558,16 @@ export async function updateReadState(id: number, state: 0 | 1 | 2): Promise<voi
   );
 }
 
-export async function getUserDetailInfo(): Promise<MyBooksUserDetailInfo | null> {
+export interface MyBooksUserDetailResult {
+  user: MyBooksUserDetailInfo;
+  sys: MyBooksSysInfo | null;
+}
+
+export async function getUserDetailInfo(): Promise<MyBooksUserDetailResult | null> {
   const response = await fetchMyBooks('/user/info', { detail: 1 });
-  updateSyncAllowedFromSysInfo(response.sys);
+  updateSysInfo(response.sys);
   if (!response.user?.is_login) return null;
-  return response.user as MyBooksUserDetailInfo;
+  return { user: response.user as MyBooksUserDetailInfo, sys: response.sys ?? null };
 }
 
 export async function updateUserSettings(settings: MyBooksUpdateSettings): Promise<void> {
