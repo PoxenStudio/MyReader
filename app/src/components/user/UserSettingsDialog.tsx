@@ -320,22 +320,26 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
 
             {/* Server Info */}
             <BoxedList title={_('Server Info')}>
-              <div className='grid grid-cols-[auto_auto] items-center gap-x-3 gap-y-2 px-4 py-3'>
-                <span className='text-end text-sm text-base-content/70'>{_('Version')}</span>
-                <span className='justify-self-start rounded-full bg-[#003153] px-2.5 py-0.5 text-[0.7rem] font-medium text-white'>
-                  {sysInfo?.version || '-'}
-                </span>
-                <span className='text-end text-sm text-base-content/70'>{_('Sync')}</span>
-                <span
-                  className={clsx(
-                    'justify-self-start rounded-full px-2.5 py-0.5 text-[0.7rem] font-medium',
-                    isSyncAllowed
-                      ? 'bg-success text-success-content'
-                      : 'bg-base-300 text-base-content/60',
-                  )}
-                >
-                  {isSyncAllowed ? _('Enabled') : _('Disabled')}
-                </span>
+              <div className='flex items-center gap-x-6 px-4 py-3'>
+                <div className='flex items-center gap-x-2'>
+                  <span className='text-end text-sm text-base-content/70'>{_('Version')}</span>
+                  <span className='rounded-full bg-[#003153] px-2.5 py-0.5 text-[0.7rem] font-medium text-white'>
+                    {sysInfo?.version || '-'}
+                  </span>
+                </div>
+                <div className='flex items-center gap-x-2'>
+                  <span className='text-end text-sm text-base-content/70'>{_('Sync')}</span>
+                  <span
+                    className={clsx(
+                      'rounded-full px-2.5 py-0.5 text-[0.7rem] font-medium',
+                      isSyncAllowed
+                        ? 'bg-success text-success-content'
+                        : 'bg-base-300 text-base-content/60',
+                    )}
+                  >
+                    {isSyncAllowed ? _('Enabled') : _('Disabled')}
+                  </span>
+                </div>
               </div>
             </BoxedList>
 
