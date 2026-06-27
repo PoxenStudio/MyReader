@@ -296,7 +296,10 @@ export const UpdaterContent = ({
       }
     };
     if (appService?.hasUpdater && checkUpdate) {
+      console.log('Checking for updates...');
       checkForUpdates();
+    } else {
+      console.log('Updater is not available or checkUpdate is false, skipping update check.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appService?.hasUpdater]);

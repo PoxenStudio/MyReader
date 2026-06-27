@@ -755,7 +755,7 @@ export const SHARE_TOKEN_LENGTH = 22;
 export const SHARE_PRESIGN_TTL_SECONDS = 300;
 export const SHARE_CFI_MAX_LENGTH = 512;
 
-const LATEST_DOWNLOAD_BASE_URL = 'https://mybooks.top/releases';
+const LATEST_DOWNLOAD_BASE_URL = 'https://mybooks.top/myreader/releases';
 
 export const MYBOOKS_UPDATER_FILE = `${LATEST_DOWNLOAD_BASE_URL}/latest.json`;
 
