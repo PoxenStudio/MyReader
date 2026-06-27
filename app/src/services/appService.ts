@@ -269,7 +269,7 @@ export abstract class BaseAppService implements AppService {
     return CloudSvc.deleteBook(this.fs, book, deleteAction);
   }
 
-  async uploadBook(book: Book, onProgress?: ProgressHandler): Promise<void> {
+  async uploadBook(book: Book, onProgress?: ProgressHandler): Promise<number> {
     return CloudSvc.uploadBook(this.fs, book, onProgress);
   }
 

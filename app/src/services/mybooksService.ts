@@ -497,7 +497,7 @@ export async function searchBooks(
   num: number = 20,
 ): Promise<{ books: MyBooksBook[]; total: number }> {
   const response = await fetchMyBooks<{ books: MyBooksBook[]; total: number }>('/search', {
-    query,
+    name: query,
     start: (page - 1) * num,
     size: num,
   });

@@ -71,7 +71,7 @@ export async function uploadBook(
   fs: FileSystem,
   book: Book,
   onProgress?: ProgressHandler,
-): Promise<void> {
+): Promise<number> {
   let bookSource = await resolveBookContentSource(fs, book);
   if (bookSource.kind === 'url') {
     const fileobj = await fs.openFile(bookSource.path, bookSource.base);
@@ -95,7 +95,7 @@ export async function uploadBook(
   }
 
   onProgress?.({ progress: 0, total: arrayBuffer.byteLength, transferSpeed: 0 });
-  await uploadBookToMyBooks(new Blob([arrayBuffer]), getRemoteBookFilename(book));
+  const bookId = await uploadBookToMyBooks(new Blob([arrayBuffer]), getRemoteBookFilename(book));
   onProgress?.({
     progress: arrayBuffer.byteLength,
     total: arrayBuffer.byteLength,
@@ -110,6 +110,8 @@ export async function uploadBook(
   // The book now lives on the MyBooks server, so treat it the same as a
   // book that was downloaded from the cloud rather than a local-only one.
   book.storageType = 'cloud';
+  book.bookId = bookId;
+  return bookId;
 }
 
 export async function downloadMyBooksBook(

@@ -397,7 +397,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
         menu.append(downloadBookMenuItem);
       }
     }
-    if (book.storageType === 'local' && !book.uploadedAt && !book.downloadedAt) {
+    if (book.storageType !== 'cloud' && book.bookId === 0) {
       menu.append(uploadBookMenuItem);
     }
     // Offered for cloud-bookshelf books and local books downloaded from

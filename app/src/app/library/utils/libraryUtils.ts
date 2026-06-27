@@ -583,3 +583,39 @@ export const createGroupSorter =
 
     return 0;
   };
+
+/** Library header search target: the local bookshelf, or a MyBooks search field. */
+export type SearchCategory =
+  | 'local'
+  | 'all'
+  | 'title'
+  | 'title_sort'
+  | 'author'
+  | 'isbn'
+  | 'comments'
+  | 'tags'
+  | 'series';
+
+export const SEARCH_CATEGORIES: { value: SearchCategory; label: string }[] = [
+  { value: 'local', label: 'Current Bookshelf' },
+  { value: 'all', label: 'All Fields' },
+  { value: 'title', label: 'Title' },
+  { value: 'title_sort', label: 'Title(Pinyin)' },
+  { value: 'author', label: 'Author' },
+  { value: 'isbn', label: 'ISBN' },
+  { value: 'comments', label: 'Comments' },
+  { value: 'tags', label: 'Tags' },
+  { value: 'series', label: 'Series' },
+];
+
+/**
+ * Builds the field-prefixed query MyBooks' /search endpoint expects
+ * (e.g. "title:foo"), mirroring SearchBar.vue's doSearch(). 'local' and
+ * 'all' search every field, so they're sent unprefixed.
+ */
+export const buildSearchFullQuery = (category: SearchCategory, query: string): string => {
+  const trimmed = query.trim();
+  if (!trimmed) return '';
+  if (category === 'local' || category === 'all') return trimmed;
+  return `${category}:${trimmed}`;
+};

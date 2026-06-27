@@ -158,7 +158,7 @@ export interface AppService {
   importBook(file: string | File, books: Book[], options?: ImportBookOptions): Promise<Book | null>;
   refreshBookMetadata(book: Book): Promise<boolean>;
   deleteBook(book: Book, deleteAction: DeleteAction): Promise<void>;
-  uploadBook(book: Book, onProgress?: ProgressHandler): Promise<void>;
+  uploadBook(book: Book, onProgress?: ProgressHandler): Promise<number>;
   downloadBook(
     book: Book,
     onlyCover?: boolean,

@@ -1479,5 +1479,9 @@
   "Version": "版本",
   "Sync": "同步",
   "Enabled": "已启用",
-  "Disabled": "已禁用"
+  "Disabled": "已禁用",
+  "Current Bookshelf": "当前书架",
+  "All Fields": "综合",
+  "Title(Pinyin)": "书名拼音",
+  "Comments": "简介"
 }

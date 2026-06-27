@@ -11,6 +11,7 @@ import {
   MdOutlineCloudQueue,
   MdPersonOutline,
   MdOutlineNoAccounts,
+  MdExpandMore,
 } from 'react-icons/md';
 import { IoMdCloseCircle } from 'react-icons/io';
 
@@ -40,6 +41,8 @@ import UserSettingsDialog from '@/components/user/UserSettingsDialog';
 import SettingsMenu from './SettingsMenu';
 import ImportMenu from './ImportMenu';
 import ViewMenu from './ViewMenu';
+import SearchCategoryMenu from './SearchCategoryMenu';
+import { SEARCH_CATEGORIES, SearchCategory } from '@/app/library/utils/libraryUtils';
 
 interface LibraryHeaderProps {
   isSelectMode: boolean;
@@ -79,6 +82,9 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const openLoginDialog = useAuthUIStore((state) => state.openLoginDialog);
   const { setSettingsDialogOpen, setRequestedPanel } = useSettingsStore();
   const [searchQuery, setSearchQuery] = useState(searchParams?.get('q') ?? '');
+  const [searchCategory, setSearchCategory] = useState<SearchCategory>(
+    () => (searchParams?.get('cat') as SearchCategory) || 'local',
+  );
   const [userInfo, setUserInfo] = useState<MyBooksUserInfo | null>(null);
   const [showUserSettings, setShowUserSettings] = useState(false);
 
@@ -107,6 +113,11 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
     onToggleSelectMode,
   });
 
+  // Keep the category selector in sync with back/forward navigation.
+  useEffect(() => {
+    setSearchCategory((searchParams?.get('cat') as SearchCategory) || 'local');
+  }, [searchParams]);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const debouncedUpdateQueryParam = useCallback(
     debounce((value: string) => {
@@ -126,6 +137,27 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
     setSearchQuery(newQuery);
     debouncedUpdateQueryParam(newQuery);
   };
+
+  const handleSelectCategory = (category: SearchCategory) => {
+    setSearchCategory(category);
+    if (!searchQuery) {
+      return;
+    }
+    const params = new URLSearchParams(searchParams?.toString());
+    if (category === 'local') {
+      params.delete('source');
+      params.delete('type');
+      params.delete('cat');
+    } else {
+      params.set('source', 'cloud');
+      params.set('type', 'search');
+      params.set('cat', category);
+    }
+    router.push(`?${params.toString()}`);
+  };
+
+  const currentCategoryLabel =
+    SEARCH_CATEGORIES.find((cat) => cat.value === searchCategory)?.label ?? 'Current Bookshelf';
 
   const handleCheckMyBooksConnectivity = async () => {
     const { online, needsLogin } = await checkMyBooksConnectivity();
@@ -190,7 +222,30 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
           </button>
 
           <div className='relative flex h-9 w-full items-center sm:h-7'>
-            <span className='text-base-content/50 absolute ps-3'>
+            <Dropdown
+              label={_('Search Category')}
+              className='exclude-title-bar-mousedown dropdown-bottom cursor-pointer'
+              containerClassName='absolute left-1 top-1 z-10'
+              buttonClassName={clsx(
+                'flex h-7 max-w-[84px] items-center gap-0.5 rounded-full px-2 sm:h-6',
+                'text-base-content/60 hover:bg-base-300/70 text-xs',
+              )}
+              toggleButton={
+                <>
+                  <span className='truncate'>{_(currentCategoryLabel)}</span>
+                  <MdExpandMore role='none' className='h-3.5 w-3.5 shrink-0' />
+                </>
+              }
+            >
+              <SearchCategoryMenu
+                currentCategory={searchCategory}
+                onSelectCategory={handleSelectCategory}
+              />
+            </Dropdown>
+            <span className='absolute ps-24'>
+              <span className='bg-base-content/30 block h-4 w-[0.5px]' />
+            </span>
+            <span className='text-base-content/50 absolute ps-28'>
               <FaSearch className='h-4 w-4' />
             </span>
             <input
@@ -206,7 +261,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
               onChange={handleSearchChange}
               spellCheck='false'
               className={clsx(
-                'search-input input h-9 w-full rounded-full pr-[30%] ps-10 sm:h-7',
+                'search-input input h-9 w-full rounded-full pr-[30%] ps-36 sm:h-7',
                 'bg-base-300/45 border-0',
                 'font-sans text-sm font-light',
                 'placeholder:text-base-content/50 truncate',

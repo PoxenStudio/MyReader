@@ -75,6 +75,8 @@ import {
   ensureLibraryGroupByType,
   findGroupById,
   getBreadcrumbs,
+  buildSearchFullQuery,
+  SearchCategory,
 } from './utils/libraryUtils';
 import Spinner from '@/components/Spinner';
 import LibraryHeader from './components/LibraryHeader';
@@ -97,7 +99,7 @@ import ModalPortal from '@/components/ModalPortal';
 import TransferQueuePanel from './components/TransferQueuePanel';
 import LibraryDrawer from './components/LibraryDrawer';
 // MyBooks API imports
-import { getBooksByType } from '@/services/mybooksService';
+import { getBooksByType, searchBooks } from '@/services/mybooksService';
 import { convertMyBooksToLocalBooks } from '@/utils/bookConverter';
 import MetaList from './components/MetaList';
 import { useMetaList } from './hooks/useMetaList';
@@ -650,9 +652,17 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     const loadCloudBooks = async () => {
       setCloudBooksLoading(true);
       try {
-        const bookType = type;
-        const name = itemName ? itemName : undefined;
-        const result = await getBooksByType(bookType, 1, 20, name);
+        let result;
+        if (type === 'search') {
+          const category = (searchParams?.get('cat') as SearchCategory) || 'all';
+          const query = searchParams?.get('q') || '';
+          const fullQuery = buildSearchFullQuery(category, query);
+          result = fullQuery ? await searchBooks(fullQuery, 1, 20) : { books: [], total: 0 };
+        } else {
+          const bookType = type;
+          const name = itemName ? itemName : undefined;
+          result = await getBooksByType(bookType, 1, 20, name);
+        }
         const convertedBooks = convertMyBooksToLocalBooks(result.books);
         setCloudBooks(convertedBooks);
         setCloudBooksTotal(result.total);
@@ -693,8 +703,18 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
 
     const loadMoreCloudBooks = async () => {
       try {
-        const name = itemName ? itemName : undefined;
-        const result = await getBooksByType(type, cloudBooksPage, 20, name);
+        let result;
+        if (type === 'search') {
+          const category = (searchParams?.get('cat') as SearchCategory) || 'all';
+          const query = searchParams?.get('q') || '';
+          const fullQuery = buildSearchFullQuery(category, query);
+          result = fullQuery
+            ? await searchBooks(fullQuery, cloudBooksPage, 20)
+            : { books: [], total: 0 };
+        } else {
+          const name = itemName ? itemName : undefined;
+          result = await getBooksByType(type, cloudBooksPage, 20, name);
+        }
         const convertedBooks = convertMyBooksToLocalBooks(result.books);
         setCloudBooks((prev) => [...prev, ...convertedBooks]);
       } catch (error) {
