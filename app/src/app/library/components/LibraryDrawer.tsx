@@ -97,9 +97,13 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
   const currentSource = searchParams?.get('source') || 'local';
   const currentType = searchParams?.get('type') || 'all';
 
+  // The root path renders the library page directly (see src/app/page.tsx),
+  // so '/' and '/library' are both valid library routes.
+  const isLibraryPath = pathname === '/library' || pathname === '/';
+
   // Check if the link matches current state
   const isLinkActive = (source: string, type?: string) => {
-    if (pathname !== '/library') return false;
+    if (!isLibraryPath) return false;
     if (currentSource !== source) return false;
     if (type && currentType !== type) return false;
     return true;
@@ -107,7 +111,7 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
 
   // Check if any cloud type is active (for expanding groups)
   const isCloudTypeActive = (types: string[]) => {
-    if (pathname !== '/library') return false;
+    if (!isLibraryPath) return false;
     if (currentSource !== 'cloud') return false;
     return types.includes(currentType);
   };
