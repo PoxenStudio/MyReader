@@ -114,7 +114,6 @@ const LoginDialog: React.FC = () => {
   // field still empty/unvalidated) — it's only hidden once the server explicitly
   // reports allow.register === false.
   const [allowRegister, setAllowRegister] = useState(true);
-  const [allowSync, setAllowSync] = useState(true);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -144,7 +143,6 @@ const LoginDialog: React.FC = () => {
       fetchMyBooksUserInfo(hostValue)
         .then((result) => {
           setAllowRegister(result.sys?.allow?.register !== false);
-          setAllowSync(result.sys?.allow?.sync !== false);
         })
         .catch(() => {
           // Can't reach the host yet (e.g. still typing it) — don't hide the

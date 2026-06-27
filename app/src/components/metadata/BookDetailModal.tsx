@@ -32,7 +32,6 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
   book,
   isOpen,
   onClose,
-  handleBookDownload,
   handleBookUpload,
   handleBookDelete,
   deleteDisabled,
@@ -120,13 +119,6 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
     setPendingDelete(false);
   };
 
-  const handleRedownload = async () => {
-    handleClose();
-    if (handleBookDownload) {
-      handleBookDownload(book, { redownload: true, queued: false });
-    }
-  };
-
   const handleReupload = async () => {
     handleClose();
     if (handleBookUpload) {
@@ -187,7 +179,7 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
                 onEdit={handleBookMetadataUpdate ? handleEditMetadata : undefined}
                 onDelete={handleBookDelete ? handleDelete : undefined}
                 deleteDisabled={deleteDisabled}
-                onDownload={handleBookDownload ? handleRedownload : undefined}
+                onDownload={undefined}
                 onUpload={handleBookUpload ? handleReupload : undefined}
                 onExport={handleBookExport}
               />

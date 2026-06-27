@@ -2,6 +2,7 @@ import clsx from 'clsx';
 import React from 'react';
 import {
   MdOutlineCloudUpload,
+  MdOutlineCloudDownload,
   MdOutlineDelete,
   MdOutlineEdit,
   MdSaveAlt,
@@ -32,6 +33,7 @@ interface BookDetailViewProps {
   onEdit?: () => void;
   onDelete?: () => void;
   deleteDisabled?: boolean;
+  onDownload?: () => void;
   onUpload?: () => void;
   onExport?: () => void;
 }
@@ -43,6 +45,7 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
   onEdit,
   onDelete,
   deleteDisabled,
+  onDownload,
   onUpload,
   onExport,
 }) => {
@@ -103,6 +106,11 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
             {book.storageType === 'local' && !book.downloadedAt && onUpload && (
               <button onClick={onUpload} title={_('Upload to MyBooks')}>
                 <MdOutlineCloudUpload className='fill-base-content' />
+              </button>
+            )}
+            {book.storageType === 'cloud' && book.downloadedAt && onDownload && (
+              <button onClick={onDownload} title={_('Download Book')}>
+                <MdOutlineCloudDownload className='fill-base-content' />
               </button>
             )}
             {book.downloadedAt && onExport && (

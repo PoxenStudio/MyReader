@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import React, { useState } from 'react';
-import { MdEdit, MdDelete, MdLock, MdLockOpen, MdOutlineSearch } from 'react-icons/md';
+import { MdEdit, MdDelete, MdLock, MdLockOpen } from 'react-icons/md';
 
 import { Book } from '@/types/book';
 import { BookMetadata } from '@/libs/document';
@@ -36,10 +36,8 @@ const BookDetailEdit: React.FC<BookDetailEditProps> = ({
   fieldSources,
   lockedFields,
   fieldErrors,
-  searchLoading,
   onFieldChange,
   onToggleFieldLock,
-  onAutoRetrieve,
   onLockAll,
   onUnlockAll,
   onCancel,
