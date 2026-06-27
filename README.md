@@ -31,6 +31,7 @@ cd myreader
 ```bash
 # 代码更新后可能需要重新运行此命令
 git submodule update --init --recursive
+# 如果submodule目录为空，可以增加参数重试: --force --checkout
 pnpm install
 # 将 vendor 库复制到 public 目录
 pnpm --filter @poxenstudio/myreader setup-vendors
