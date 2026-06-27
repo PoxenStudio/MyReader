@@ -93,9 +93,6 @@ pnpm tauri android build
 pnpm tauri ios build
 ```
 
-如遇到问题，请参考我们的发布脚本：
-https://github.com/poxenstudio/mybooks_reader/blob/main/.github/workflows/release.yml
-
 ### 6. 使用 Nix 设置开发环境
 
 如果已安装 Nix，可以利用 flake 进入包含所有必要依赖的开发 shell：
