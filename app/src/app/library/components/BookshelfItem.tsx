@@ -110,7 +110,7 @@ interface BookshelfItemProps {
   handleLibraryNavigation: (targetGroup: string) => void;
   handleUpdateReadingStatus: (book: Book, status: ReadingStatus | undefined) => void;
   showCloudIcon?: boolean;
-  showFormatBadge?: boolean;
+  showAllFormatsBadge?: boolean;
   isCloudLibrary?: boolean;
 }
 
@@ -131,7 +131,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
   handleLibraryNavigation,
   handleUpdateReadingStatus,
   showCloudIcon = false,
-  showFormatBadge = false,
+  showAllFormatsBadge = false,
   isCloudLibrary = false,
 }) => {
   const _ = useTranslation();
@@ -555,7 +555,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
               handleBookDownload={handleBookDownload}
               showBookDetailsModal={showBookDetailsModal}
               showCloudIcon={showCloudIcon}
-              showFormatBadge={showFormatBadge}
+              showAllFormatsBadge={showAllFormatsBadge}
             />
           ) : (
             <GroupItem

@@ -80,7 +80,7 @@ interface BookshelfProps {
   cloudBooksTotal?: number;
   onLoadMoreCloudBooks?: () => void;
   showCloudIcon?: boolean;
-  showFormatBadge?: boolean;
+  showAllFormatsBadge?: boolean;
 }
 
 /**
@@ -157,7 +157,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   cloudBooksTotal = 0,
   onLoadMoreCloudBooks,
   showCloudIcon = false,
-  showFormatBadge = false,
+  showAllFormatsBadge = false,
 }) => {
   const _ = useTranslation();
   const router = useRouter();
@@ -622,7 +622,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
             'hash' in item ? booksTransferProgress[(item as Book).hash] || null : null
           }
           showCloudIcon={showCloudIcon}
-          showFormatBadge={showFormatBadge}
+          showAllFormatsBadge={showAllFormatsBadge}
           isCloudLibrary={isCloudLibrary}
         />
       );

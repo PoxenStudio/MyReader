@@ -35,7 +35,7 @@ interface BookItemProps {
   handleBookDownload: (book: Book, options?: { redownload?: boolean; queued?: boolean }) => void;
   showBookDetailsModal: (book: Book) => void;
   showCloudIcon?: boolean;
-  showFormatBadge?: boolean;
+  showAllFormatsBadge?: boolean;
 }
 
 const BookItem: React.FC<BookItemProps> = ({
@@ -49,7 +49,7 @@ const BookItem: React.FC<BookItemProps> = ({
   handleBookDownload,
   showBookDetailsModal,
   showCloudIcon = false,
-  showFormatBadge = false,
+  showAllFormatsBadge = false,
 }) => {
   const _ = useTranslation();
   const router = useRouter();
@@ -128,7 +128,21 @@ const BookItem: React.FC<BookItemProps> = ({
             <LiaCloudSolid size={iconSize15} className='fill-gray-300 drop-shadow-md' />
           </div>
         )}
-        {showFormatBadge && <FormatBadge format={book.sourceFormat ?? book.format} />}
+        {showAllFormatsBadge ? (
+          <div className='absolute right-0.5 top-0 flex flex-row-reverse gap-0.3'>
+            {book.files && book.files.length > 0 ? (
+              book.files
+                .slice(0, 3)
+                .map((file, index) => <FormatBadge key={index} format={file.format} />)
+            ) : (
+              <FormatBadge format={book.sourceFormat ?? book.format} />
+            )}
+          </div>
+        ) : (
+          <div className='absolute right-0.5 top-0 flex flex-row-reverse gap-0.3'>
+            <FormatBadge format={book.sourceFormat ?? book.format} />
+          </div>
+        )}
       </div>
       <div
         className={clsx(

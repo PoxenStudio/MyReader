@@ -1699,7 +1699,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                           setCloudBooksPage((prev) => prev + 1);
                         }}
                         showCloudIcon={source === 'cloud'}
-                        showFormatBadge={source !== 'cloud'}
+                        showAllFormatsBadge={source === 'cloud'}
                       />
                     </div>
                   );

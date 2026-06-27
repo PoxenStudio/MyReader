@@ -22,7 +22,7 @@ const FormatBadge: React.FC<FormatBadgeProps> = ({ format }) => {
   return (
     <div
       className={clsx(
-        'eink-bordered absolute right-1 top-1 rounded px-1 text-[0.55em] font-bold leading-tight drop-shadow-sm',
+        'eink-bordered rounded px-1 text-[0.55em] font-bold leading-tight drop-shadow-sm',
         FORMAT_BADGE_STYLES[format],
       )}
     >
