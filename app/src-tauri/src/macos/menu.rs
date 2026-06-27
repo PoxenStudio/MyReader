@@ -59,7 +59,7 @@ pub fn handle_menu_event(app: &AppHandle, event: &MenuEvent) {
     } else if event.id() == "privacy_policy" {
         let _ = opener.open_url("https://mybooks.top/privacy-policy.html", None::<&str>);
     } else if event.id() == "report_issue" {
-        let _ = opener.open_url("https://github.com/poxenstudio/mybooks/issues", None::<&str>);
+        let _ = opener.open_url("https://github.com/poxenstudio/myreader/issues", None::<&str>);
     } else if event.id() == "myreader_help" {
         let _ = opener.open_url("https://mybooks.top", None::<&str>);
     }
