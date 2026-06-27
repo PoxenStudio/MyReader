@@ -1,0 +1,1339 @@
+import {
+  MONOSPACE_FONTS,
+  SANS_SERIF_FONTS,
+  SERIF_FONTS,
+  FALLBACK_FONTS,
+  CJK_SANS_SERIF_FONTS,
+  CJK_SERIF_FONTS,
+} from '@/services/constants';
+import { ViewSettings } from '@/types/book';
+import {
+  themes,
+  Palette,
+  CustomTheme,
+  generateLightPalette,
+  generateDarkPalette,
+} from '@/styles/themes';
+import { createFontCSS, CustomFont } from '@/styles/fonts';
+import { getOSPlatform } from './misc';
+
+const getFontStyles = (
+  serif: string,
+  sansSerif: string,
+  monospace: string,
+  defaultFont: string,
+  defaultCJKFont: string,
+  fontSize: number,
+  minFontSize: number,
+  fontWeight: number,
+  overrideFont: boolean,
+) => {
+  const lastSerifFonts = ['Georgia', 'Times New Roman'];
+  const serifFonts = [
+    serif,
+    ...(defaultCJKFont !== serif ? [defaultCJKFont] : []),
+    ...SERIF_FONTS.filter(
+      (font) => font !== serif && font !== defaultCJKFont && !lastSerifFonts.includes(font),
+    ),
+    ...CJK_SERIF_FONTS.filter((font) => font !== serif && font !== defaultCJKFont),
+    ...lastSerifFonts.filter(
+      (font) => SERIF_FONTS.includes(font) && !lastSerifFonts.includes(defaultCJKFont),
+    ),
+    ...FALLBACK_FONTS,
+  ];
+  const sansSerifFonts = [
+    sansSerif,
+    ...(defaultCJKFont !== sansSerif ? [defaultCJKFont] : []),
+    ...SANS_SERIF_FONTS.filter((font) => font !== sansSerif && font !== defaultCJKFont),
+    ...CJK_SANS_SERIF_FONTS.filter((font) => font !== sansSerif && font !== defaultCJKFont),
+    ...FALLBACK_FONTS,
+  ];
+  const monospaceFonts = [monospace, ...MONOSPACE_FONTS.filter((font) => font !== monospace)];
+  const defaultFontFamily = defaultFont.toLowerCase() === 'serif' ? '--serif' : '--sans-serif';
+  const fontStyles = `
+    html {
+      --serif: ${serifFonts.map((font) => `"${font}"`).join(', ')}, serif;
+      --sans-serif: ${sansSerifFonts.map((font) => `"${font}"`).join(', ')}, sans-serif;
+      --monospace: ${monospaceFonts.map((font) => `"${font}"`).join(', ')}, monospace;
+      --font-size: ${fontSize}px;
+      --min-font-size: ${minFontSize}px;
+      --font-weight: ${fontWeight};
+    }
+    html, body {
+      font-size: ${fontSize}px !important;
+      font-weight: ${fontWeight};
+      -webkit-text-size-adjust: none;
+      text-size-adjust: none;
+    }
+    /* lower specificity than ebook built-in font styles */
+    html {
+      font-family: var(${defaultFontFamily}) ${overrideFont ? '!important' : ''};
+    }
+    /* higher specificity than ebook built-in font styles */
+    html body {
+      ${overrideFont ? `font-family: var(${defaultFontFamily}) !important;` : ''}
+    }
+    font[size="1"] {
+      font-size: ${minFontSize}px;
+    }
+    font[size="2"] {
+      font-size: ${minFontSize * 1.5}px;
+    }
+    font[size="3"] {
+      font-size: ${fontSize}px;
+    }
+    font[size="4"] {
+      font-size: ${fontSize * 1.2}px;
+    }
+    font[size="5"] {
+      font-size: ${fontSize * 1.5}px;
+    }
+    font[size="6"] {
+      font-size: ${fontSize * 2}px;
+    }
+    font[size="7"] {
+      font-size: ${fontSize * 3}px;
+    }
+    /* hardcoded inline font size */
+    [style*="font-size: 16px"], [style*="font-size:16px"] {
+      font-size: 1rem !important;
+    }
+    pre, code, kbd {
+      font-family: var(--monospace);
+    }
+    body *:not(pre, code, kbd, .code):not(pre *, code *, kbd *, .code *) {
+      ${overrideFont ? 'font-family: revert !important;' : ''}
+    }
+  `;
+  return fontStyles;
+};
+
+/** True for #fff, #f5f5f5, rgb(255,…), etc. Used when rewriting EPUB CSS in dark mode. */
+const isLightCssColor = (value: string): boolean => {
+  const v = value.trim().toLowerCase();
+  if (v === 'white') return true;
+  const hex = v.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    const h = hex[1]!;
+    const expand =
+      h.length === 3
+        ? h
+            .split('')
+            .map((c) => c + c)
+            .join('')
+        : h;
+    const r = parseInt(expand.slice(0, 2), 16);
+    const g = parseInt(expand.slice(2, 4), 16);
+    const b = parseInt(expand.slice(4, 6), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.85;
+  }
+  const rgb = v.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+  if (rgb?.[1] != null && rgb[2] != null && rgb[3] != null) {
+    const r = parseInt(rgb[1], 10);
+    const g = parseInt(rgb[2], 10);
+    const b = parseInt(rgb[3], 10);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.85;
+  }
+  return false;
+};
+
+const getDarkModeLightBackgroundOverrides = (bg: string) => `
+    /* Callout boxes often use inline white/light backgrounds while html/body set dark fg. */
+    *[style*="background-color: #fff"], *[style*="background-color:#fff"],
+    *[style*="background-color: #ffffff"], *[style*="background-color:#ffffff"],
+    *[style*="background-color: white"], *[style*="background-color:white"],
+    *[style*="background: #fff"], *[style*="background:#fff"],
+    *[style*="background: #ffffff"], *[style*="background:#ffffff"],
+    *[style*="background: white"], *[style*="background:white"],
+    *[style*="background-color: rgb(255"], *[style*="background-color:rgb(255"],
+    *[style*="background: rgb(255"], *[style*="background:rgb(255"] {
+      background-color: ${bg} !important;
+    }
+    body.theme-dark {
+      background-color: ${bg} !important;
+    }
+`;
+
+const getEinkSelectionStyles = () => {
+  return `
+    ::selection {
+      color: var(--theme-bg-color);
+      background: var(--theme-fg-color);
+    }
+    ::-moz-selection {
+      color: var(--theme-bg-color);
+      background: var(--theme-fg-color);
+    }
+  `;
+};
+
+const getColorStyles = (
+  overrideColor: boolean,
+  invertImgColorInDark: boolean,
+  themeCode: ThemeCode,
+  backgroundTextureId: string,
+  isEink: boolean,
+) => {
+  const { bg, fg, primary, isDarkMode } = themeCode;
+  const hasBackgroundTexture = !!backgroundTextureId && backgroundTextureId !== 'none';
+  const colorStyles = `
+    html {
+      --bg-texture-id: ${backgroundTextureId};
+      --theme-bg-color: ${bg};
+      --theme-fg-color: ${fg};
+      --theme-primary-color: ${primary};
+      --override-color: ${overrideColor};
+      color-scheme: ${isDarkMode ? 'dark' : 'light'};
+    }
+    html, body {
+      color: ${fg};
+    }
+    ${isEink ? getEinkSelectionStyles() : ''}
+    html[has-background], body[has-background] {
+      --background-set: var(--theme-bg-color);
+    }
+    html {
+      background-color: var(--theme-bg-color, transparent);
+      background: var(--background-set, none);
+    }
+    body {
+      ${isEink ? `background-color: ${bg} !important;` : ''}
+    }
+    section, aside, blockquote, article, nav, header, footer, main, figure,
+    div, p, font, h1, h2, h3, h4, h5, h6, li, span {
+      ${overrideColor && !hasBackgroundTexture ? `background-color: ${bg} !important;` : ''}
+      ${overrideColor && !hasBackgroundTexture ? `color: ${fg} !important;` : ''}
+      ${overrideColor && !hasBackgroundTexture ? `border-color: ${fg} !important;` : ''}
+    }
+    pre, span { /* inline code blocks */
+      ${overrideColor ? `background-color: ${bg} !important;` : ''}
+    }
+    a:any-link {
+      ${overrideColor ? `color: ${primary} !important;` : isDarkMode ? `color: lightblue;` : ''}
+      text-decoration: ${isEink ? 'underline' : 'none'};
+    }
+    body.pbg {
+      ${isDarkMode ? `background-color: ${bg} !important;` : ''}
+    }
+    img {
+      ${isDarkMode && invertImgColorInDark ? 'filter: invert(100%);' : ''}
+      ${!isDarkMode && overrideColor ? 'mix-blend-mode: multiply;' : ''}
+    }
+    svg, img {
+      ${overrideColor ? `background-color: transparent !important;` : ''};
+    }
+    /* horizontal rule #1649 */
+    *:has(> hr.background-img):not(body) {
+      background-color: ${bg};
+    }
+    hr.background-img {
+      mix-blend-mode: multiply;
+    }
+    p[width][height] > img:only-child {
+      mix-blend-mode: multiply;
+    }
+    /* inline images */
+    *:has(> img.has-text-siblings):not(body) {
+      ${overrideColor ? `background-color: ${bg};` : ''}
+    }
+    p img.has-text-siblings, span img.has-text-siblings, sup img.has-text-siblings {
+      mix-blend-mode: ${isDarkMode ? 'screen' : 'multiply'};
+    }
+    table:has(> colgroup) {
+      table-layout: fixed;
+    }
+    td, th {
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    /* code */
+    body.theme-dark code {
+      ${isDarkMode ? `color: ${fg}cc;` : ''}
+      ${isDarkMode ? `background: color-mix(in srgb, ${bg} 90%, #000);` : ''}
+      ${isDarkMode ? `background-color: color-mix(in srgb, ${bg} 90%, #000);` : ''}
+    }
+    blockquote {
+      ${isDarkMode ? `background: color-mix(in srgb, ${bg} 80%, #000);` : ''}
+    }
+    blockquote, table * {
+      ${isDarkMode ? `background: color-mix(in srgb, ${bg} 80%, #000);` : ''}
+      ${isDarkMode ? `background-color: color-mix(in srgb, ${bg} 80%, #000);` : ''}
+    }
+    /* override inline hardcoded text color */
+    font[color="#000000"], font[color="#000"], font[color="black"],
+    font[color="rgb(0,0,0)"], font[color="rgb(0, 0, 0)"],
+    *[style*="color: rgb(0,0,0)"], *[style*="color: rgb(0, 0, 0)"],
+    *[style*="color: #000"], *[style*="color: #000000"], *[style*="color: black"],
+    *[style*="color:rgb(0,0,0)"], *[style*="color:rgb(0, 0, 0)"],
+    *[style*="color:#000"], *[style*="color:#000000"], *[style*="color:black"] {
+      color: ${fg} !important;
+    }
+    ${isDarkMode && !overrideColor ? getDarkModeLightBackgroundOverrides(bg) : ''}
+    /* for the Gutenberg eBooks */
+    #pg-header * {
+      color: inherit !important;
+    }
+    .x-ebookmaker, .x-ebookmaker-cover, .x-ebookmaker-coverpage {
+      background-color: unset !important;
+    }
+    /* for the Feedbooks eBooks */
+    .chapterHeader, .chapterHeader * {
+      border-color: unset;
+      background-color: ${bg} !important;
+    }
+    .calibre {
+      color: unset;
+      background-color: unset;
+    }
+  `;
+  return colorStyles;
+};
+
+const getPageLayoutStyles = (
+  marginTop: number,
+  marginRight: number,
+  marginBottom: number,
+  marginLeft: number,
+  zoomLevel: number,
+  writingMode: string,
+  vertical: boolean,
+) => `
+  @namespace epub "http://www.idpf.org/2007/ops";
+  html {
+    --margin-top: ${marginTop}px;
+    --margin-right: ${marginRight}px;
+    --margin-bottom: ${marginBottom}px;
+    --margin-left: ${marginLeft}px;
+  }
+  html, body {
+    ${writingMode === 'auto' ? '' : `writing-mode: ${writingMode} !important;`}
+    max-height: unset;
+    -webkit-touch-callout: none;
+    -webkit-user-select: text;
+  }
+  body {
+    overflow: unset;
+    zoom: ${zoomLevel};
+    padding: unset;
+    margin: unset;
+  }
+  svg:where(:not([width])), img:where(:not([width])) {
+    width: auto;
+  }
+  svg:where(:not([height])), img:where(:not([height])) {
+    height: auto;
+  }
+  figure > div:has(img) {
+    height: auto !important;
+  }
+  /* enlarge the clickable area of links */
+  a {
+    position: relative !important;
+  }
+  a::before {
+    content: '';
+    position: absolute;
+    inset: -10px;
+  }
+
+  pre, code {
+    white-space: pre-wrap !important;
+  }
+  .readest-table-scroll {
+    display: block;
+    max-width: 100%;
+    /* Scrolling is the default so a table wider than the column is never clipped.
+       A table that can wrap to fit doesn't overflow, so no scrollbar shows.
+       applyTableStyle adds .readest-table-scroll-fit (via a ResizeObserver) to
+       clip the few px of min-content slop some layout tables have, suppressing a
+       spurious scrollbar once layout has settled. */
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    /* Let the browser handle horizontal pans on the table; paginated swipe uses capture-phase JS when needed. */
+    touch-action: pan-x pan-y;
+  }
+  .readest-table-scroll-fit {
+    overflow-x: clip;
+    touch-action: auto;
+  }
+  .readest-table-scroll > table {
+    display: table !important;
+    max-width: 100%;
+  }
+  pre {
+    max-width: calc(var(--available-width) * 1px);
+    max-height: calc(var(--available-height) * 1px);
+    scrollbar-width: none;
+    overflow: auto;
+  }
+  pre::-webkit-scrollbar {
+    display: none;
+  }
+
+  .epubtype-footnote,
+  aside[epub|type~="endnote"],
+  aside[epub|type~="footnote"],
+  aside[epub|type~="note"],
+  aside[epub|type~="rearnote"] {
+    display: none;
+  }
+
+  /* Now begins really dirty hacks to fix some badly designed epubs */
+  body {
+    line-height: unset;
+  }
+
+  .duokan-footnote-content,
+  .duokan-footnote-item {
+    display: none;
+  }
+
+  .duokan-image-gallery-cell {
+    height: calc(var(--available-height) * 1px);
+  }
+
+  .duokan-image-gallery-cell img {
+    height: 90%;
+  }
+
+  div:has(> img, > svg) {
+    max-width: 100% !important;
+  }
+
+  body.paginated-mode td:has(img), body.paginated-mode td :has(img) {
+    max-height: calc(var(--available-height) * 0.8 * 1px);
+  }
+
+  /* some epubs set insane inline-block for p */
+  p {
+    display: block;
+  }
+
+  /* inline images without dimension */
+  .ie6 img {
+    width: unset;
+    height: unset;
+  }
+  sup img {
+    height: 1em;
+  }
+  img.has-text-siblings {
+    ${vertical ? 'width: 1em;' : 'height: 1em;'}
+    vertical-align: baseline;
+  }
+  :is(div) > img.has-text-siblings[style*="object-fit"] {
+    display: block;
+    height: auto;
+    vertical-align: unset;
+  }
+  .duokan-footnote img:not([class]) {
+    width: 0.8em;
+    height: 0.8em;
+  }
+  div:has(img.singlepage) {
+    position: relative;
+    width: auto;
+    height: auto;
+  }
+  /* some mobi */
+  p[width][height] > img:only-child { 
+    width: unset !important;
+    height: unset !important;
+  }
+
+  /* page break */
+  body.paginated-mode div[style*="page-break-after: always"],
+  body.paginated-mode div[style*="page-break-after:always"],
+  body.paginated-mode p[style*="page-break-after: always"],
+  body.paginated-mode p[style*="page-break-after:always"] {
+    margin-bottom: calc(var(--available-height) * 1px);
+  }
+
+  .br {
+    display: flow-root;
+  }
+
+  .h5_mainbody {
+    overflow: unset !important;
+  }
+`;
+
+// Paragraph-scoped CSS controlled by the Paragraph section of the Layout
+// panel. Gated by BookStyle.useBookLayout: when true, this chunk is skipped
+// and the book's own paragraph formatting takes over.
+const getParagraphLayoutStyles = (
+  overrideLayout: boolean,
+  paragraphMargin: number,
+  lineSpacing: number,
+  wordSpacing: number,
+  letterSpacing: number,
+  textIndent: number,
+  justify: boolean,
+  hyphenate: boolean,
+  vertical: boolean,
+) => `
+  html {
+    --default-text-align: ${justify ? 'justify' : 'start'};
+    hanging-punctuation: allow-end last;
+    orphans: 2;
+    widows: 2;
+  }
+  html, body {
+    text-align: var(--default-text-align);
+  }
+  [align="left"] { text-align: left; }
+  [align="right"] { text-align: right; }
+  [align="center"] { text-align: center; }
+  [align="justify"] { text-align: justify; }
+  :is(hgroup, header) p {
+      text-align: unset;
+      hyphens: unset;
+  }
+  p, blockquote, dd, div:not(:has(*:not(b, a, em, i, strong, u, span))) {
+    line-height: ${lineSpacing} ${overrideLayout ? '!important' : ''};
+    word-spacing: ${wordSpacing}px ${overrideLayout ? '!important' : ''};
+    letter-spacing: ${letterSpacing}px ${overrideLayout ? '!important' : ''};
+    text-indent: ${textIndent}em ${overrideLayout ? '!important' : ''};
+    -webkit-hyphens: ${hyphenate ? 'auto' : 'manual'};
+    hyphens: ${hyphenate ? 'auto' : 'manual'};
+    -webkit-hyphenate-limit-before: 3;
+    -webkit-hyphenate-limit-after: 2;
+    -webkit-hyphenate-limit-lines: 2;
+    hanging-punctuation: allow-end last;
+    widows: 2;
+  }
+  li {
+    line-height: ${lineSpacing} ${overrideLayout ? '!important' : ''};
+    -webkit-hyphens: ${hyphenate ? 'auto' : 'manual'};
+    hyphens: ${hyphenate ? 'auto' : 'manual'};
+  }
+  p.aligned-center, blockquote.aligned-center,
+  dd.aligned-center, div.aligned-center {
+    text-align: center ${overrideLayout ? '!important' : ''};
+  }
+  p.aligned-left, blockquote.aligned-left,
+  dd.aligned-left, div.aligned-left {
+    ${justify && overrideLayout ? 'text-align: justify !important;' : ''}
+  }
+  p.aligned-right, blockquote.aligned-right,
+  dd.aligned-right, div.aligned-right {
+    text-align: right ${overrideLayout ? '!important' : ''};
+  }
+  p.aligned-justify, blockquote.aligned-justify,
+  dd.aligned-justify, div.aligned-justify {
+    ${!justify && overrideLayout ? 'text-align: initial !important;' : ''};
+  }
+  p:has(> img:only-child), p:has(> span:only-child > img:only-child),
+  p:has(> img:not(.has-text-siblings)),
+  p:has(> a:first-child + img:last-child) {
+    text-indent: initial !important;
+  }
+  blockquote[align="center"], div[align="center"],
+  p[align="center"], dd[align="center"],
+  p.aligned-center, blockquote.aligned-center,
+  dd.aligned-center, div.aligned-center,
+  li p, ol p, ul p, td p {
+    text-indent: initial !important;
+  }
+  p {
+    ${vertical ? `margin-left: ${paragraphMargin}em ${overrideLayout ? '!important' : ''};` : ''}
+    ${vertical ? `margin-right: ${paragraphMargin}em ${overrideLayout ? '!important' : ''};` : ''}
+    ${vertical ? `margin-top: unset ${overrideLayout ? '!important' : ''};` : ''}
+    ${vertical ? `margin-bottom: unset ${overrideLayout ? '!important' : ''};` : ''}
+    ${!vertical ? `margin-top: ${paragraphMargin}em ${overrideLayout ? '!important' : ''};` : ''}
+    ${!vertical ? `margin-bottom: ${paragraphMargin}em ${overrideLayout ? '!important' : ''};` : ''}
+    ${!vertical ? `margin-left: unset ${overrideLayout ? '!important' : ''};` : ''}
+    ${!vertical ? `margin-right: unset ${overrideLayout ? '!important' : ''};` : ''}
+  }
+  div {
+    ${vertical && overrideLayout ? `margin-left: ${paragraphMargin}em !important;` : ''}
+    ${vertical && overrideLayout ? `margin-right: ${paragraphMargin}em !important;` : ''}
+    ${!vertical && overrideLayout ? `margin-top: ${paragraphMargin}em !important;` : ''}
+    ${!vertical && overrideLayout ? `margin-bottom: ${paragraphMargin}em !important;` : ''}
+  }
+  p > font:only-child { 
+    display: flow-root; 
+  }
+
+  :lang(zh), :lang(ja), :lang(ko) {
+    widows: 1;
+    orphans: 1;
+  }
+
+  /* workaround for some badly designed epubs */
+  div.left *, p.left * { text-align: left; }
+  div.right *, p.right * { text-align: right; }
+  div.center *, p.center * { text-align: center; }
+  div.justify *, p.justify * { text-align: justify; }
+
+  img.pi {
+    ${vertical ? 'transform: rotate(90deg);' : ''}
+    ${vertical ? 'transform-origin: center;' : ''}
+    ${vertical ? 'height: 2em;' : ''}
+    ${vertical ? `width: ${lineSpacing}em;` : ''}
+    ${vertical ? `vertical-align: unset;` : ''}
+  }
+
+  .nonindent, .noindent {
+    text-indent: unset !important;
+  }
+`;
+
+export const getFootnoteStyles = () => `
+  .duokan-footnote-content,
+  .duokan-footnote-item {
+    display: block !important;
+  }
+
+  body {
+    padding: 1em !important;
+    overflow-wrap: break-word;
+  }
+
+  a:any-link {
+    text-decoration: none;
+    padding: unset;
+    margin: unset;
+  }
+
+  ol {
+    margin: 0;
+    padding: 0;
+  }
+
+  p, li, blockquote, dd {
+    margin: unset !important;
+    text-indent: unset !important;
+  }
+
+  div {
+    margin: unset !important;
+    padding: unset !important;
+  }
+
+  dt {
+    font-weight: bold;
+    line-height: 1.6;
+  }
+
+  .epubtype-footnote,
+  aside[epub|type~="endnote"],
+  aside[epub|type~="footnote"],
+  aside[epub|type~="note"],
+  aside[epub|type~="rearnote"] {
+    display: block;
+  }
+`;
+
+/**
+ * Baseline stylesheet injected into every dictionary card's shadow root
+ * (alongside any loose `.css` files imported with the bundle and any
+ * `<link rel="stylesheet">` references resolved from the MDD).
+ *
+ * The seam exists so app-wide rules can be added in one place without
+ * touching the provider code. Currently it ships:
+ */
+export const getDictStyles = (bg: string, fg: string, isDarkMode: boolean) => {
+  void fg;
+  return `
+    a:empty {
+      background-color: transparent;
+      mix-blend-mode: multiply;
+    }
+    a img {
+      mix-blend-mode: multiply;
+    }
+    div[data-dict-kind="mdict"] .entry_name {
+      font-size: 1.2em;
+      margin-block-start: 0.5em;
+      margin-block-end: 0.5em;
+    }
+    div[data-dict-kind="mdict"] .juan_drop {
+      ${isDarkMode ? `background-color: color-mix(in srgb, ${bg} 80%, #000);` : ''}
+    }
+  `;
+};
+
+const getTranslationStyles = (showSource: boolean) => `
+  .translation-source {
+  }
+  .translation-target {
+  }
+  .translation-target.hidden {
+    display: none !important;
+  }
+  .translation-target-block {
+    display: block !important;
+    ${showSource ? 'margin: 0.5em 0 !important;' : ''}
+  }
+  .translation-target-toc {
+    display: block !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+`;
+
+const getWarichuStyles = () => `
+  /* Warichu (割注/夹注) — double-line inline annotation */
+  .warichu-pending {
+    display: inline;
+    font-size: 0.5em;
+    line-height: 1.1;
+  }
+  .warichu-chunk {
+    display: inline-block;
+    line-height: 1.1;
+    font-size: 0.5em;
+    text-indent: 0;
+    vertical-align: middle !important;
+    width: 1lh !important;
+    text-align: center !important;
+  }
+  .warichu-chunk .warichu-line {
+    display: inline;
+  }
+  .warichu-open,
+  .warichu-close {
+    display: inline;
+    font-size: 0.5em;
+    vertical-align: middle;
+    line-height: 1.1;
+  }
+`;
+
+const getRubyStyles = () => `
+  rt {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  rp {
+    display: none !important;
+  }
+`;
+
+export interface ThemeCode {
+  bg: string;
+  fg: string;
+  primary: string;
+  palette: Palette;
+  isDarkMode: boolean;
+}
+
+export const getThemeCode = () => {
+  let themeMode = 'auto';
+  let themeColor = 'default';
+  let systemIsDarkMode = false;
+  let customThemes: CustomTheme[] = [];
+  if (typeof window !== 'undefined') {
+    themeColor = localStorage.getItem('themeColor') || 'default';
+    themeMode = localStorage.getItem('themeMode') || 'auto';
+    systemIsDarkMode = localStorage.getItem('systemIsDarkMode') === 'true';
+    customThemes = JSON.parse(localStorage.getItem('customThemes') || '[]');
+  }
+  const isDarkMode = themeMode === 'dark' || (themeMode === 'auto' && systemIsDarkMode);
+  let currentTheme = themes.find((theme) => theme.name === themeColor);
+  if (!currentTheme) {
+    const customTheme = customThemes.find((theme) => theme.name === themeColor);
+    if (customTheme) {
+      currentTheme = {
+        name: customTheme.name,
+        label: customTheme.label,
+        colors: {
+          light: generateLightPalette(customTheme.colors.light),
+          dark: generateDarkPalette(customTheme.colors.dark),
+        },
+      };
+    }
+  }
+  if (!currentTheme) currentTheme = themes[0];
+  const defaultPalette = isDarkMode ? currentTheme!.colors.dark : currentTheme!.colors.light;
+  return {
+    bg: defaultPalette['base-100'],
+    fg: defaultPalette['base-content'],
+    primary: defaultPalette.primary,
+    palette: defaultPalette,
+    isDarkMode,
+  } as ThemeCode;
+};
+
+export const getStyles = (
+  viewSettings: ViewSettings,
+  themeCode?: ThemeCode,
+  customFonts: CustomFont[] = [],
+) => {
+  if (!themeCode) {
+    themeCode = getThemeCode();
+  }
+  const pageLayoutStyles = getPageLayoutStyles(
+    viewSettings.marginTopPx,
+    viewSettings.marginRightPx,
+    viewSettings.marginBottomPx,
+    viewSettings.marginLeftPx,
+    1.0,
+    viewSettings.writingMode!,
+    viewSettings.vertical!,
+  );
+  const paragraphLayoutStyles = viewSettings.useBookLayout
+    ? ''
+    : getParagraphLayoutStyles(
+        viewSettings.overrideLayout!,
+        viewSettings.paragraphMargin!,
+        viewSettings.lineHeight!,
+        viewSettings.wordSpacing!,
+        viewSettings.letterSpacing!,
+        viewSettings.textIndent!,
+        viewSettings.fullJustification!,
+        viewSettings.hyphenation!,
+        viewSettings.vertical!,
+      );
+  // scale the font size on-the-fly so that we can sync the same font size on different devices
+  const isMobile = ['ios', 'android'].includes(getOSPlatform());
+  const fontScale = isMobile ? 1.25 : 1;
+  // Only for backward compatibility, new viewSettings.zoomLevel will always be 100 for EPUBs
+  const zoomScale = (viewSettings.zoomLevel || 100) / 100.0;
+  const fontStyles = getFontStyles(
+    viewSettings.serifFont!,
+    viewSettings.sansSerifFont!,
+    viewSettings.monospaceFont!,
+    viewSettings.defaultFont!,
+    viewSettings.defaultCJKFont!,
+    viewSettings.defaultFontSize! * fontScale * zoomScale,
+    viewSettings.minimumFontSize!,
+    viewSettings.fontWeight!,
+    viewSettings.overrideFont!,
+  );
+  // Inline `@font-face` rules for the caller-supplied custom fonts so
+  // they ship to the iframe synchronously with the rest of the
+  // stylesheet. Paginator injects this CSS into the iframe `<style>`
+  // before the 'load' event fires, so the first paint already resolves
+  // the configured font instead of falling back to serif/sans-serif and
+  // visibly swapping a moment later. Blob URLs are already in memory, so
+  // no network round-trip happens here.
+  const customFontFaces = getCustomFontFaces(customFonts);
+  const colorStyles = getColorStyles(
+    viewSettings.overrideColor!,
+    viewSettings.invertImgColorInDark!,
+    themeCode,
+    viewSettings.backgroundTextureId,
+    viewSettings.isEink,
+  );
+  const translationStyles = getTranslationStyles(viewSettings.showTranslateSource!);
+  const warichuStyles = getWarichuStyles();
+  const rubyStyles = getRubyStyles();
+  const userStylesheet = viewSettings.userStylesheet!;
+  return `${customFontFaces}\n${pageLayoutStyles}\n${paragraphLayoutStyles}\n${fontStyles}\n${colorStyles}\n${translationStyles}\n${warichuStyles}\n${rubyStyles}\n${userStylesheet}`;
+};
+
+// Build a CSS chunk of `@font-face` rules for the given user custom
+// fonts. The caller (a reader component) owns the font store and passes
+// in the loaded fonts, keeping this util free of store dependencies.
+// Fonts without a blob URL are skipped; createFontCSS throws when the
+// blob URL is unset, so the inner try/catch keeps a single bad font from
+// breaking the whole stylesheet.
+const getCustomFontFaces = (fonts: CustomFont[]): string =>
+  fonts
+    .filter((font) => !!font.blobUrl)
+    .map((font) => {
+      try {
+        return createFontCSS(font);
+      } catch {
+        return '';
+      }
+    })
+    .join('\n');
+
+export const applyTranslationStyle = (viewSettings: ViewSettings) => {
+  const styleId = 'translation-style';
+
+  const existingStyle = document.getElementById(styleId);
+  if (existingStyle) {
+    existingStyle.remove();
+  }
+
+  const styleElement = document.createElement('style');
+  styleElement.id = styleId;
+  styleElement.textContent = getTranslationStyles(viewSettings.showTranslateSource);
+
+  document.head.appendChild(styleElement);
+};
+
+export const transformStylesheet = (css: string, vw: number, vh: number, vertical: boolean) => {
+  const isMobile = ['ios', 'android'].includes(getOSPlatform());
+  const fontScale = isMobile ? 1.25 : 1;
+  const isInlineStyle = !css.includes('{');
+  const ruleRegex = /([^{]+)({[^}]+})/g;
+  css = css.replace(ruleRegex, (match, selector, block) => {
+    const hasTextAlignCenter = /text-align\s*:\s*center\s*[;$]/.test(block);
+    const hasTextIndentZero = /text-indent\s*:\s*0(?:\.0+)?(?:px|em|rem|%)?\s*[;$]/.test(block);
+
+    if (hasTextAlignCenter && hasTextIndentZero) {
+      block = block.replace(/(text-align\s*:\s*center)(\s*;|\s*$)/g, '$1 !important$2');
+      block = block.replace(
+        /(text-indent\s*:\s*0(?:\.0+)?(?:px|em|rem|%)?)(\s*;|\s*$)/g,
+        '$1 !important$2',
+      );
+      return selector + block;
+    }
+    return match;
+  });
+
+  // clip nowrapped elements
+  css = css.replace(ruleRegex, (match, selector, block) => {
+    const hasWhiteSpaceNowrap = /white-space\s*:\s*nowrap\s*[;$]/.test(block);
+    if (hasWhiteSpaceNowrap) {
+      if (!/overflow\s*:/.test(block)) {
+        block = block.replace(/}$/, ' overflow: clip !important; }');
+      }
+      return selector + block;
+    }
+    return match;
+  });
+
+  if (isInlineStyle) {
+    const hasPageBreakAfterAlways = /page-break-after\s*:\s*always\s*[;]?/.test(css);
+    if (hasPageBreakAfterAlways && !/margin-bottom\s*:/.test(css)) {
+      css = css.replace(/;?\s*$/, '') + '; margin-bottom: calc(var(--available-height) * 1px)';
+    }
+  } else {
+    css = css.replace(ruleRegex, (match, selector, block) => {
+      const hasPageBreakAfterAlways = /page-break-after\s*:\s*always\s*[;$]/.test(block);
+      if (hasPageBreakAfterAlways) {
+        if (!/margin-bottom\s*:/.test(block)) {
+          block = block.replace(/}$/, ' margin-bottom: calc(var(--available-height) * 1px); }');
+        }
+        return selector + block;
+      }
+      return match;
+    });
+  }
+
+  // Process duokan-bleed
+  css = css.replace(ruleRegex, (_, selector, block) => {
+    if (vertical) return selector + block;
+
+    const directions: string[] = [];
+    let hasBleed = false;
+    for (const dir of ['top', 'bottom', 'left', 'right']) {
+      const bleedRegex = new RegExp(`duokan-bleed\\s*:\\s*[^;]*${dir}[^;]*;`);
+      const marginRegex = new RegExp(`margin-${dir}\\s*:`);
+      if (bleedRegex.test(block) && !marginRegex.test(block)) {
+        hasBleed = true;
+        directions.push(dir);
+        block = block.replace(
+          /}$/,
+          ` margin-${dir}: calc(-1 * var(--page-margin-${dir})) !important; }`,
+        );
+      }
+    }
+    if (hasBleed) {
+      if (!/position\s*:/.test(block)) {
+        block = block.replace(/}$/, ' position: relative !important; }');
+      }
+      if (!/overflow\s*:/.test(block)) {
+        block = block.replace(/}$/, ' overflow: hidden !important; }');
+      }
+      if (!/display\s*:/.test(block)) {
+        block = block.replace(/}$/, ' display: flow-root !important; }');
+      }
+      if (directions.includes('left') && directions.includes('right')) {
+        block = block
+          .replace(/}$/, ' width: calc(var(--full-width) * 1px) !important; }')
+          .replace(/}$/, ' min-width: calc(var(--full-width) * 1px) !important; }')
+          .replace(/}$/, ' max-width: calc(var(--full-width) * 1px) !important; }');
+      }
+      if (directions.includes('top') && directions.includes('bottom')) {
+        block = block
+          .replace(/}$/, ' height: calc(var(--full-height) * 1px) !important; }')
+          .replace(/}$/, ' min-height: calc(var(--full-height) * 1px) !important; }')
+          .replace(/}$/, ' max-height: calc(var(--full-height) * 1px) !important; }');
+      }
+    }
+    return selector + block;
+  });
+
+  // unset font-family for body when set to serif or sans-serif
+  css = css.replace(ruleRegex, (_, selector, block) => {
+    if (/\bbody\b/i.test(selector)) {
+      const hasSerifFont = /font-family\s*:\s*serif\s*(?:;|\}|$)/.test(block);
+      const hasSansSerifFont = /font-family\s*:\s*sans-serif\s*(?:;|\}|$)/.test(block);
+      if (hasSerifFont) {
+        block = block.replace(/font-family\s*:\s*serif\s*(;|\}|$)/gi, 'font-family: unset$1');
+      }
+      if (hasSansSerifFont) {
+        block = block.replace(/font-family\s*:\s*sans-serif\s*(;|\}|$)/gi, 'font-family: unset$1');
+      }
+    }
+    return selector + block;
+  });
+
+  // clip hardcoded pixel widths to available width when they exceed viewport
+  css = css.replace(ruleRegex, (match, selector, block) => {
+    const widthMatch = /(?:^|[^a-z-])width\s*:\s*(\d+(?:\.\d+)?)px/.exec(block);
+    const pxWidth = widthMatch ? parseFloat(widthMatch[1] ?? '0') : 0;
+    if (pxWidth > vw && !/max-width\s*:/.test(block)) {
+      block = block.replace(
+        /}$/,
+        ' width: 100%; max-width: calc(var(--available-width) * 1px); box-sizing: border-box; }',
+      );
+      return selector + block;
+    }
+    return match;
+  });
+
+  // replace absolute font sizes with rem units
+  // replace vw and vh as they cause problems with layout
+  // replace hardcoded colors
+  css = css
+    .replace(/font-size\s*:\s*xx-small/gi, 'font-size: 0.6rem')
+    .replace(/font-size\s*:\s*x-small/gi, 'font-size: 0.75rem')
+    .replace(/font-size\s*:\s*small/gi, 'font-size: 0.875rem')
+    .replace(/font-size\s*:\s*medium/gi, 'font-size: 1rem')
+    .replace(/font-size\s*:\s*large/gi, 'font-size: 1.2rem')
+    .replace(/font-size\s*:\s*x-large/gi, 'font-size: 1.5rem')
+    .replace(/font-size\s*:\s*xx-large/gi, 'font-size: 2rem')
+    .replace(/font-size\s*:\s*xxx-large/gi, 'font-size: 3rem')
+    .replace(/font-size\s*:\s*(\d+(?:\.\d+)?)px/gi, (_, px) => {
+      const rem = parseFloat(px) / fontScale / 16;
+      return `font-size: ${rem}rem`;
+    })
+    .replace(/font-size\s*:\s*(\d+(?:\.\d+)?)pt/gi, (_, pt) => {
+      const rem = parseFloat(pt) / fontScale / 12;
+      return `font-size: ${rem}rem`;
+    })
+    .replace(/font-size\s*:\s*(\d*\.?\d+)(px|rem|em|%)?/gi, (_, size, unit = 'px') => {
+      return `font-size: max(${size}${unit}, var(--min-font-size, 8px))`;
+    })
+    // remove no-op backdrop-filter: brightness(100%); see #3895
+    .replace(/backdrop-filter\s*:\s*brightness\(100%\)\s*[;]?/gi, '')
+    .replace(/(\d*\.?\d+)vw/gi, (_, d) => (parseFloat(d) * vw) / 100 + 'px')
+    .replace(/(\d*\.?\d+)vh/gi, (_, d) => (parseFloat(d) * vh) / 100 + 'px')
+    .replace(/([\s;])-webkit-user-select\s*:\s*none/gi, '$1-webkit-user-select: unset')
+    .replace(/([\s;])-moz-user-select\s*:\s*none/gi, '$1-moz-user-select: unset')
+    .replace(/([\s;])-ms-user-select\s*:\s*none/gi, '$1-ms-user-select: unset')
+    .replace(/([\s;])-o-user-select\s*:\s*none/gi, '$1-o-user-select: unset')
+    .replace(/([\s;])user-select\s*:\s*none/gi, '$1user-select: unset')
+    .replace(/(font-family\s*:[^;]*?)\bsans-serif\b/gi, '$1MYBOOKS_SS_PLACEHOLDER')
+    .replace(/(font-family\s*:[^;]*?)\bserif\b(?!-)/gi, '$1var(--serif, serif)')
+    .replace(/MYBOOKS_SS_PLACEHOLDER/g, 'var(--sans-serif, sans-serif)')
+    .replace(/(font-family\s*:[^;]*?)\bmonospace\b/gi, '$1var(--monospace, monospace)')
+    .replace(/([\s;])font-weight\s*:\s*normal/gi, '$1font-weight: var(--font-weight)')
+    .replace(/([\s;])color\s*:\s*black/gi, '$1color: var(--theme-fg-color)')
+    .replace(/([\s;])color\s*:\s*#000000/gi, '$1color: var(--theme-fg-color)')
+    .replace(/([\s;])color\s*:\s*#000/gi, '$1color: var(--theme-fg-color)')
+    .replace(/([\s;])color\s*:\s*rgb\(0,\s*0,\s*0\)/gi, '$1color: var(--theme-fg-color)');
+
+  const { isDarkMode, bg } = getThemeCode();
+  if (isDarkMode) {
+    css = css.replace(ruleRegex, (match, selector, block) => {
+      const rewritten = block.replace(
+        /background(-color)?\s*:\s*([^;!}]+)(\s*!important)?(?=\s*[;!}])/gi,
+        (decl: string, _prop: string, value: string, important?: string) => {
+          const raw = value.trim().split(/\s+/)[0] ?? '';
+          if (!isLightCssColor(raw)) return decl;
+          return `background-color: ${bg}${important ?? ''}`;
+        },
+      );
+      return rewritten === block ? match : selector + rewritten;
+    });
+  }
+
+  return css;
+};
+
+export const applyThemeModeClass = (document: Document, isDarkMode: boolean) => {
+  document.body.classList.remove('theme-light', 'theme-dark');
+  document.body.classList.add(isDarkMode ? 'theme-dark' : 'theme-light');
+};
+
+export const applyScrollModeClass = (document: Document, isScrollMode: boolean) => {
+  document.body.classList.remove('scroll-mode', 'paginated-mode');
+  document.body.classList.add(isScrollMode ? 'scroll-mode' : 'paginated-mode');
+};
+
+/**
+  @param document should be the global `document`
+*/
+export const applyScrollbarStyle = (document: Document, hideScrollbar: boolean) => {
+  const styleId = 'scrollbar-hide-style';
+  let styleEl = document.getElementById(styleId) as HTMLStyleElement;
+
+  if (hideScrollbar) {
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = styleId;
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = 'foliate-view::part(container) { scrollbar-width: none; }';
+  } else {
+    if (styleEl) {
+      styleEl.textContent = 'foliate-view::part(container) { scrollbar-width: thin; }';
+    }
+  }
+};
+
+export const applyImageStyle = (document: Document) => {
+  document.querySelectorAll('img').forEach((img) => {
+    const widthAttr = img.getAttribute('width');
+    if (widthAttr && (widthAttr.endsWith('%') || widthAttr.endsWith('vw'))) {
+      const percentage = parseFloat(widthAttr);
+      if (!isNaN(percentage)) {
+        img.style.width = `${(percentage / 100) * window.innerWidth}px`;
+        img.removeAttribute('width');
+      }
+    }
+
+    const heightAttr = img.getAttribute('height');
+    if (heightAttr && (heightAttr.endsWith('%') || heightAttr.endsWith('vh'))) {
+      const percentage = parseFloat(heightAttr);
+      if (!isNaN(percentage)) {
+        img.style.height = `${(percentage / 100) * window.innerHeight}px`;
+        img.removeAttribute('height');
+      }
+    }
+
+    const parent = img.parentNode;
+    if (!parent || parent.nodeType !== Node.ELEMENT_NODE) return;
+    const hasTextSiblings = Array.from(parent.childNodes).some(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+    );
+    const isInline = Array.from(parent.childNodes).every(
+      (node) => node.nodeType !== Node.ELEMENT_NODE || (node as Element).tagName !== 'BR',
+    );
+    if (hasTextSiblings && isInline) {
+      img.classList.add('has-text-siblings');
+    }
+  });
+  document.querySelectorAll('hr').forEach((hr) => {
+    const computedStyle = window.getComputedStyle(hr);
+    if (computedStyle.backgroundImage && computedStyle.backgroundImage !== 'none') {
+      hr.classList.add('background-img');
+    }
+  });
+};
+
+export const TABLE_SCROLL_CLASS = 'readest-table-scroll';
+// Added to a wrapper whose table fits the column within tolerance, so the wrapper
+// clips instead of showing a scrollbar. Wide tables stay scrollable (no class).
+const TABLE_SCROLL_FIT_CLASS = 'readest-table-scroll-fit';
+// Ignore tiny overflows (borders, image rounding) so they don't show a scrollbar.
+const TABLE_SCROLL_TOLERANCE_PX = 4;
+
+const TABLE_TOUCH_SCROLL_FLAG = 'data-readest-table-touch-scroll';
+
+/** Horizontal swipe on a wide table should scroll the table, not turn the page (paginated mode). */
+export const shouldTableScrollConsumeTouch = (
+  wrapper: HTMLElement,
+  dx: number,
+  dy: number,
+): boolean => {
+  if (wrapper.scrollWidth <= wrapper.clientWidth) return false;
+  if (Math.abs(dx) < 8 || Math.abs(dx) <= Math.abs(dy)) return false;
+
+  const atStart = wrapper.scrollLeft <= 1;
+  const atEnd = wrapper.scrollLeft + wrapper.clientWidth >= wrapper.scrollWidth - 1;
+
+  // Finger moves left (dx < 0) reveals content to the right; finger moves right reveals left.
+  if (dx < 0 && !atEnd) return true;
+  if (dx > 0 && !atStart) return true;
+  return false;
+};
+
+/** Horizontal wheel/trackpad over a wide table should scroll the table, not turn the page. */
+export const shouldTableScrollConsumeWheel = (
+  wrapper: HTMLElement,
+  deltaX: number,
+  deltaY: number,
+): boolean => {
+  if (wrapper.scrollWidth <= wrapper.clientWidth) return false;
+  // A horizontal wheel belongs to the table. Consume it regardless of scroll
+  // position: at the edge a wheel gesture (incl. trackpad momentum) must not
+  // chain into a page turn — the table owns the whole horizontal gesture.
+  return Math.abs(deltaX) > Math.abs(deltaY);
+};
+
+/**
+ * Capture-phase touch + wheel routing so foliate's paginator and readest's wheel
+ * pagination do not steal horizontal scrolls over wide tables. Attached once per
+ * iframe document.
+ */
+export const applyTableTouchScroll = (document: Document) => {
+  const root = document.documentElement;
+  if (root.getAttribute(TABLE_TOUCH_SCROLL_FLAG) === 'true') return;
+  root.setAttribute(TABLE_TOUCH_SCROLL_FLAG, 'true');
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let activeWrapper: HTMLElement | null = null;
+
+  const findWrapper = (target: EventTarget | null): HTMLElement | null => {
+    // This module runs in the top-window realm, but `target` originates from
+    // the iframe's realm, so `target instanceof Element` is always false here.
+    // Duck-type on `closest` instead so the lookup works across realms. Skip
+    // wrappers that fit (they clip, not scroll) so only scrollable tables route.
+    if (!target || !('closest' in target)) return null;
+    const wrapper = (target as Element).closest(`.${TABLE_SCROLL_CLASS}`) as HTMLElement | null;
+    return wrapper && !wrapper.classList.contains(TABLE_SCROLL_FIT_CLASS) ? wrapper : null;
+  };
+
+  const onTouchStart = (e: TouchEvent) => {
+    activeWrapper = findWrapper(e.target);
+    if (!activeWrapper) return;
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    touchStartX = touch.screenX;
+    touchStartY = touch.screenY;
+  };
+
+  const onTouchMove = (e: TouchEvent) => {
+    if (!activeWrapper) return;
+    if (!activeWrapper.contains(e.target as Node)) return;
+
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+
+    const dx = touch.screenX - touchStartX;
+    const dy = touch.screenY - touchStartY;
+    if (!shouldTableScrollConsumeTouch(activeWrapper, dx, dy)) return;
+
+    e.stopImmediatePropagation();
+  };
+
+  const onTouchEnd = () => {
+    activeWrapper = null;
+  };
+
+  // Trackpad / mouse wheel over a wide table generates wheel events (not touch).
+  // foliate has no wheel handler, but readest forwards iframe wheel events to
+  // pagination (see handleWheel -> 'iframe-wheel'), so a horizontal wheel over
+  // a scrollable table would both scroll the table and turn the page.
+  const onWheel = (e: WheelEvent) => {
+    const wrapper = findWrapper(e.target);
+    if (!wrapper) return;
+    if (!shouldTableScrollConsumeWheel(wrapper, e.deltaX, e.deltaY)) return;
+    // Native overflow scrolling of the table still happens (no preventDefault);
+    // we only stop pagination from also acting on this wheel.
+    e.stopImmediatePropagation();
+  };
+
+  const opts = { capture: true, passive: false } as const;
+  document.addEventListener('touchstart', onTouchStart, opts);
+  document.addEventListener('touchmove', onTouchMove, opts);
+  document.addEventListener('touchend', onTouchEnd, opts);
+  document.addEventListener('touchcancel', onTouchEnd, opts);
+  document.addEventListener('wheel', onWheel, { capture: true, passive: true });
+};
+
+/**
+ * Toggle the fit class: a wrapper whose table overflows by no more than the
+ * tolerance is treated as fitting (clip the slop, no scrollbar); a genuinely
+ * wider table keeps scrolling. Re-runs on resize so the decision is correct once
+ * layout has settled (the column width isn't reliable at section-load time).
+ */
+const updateTableFit = (wrapper: HTMLElement) => {
+  const fits = wrapper.scrollWidth - wrapper.clientWidth <= TABLE_SCROLL_TOLERANCE_PX;
+  wrapper.classList.toggle(TABLE_SCROLL_FIT_CLASS, fits);
+};
+
+/**
+ * Wrap each table so a table wider than its column scrolls horizontally instead
+ * of overflowing the page. Tables that wrap to fit show no scrollbar; a
+ * ResizeObserver suppresses the scrollbar for tables that overflow only within
+ * tolerance, re-evaluating as the column width settles.
+ */
+export const applyTableStyle = (document: Document) => {
+  document.querySelectorAll('table').forEach((table) => {
+    const parent = table.parentNode;
+    if (!parent || parent.nodeType !== Node.ELEMENT_NODE) return;
+
+    if (
+      parent instanceof HTMLElement &&
+      parent.classList.contains(TABLE_SCROLL_CLASS) &&
+      parent.querySelector(':scope > table') === table
+    ) {
+      table.style.removeProperty('transform');
+      table.style.removeProperty('transform-origin');
+      return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = TABLE_SCROLL_CLASS;
+    parent.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
+    table.style.removeProperty('transform');
+    table.style.removeProperty('transform-origin');
+
+    updateTableFit(wrapper);
+    const win = document.defaultView;
+    if (win?.ResizeObserver) {
+      const observer = new win.ResizeObserver(() => updateTableFit(wrapper));
+      observer.observe(wrapper);
+    }
+  });
+};
+
+export const keepTextAlignment = (document: Document) => {
+  document.querySelectorAll('div, p, blockquote, dd').forEach((el) => {
+    const computedStyle = window.getComputedStyle(el);
+    if (computedStyle.textAlign === 'center') {
+      el.classList.add('aligned-center');
+    } else if (computedStyle.textAlign === 'left') {
+      el.classList.add('aligned-left');
+    } else if (computedStyle.textAlign === 'right') {
+      el.classList.add('aligned-right');
+    } else if (computedStyle.textAlign === 'justify') {
+      el.classList.add('aligned-justify');
+    }
+  });
+};
+
+export const applyFixedlayoutStyles = (
+  document: Document,
+  viewSettings: ViewSettings,
+  themeCode?: ThemeCode,
+) => {
+  if (!themeCode) {
+    themeCode = getThemeCode();
+  }
+  const { bg, fg, primary, isDarkMode } = themeCode;
+  const isEink = viewSettings.isEink;
+  const overrideColor = viewSettings.overrideColor!;
+  const invertImgColorInDark = viewSettings.invertImgColorInDark!;
+  const darkMixBlendMode = bg === '#000000' ? 'luminosity' : 'overlay';
+  const existingStyleId = 'fixed-layout-styles';
+  let style = document.getElementById(existingStyleId) as HTMLStyleElement;
+  if (style) {
+    style.remove();
+  }
+  style = document.createElement('style');
+  style.id = existingStyleId;
+  style.textContent = `
+    html {
+      --theme-bg-color: ${bg};
+      --theme-fg-color: ${fg};
+      --theme-primary-color: ${primary};
+      color-scheme: ${isDarkMode ? 'dark' : 'light'};
+    }
+    body {
+      position: relative;
+      background-color: var(--theme-bg-color);
+    }
+    ${isEink ? getEinkSelectionStyles() : ''}
+    #canvas {
+      display: inline-block;
+      width: fit-content;
+      height: fit-content;
+      background-color: var(--theme-bg-color);
+    }
+    img, canvas {
+      ${isDarkMode && invertImgColorInDark ? 'filter: invert(100%);' : ''}
+      ${overrideColor ? `mix-blend-mode: ${isDarkMode ? darkMixBlendMode : 'multiply'};` : ''}
+    }
+    img.singlePage {
+      position: relative;
+    }
+  `;
+  document.head.appendChild(style);
+};

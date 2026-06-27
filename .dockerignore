@@ -1,0 +1,52 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Rust build artifacts
+target
+**/target
+
+# Git
+.git
+.gitignore
+
+# Build outputs
+.next
+**/.next
+.open-next
+**/.open-next
+out
+**/out
+.vercel
+**/.vercel
+
+# Local env files
+docker/.env
+.env*.local
+**/.env*.local
+
+# Local credentials and tooling state
+*.pem
+certs
+**/certs
+.claude/settings.local.json
+**/.claude/settings.local.json
+.claude/worktrees
+**/.claude/worktrees
+.gstack
+**/.gstack
+.playwright-mcp
+**/.playwright-mcp
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

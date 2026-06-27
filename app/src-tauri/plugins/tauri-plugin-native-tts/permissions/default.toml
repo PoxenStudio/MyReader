@@ -1,0 +1,22 @@
+[default]
+description = "Default permissions for the plugin"
+permissions = [
+  "allow-init", 
+  "allow-speak",
+  "allow-stop",
+  "allow-pause",
+  "allow-resume",
+  "allow-set-rate",
+  "allow-set-pitch",
+  "allow-set-voice",
+  "allow-get-all-voices",
+  "allow-set-media-session-active",
+  "allow-update-media-session-state",
+  "allow-update-media-session-metadata",
+  "allow-register-listener",
+  "allow-remove-listener",
+  "allow-check-permissions",
+  "allow-request-permissions",
+  "allow-checkPermissions",
+  "allow-requestPermissions",
+]

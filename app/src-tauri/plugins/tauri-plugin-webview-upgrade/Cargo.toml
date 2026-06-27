@@ -1,0 +1,19 @@
+[package]
+name = "tauri-plugin-webview-upgrade"
+version = "0.1.0"
+authors = [ "Readest" ]
+description = "Redirect the in-process WebView loader to a sideloaded com.google.android.webview on Android devices stuck on an old system WebView."
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+repository = "https://github.com/readest/tauri-plugin-webview-upgrade"
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+# `links` is what makes tauri-build's gradle-file generator wire this plugin
+# into the host app's Android project — it reads DEP_*_ANDROID_LIBRARY_PATH.
+links = "tauri-plugin-webview-upgrade"
+
+[dependencies]
+tauri = { version = "2" }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

@@ -1,0 +1,426 @@
+export interface Frame {
+  top: number;
+  left: number;
+}
+
+export interface Rect {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export type PositionDir = 'up' | 'down' | 'left' | 'right';
+
+export interface Position {
+  point: Point;
+  dir?: PositionDir;
+}
+
+export interface TextSelection {
+  key: string;
+  text: string;
+  page: number;
+  range: Range;
+  index: number;
+  cfi?: string;
+  href?: string;
+  annotated?: boolean;
+  rect?: Rect;
+}
+
+const frameRect = (frame: Frame, rect?: Rect, sx = 1, sy = 1) => {
+  if (!rect) return { left: 0, right: 0, top: 0, bottom: 0 };
+  const left = sx * rect.left + frame.left;
+  const right = sx * rect.right + frame.left;
+  const top = sy * rect.top + frame.top;
+  const bottom = sy * rect.bottom + frame.top;
+  return { left, right, top, bottom };
+};
+
+const pointIsInView = ({ x, y }: Point) =>
+  x > 0 && y > 0 && x < window.innerWidth && y < window.innerHeight;
+
+const getIframeElement = (nodeElement: Range | Element): HTMLIFrameElement | null => {
+  let node: Node | null;
+  if (nodeElement && typeof nodeElement === 'object' && 'tagName' in nodeElement) {
+    node = nodeElement as Element;
+  } else if (nodeElement && typeof nodeElement === 'object' && 'collapse' in nodeElement) {
+    node = nodeElement.commonAncestorContainer;
+  } else {
+    node = nodeElement;
+  }
+  while (node) {
+    if (node.nodeType === Node.DOCUMENT_NODE) {
+      const doc = node as Document;
+      if (doc.defaultView && doc.defaultView.frameElement) {
+        return doc.defaultView.frameElement as HTMLIFrameElement;
+      }
+    }
+    node = node.parentNode;
+  }
+
+  return null;
+};
+
+const constrainPointWithinRect = (point: Point, rect: Rect, padding: number) => {
+  return {
+    x: Math.max(padding, Math.min(point.x, rect.right - rect.left - padding)),
+    y: Math.max(padding, Math.min(point.y, rect.bottom - rect.top - padding)),
+  };
+};
+
+export const isPointInRect = (point: Point, rect: Rect, padding: number = 1): boolean => {
+  return (
+    point.x >= rect.left + padding &&
+    point.x <= rect.right - padding &&
+    point.y >= rect.top + padding &&
+    point.y <= rect.bottom - padding
+  );
+};
+
+/**
+ * Resolve the bounding rect of a {@link Range} in the OUTER webview's
+ * viewport coordinate system (CSS pixels, top-down).
+ *
+ * Foliate renders book pages inside an iframe with a CSS transform
+ * (its column-pagination layout uses non-identity `matrix(...)` to
+ * shift columns). A naive `range.getBoundingClientRect()` returns
+ * coordinates in the iframe's local viewport, which won't line up
+ * with anything outside the iframe. This helper applies the iframe's
+ * transform scale and offset, mirroring the math in {@link getPosition}.
+ *
+ * Returns `null` when the range is detached (no iframe ancestor) or
+ * has no client rects (collapsed / off-screen).
+ */
+export const getRangeRectInWebview = (range: Range): Rect | null => {
+  const rect = range.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return null;
+  const frameElement = getIframeElement(range);
+  // No iframe ancestor — range lives directly in the host document
+  // (e.g. fixed-layout PDF). Pass through the rect as-is.
+  if (!frameElement) {
+    return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left };
+  }
+  const transform = getComputedStyle(frameElement).transform;
+  const match = transform.match(/matrix\((.+)\)/);
+  const [sx, , , sy] = match?.[1]?.split(/\s*,\s*/)?.map((x) => parseFloat(x)) ?? [];
+  const scaleX = Number.isFinite(sx) ? sx! : 1;
+  const scaleY = Number.isFinite(sy) ? sy! : 1;
+  const frame = frameElement.getBoundingClientRect();
+  return {
+    top: scaleY * rect.top + frame.top,
+    bottom: scaleY * rect.bottom + frame.top,
+    left: scaleX * rect.left + frame.left,
+    right: scaleX * rect.right + frame.left,
+  };
+};
+
+/**
+ * Sample the visual style (font size / family / color) of the text
+ * underneath a {@link Range}. Used by the macOS system-dictionary
+ * bridge so the inline HUD label matches the original paragraph's
+ * typography — `-[NSView showDefinitionForAttributedString:atPoint:]`
+ * re-draws the word using whatever attributes we hand in, and a plain
+ * unattributed string falls back to AppKit's small system font.
+ *
+ * The font-size is scaled by the iframe's vertical transform so the
+ * value is in **outer webview** CSS pixels (matching what AppKit
+ * receives via the contentView, which itself reports its bounds in
+ * CSS pixels on standard Tauri/macOS).
+ *
+ * Returns `null` when the range has no element parent we can sample.
+ */
+export interface RangeTextStyle {
+  fontSize: number;
+  fontFamily: string;
+  color: string;
+}
+
+export const getRangeTextStyleInWebview = (range: Range): RangeTextStyle | null => {
+  const node: Node | null =
+    range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  if (!node || node.nodeType !== Node.ELEMENT_NODE) return null;
+  const element = node as Element;
+  const style = element.ownerDocument?.defaultView?.getComputedStyle(element);
+  if (!style) return null;
+
+  const frameElement = getIframeElement(range);
+  let scaleY = 1;
+  if (frameElement) {
+    const transform = getComputedStyle(frameElement).transform;
+    const match = transform.match(/matrix\((.+)\)/);
+    const parts = match?.[1]?.split(/\s*,\s*/)?.map((x) => parseFloat(x));
+    const sy = parts?.[3];
+    if (Number.isFinite(sy)) scaleY = sy!;
+  }
+
+  // Cross-check the declared font-size against the range's actual
+  // visual height. In typical EPUB layout the inline box is roughly
+  // `font-size × line-height` tall (≈1.2× by default), so a declared
+  // font-size noticeably *larger* than the rendered height means the
+  // value isn't a real CSS pixel measurement we can hand to NSFont —
+  // pdf.js's text layer is the canonical offender: each glyph span
+  // can carry an intrinsic `font-size` that reflects the document's
+  // unit-em size before `transform: scale(...)` shrinks it back to
+  // page-coordinate pixels, leaving `getComputedStyle(...).fontSize`
+  // many times bigger than the on-screen glyph. Without compensation
+  // the macOS HUD lays out a giant attributed string and the yellow
+  // highlight rectangle behind it engulfs neighbouring paragraphs.
+  //
+  // Fix: when the declared size exceeds the inline box height by
+  // more than 30 %, treat the inline box height as the source of
+  // truth and back out a plausible font-size. 0.85 is the typical
+  // ratio of cap-height-ish font-size to a 1.2 line-height box; it
+  // matches normal EPUB body text (the common case) within a few
+  // percent and converges PDF text layers onto something AppKit can
+  // render at a sensible scale. Below the threshold (the common
+  // EPUB case) we leave the declared value alone.
+  const declaredFontSize = (parseFloat(style.fontSize) || 0) * scaleY;
+  let fontSize = declaredFontSize;
+  const renderedHeight = range.getBoundingClientRect().height;
+  if (renderedHeight > 0 && declaredFontSize > renderedHeight * 1.3) {
+    fontSize = renderedHeight * 0.85;
+  }
+
+  return {
+    fontSize,
+    fontFamily: style.fontFamily,
+    color: style.color,
+  };
+};
+
+export const isPointerInsideSelection = (selection: Selection, ev: PointerEvent) => {
+  if (selection.rangeCount === 0) return false;
+  const range = selection.getRangeAt(0);
+  const rects = range.getClientRects();
+  const padding = 50;
+  for (let i = 0; i < rects.length; i++) {
+    const rect = rects[i]!;
+    if (
+      ev.clientX >= rect.left - padding &&
+      ev.clientX <= rect.right + padding &&
+      ev.clientY >= rect.top - padding &&
+      ev.clientY <= rect.bottom + padding
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
+export const getPosition = (
+  targetElement: Range | Element | TextSelection,
+  rect: Rect,
+  paddingPx: number,
+  isVertical: boolean = false,
+) => {
+  const { range: target, rect: targetRect } =
+    targetElement && 'range' in targetElement
+      ? targetElement
+      : { range: targetElement, rect: undefined };
+  const frameElement = getIframeElement(target);
+  const transform = frameElement ? getComputedStyle(frameElement).transform : '';
+  const match = transform.match(/matrix\((.+)\)/);
+  const [sx, , , sy] = match?.[1]?.split(/\s*,\s*/)?.map((x) => parseFloat(x)) ?? [];
+
+  const frame = frameElement?.getBoundingClientRect() ?? { top: 0, left: 0 };
+  let padding = { top: 0, right: 0, bottom: 0, left: 0 };
+  if ('nodeType' in target && target.nodeType === 1) {
+    const computedStyle = window.getComputedStyle(target);
+    padding = {
+      top: parseInt(computedStyle.paddingTop, 10) || 0,
+      right: parseInt(computedStyle.paddingRight, 10) || 0,
+      bottom: parseInt(computedStyle.paddingBottom, 10) || 0,
+      left: parseInt(computedStyle.paddingLeft, 10) || 0,
+    };
+  }
+  const rects = Array.from(target.getClientRects()).map((rect) => {
+    return {
+      top: rect.top + padding.top,
+      right: rect.right - padding.right,
+      bottom: rect.bottom - padding.bottom,
+      left: rect.left + padding.left,
+    };
+  });
+  const first = targetRect
+    ? frameRect(frame, targetRect, sx, sy)
+    : frameRect(frame, rects[0], sx, sy);
+  const last = targetRect
+    ? frameRect(frame, targetRect, sx, sy)
+    : frameRect(frame, rects.at(-1), sx, sy);
+
+  if (isVertical) {
+    const leftSpace = first.left - rect.left;
+    const rightSpace = rect.right - first.right;
+    const dir = leftSpace > rightSpace ? 'left' : 'right';
+    const position = {
+      point: constrainPointWithinRect(
+        {
+          x: dir === 'left' ? first.left - rect.left - 6 : first.right - rect.left + 6,
+          y: (first.top + first.bottom) / 2 - rect.top,
+        },
+        rect,
+        paddingPx,
+      ),
+      dir,
+    } as Position;
+    const inView = pointIsInView(position.point);
+    return inView ? position : ({ point: { x: 0, y: 0 }, dir } as Position);
+  }
+
+  const start = {
+    point: constrainPointWithinRect(
+      { x: (first.left + first.right) / 2 - rect.left, y: first.top - rect.top - 12 },
+      rect,
+      paddingPx,
+    ),
+    dir: 'up',
+  } as Position;
+  const end = {
+    point: constrainPointWithinRect(
+      { x: (last.left + last.right) / 2 - rect.left, y: last.bottom - rect.top + 6 },
+      rect,
+      paddingPx,
+    ),
+    dir: 'down',
+  } as Position;
+  const startInView = pointIsInView(start.point);
+  const endInView = pointIsInView(end.point);
+  if (!startInView && !endInView) return { point: { x: 0, y: 0 } };
+  if (!startInView) return end;
+  if (!endInView) return start;
+  return start.point.y > window.innerHeight - end.point.y ? start : end;
+};
+
+// The popup will be positioned based on the triangle position and the direction
+// up: above the triangle
+// down: below the triangle
+// left: to the left of the triangle
+// right: to the right of the triangle
+export const getPopupPosition = (
+  position: Position,
+  boundingReact: Rect,
+  popupWidthPx: number,
+  popupHeightPx: number,
+  popupPaddingPx: number,
+) => {
+  const popupPoint = { x: 0, y: 0 };
+  if (position.dir === 'up') {
+    popupPoint.x = position.point.x - popupWidthPx / 2;
+    popupPoint.y = position.point.y - popupHeightPx;
+  } else if (position.dir === 'down') {
+    popupPoint.x = position.point.x - popupWidthPx / 2;
+    popupPoint.y = position.point.y + 6;
+  } else if (position.dir === 'left') {
+    popupPoint.x = position.point.x - popupWidthPx;
+    popupPoint.y = position.point.y - popupHeightPx / 2;
+  } else if (position.dir === 'right') {
+    popupPoint.x = position.point.x + 6;
+    popupPoint.y = position.point.y - popupHeightPx / 2;
+  }
+
+  if (popupPoint.x < popupPaddingPx) {
+    popupPoint.x = popupPaddingPx;
+  }
+  if (popupPoint.y < popupPaddingPx) {
+    popupPoint.y = popupPaddingPx;
+  }
+  if (popupPoint.x + popupWidthPx > boundingReact.right - boundingReact.left - popupPaddingPx) {
+    popupPoint.x = boundingReact.right - boundingReact.left - popupPaddingPx - popupWidthPx;
+  }
+  if (popupPoint.y + popupHeightPx > boundingReact.bottom - boundingReact.top - popupPaddingPx) {
+    popupPoint.y = boundingReact.bottom - boundingReact.top - popupPaddingPx - popupHeightPx;
+  }
+
+  return { point: popupPoint, dir: position.dir } as Position;
+};
+
+export const snapRangeToWords = (range: Range): void => {
+  if (typeof Intl === 'undefined' || !Intl.Segmenter) return;
+
+  const isPunctuation = (ch: string) => /^\p{P}|\p{S}$/u.test(ch);
+
+  const snapStartToWordBoundary = () => {
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const text = node.textContent ?? '';
+    const offset = range.startOffset;
+    if (offset === 0 || offset >= text.length) return;
+
+    const charAtOffset = text[offset] ?? '';
+    if (isPunctuation(charAtOffset)) return;
+
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+    for (const seg of segmenter.segment(text)) {
+      if (seg.isWordLike && seg.index < offset && seg.index + seg.segment.length > offset) {
+        range.setStart(node, seg.index);
+        break;
+      }
+    }
+  };
+
+  const snapEndToWordBoundary = () => {
+    const node = range.endContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const text = node.textContent ?? '';
+    const offset = range.endOffset;
+    if (offset === 0 || offset >= text.length) return;
+
+    const charBeforeOffset = text[offset - 1] ?? '';
+    if (isPunctuation(charBeforeOffset)) return;
+
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+    for (const seg of segmenter.segment(text)) {
+      if (seg.isWordLike && seg.index < offset && seg.index + seg.segment.length > offset) {
+        range.setEnd(node, seg.index + seg.segment.length);
+        break;
+      }
+    }
+  };
+
+  snapStartToWordBoundary();
+  snapEndToWordBoundary();
+};
+
+export const getTextFromRange = (range: Range, rejectTags: string[] = []): string => {
+  const clonedRange = range.cloneRange();
+  const fragment = clonedRange.cloneContents();
+  const walker = document.createTreeWalker(
+    fragment,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+    {
+      acceptNode: (node) => {
+        const parent = node.parentElement;
+        if (rejectTags.includes(parent?.tagName.toLowerCase() || '')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    },
+  );
+
+  // pdf.js inserts <br role="presentation"> between text spans at line endings
+  // (see TextLayer#appendText in pdfjs). Without this, multi-line PDF
+  // selections collapse adjacent line-final and line-initial words into a
+  // single token (e.g. "lastfirst"). Treat <br> as a newline, matching how
+  // Selection.toString() handles line breaks in the browser.
+  let text = '';
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += (node as Text).nodeValue ?? '';
+    } else if ((node as Element).tagName === 'BR') {
+      text += '\n';
+    }
+  }
+
+  return text;
+};

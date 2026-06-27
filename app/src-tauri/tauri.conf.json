@@ -1,0 +1,181 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "MyReader",
+  "mainBinaryName": "myreader",
+  "identifier": "com.poxenstudio.myreader",
+  "version": "../package.json",
+  "build": {
+    "frontendDist": "../out",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": {
+        "default-src": "'self' 'unsafe-inline' blob: data: customprotocol: asset: http://asset.localhost ipc: http://ipc.localhost",
+        "connect-src": "'self' blob: data: asset: http://asset.localhost ipc: http://ipc.localhost http://*:* https://*:* https://*.sentry.io https://*.posthog.com https://*.deepl.com https://*.wikipedia.org https://*.wiktionary.org https://*.supabase.co https://*.readest.com wss://speech.platform.bing.com https://*.cloudflarestorage.com https://translate.googleapis.com https://translate.toil.cc https://*.microsofttranslator.com https://edge.microsoft.com https://*.googleusercontent.com",
+        "img-src": "'self' blob: data: asset: http://asset.localhost https://* https://*:* http://* http://*:*",
+        "style-src": "'self' 'unsafe-inline' blob: asset: http://asset.localhost https://cdn.jsdelivr.net https://fonts.googleapis.com https://cdnjs.cloudflare.com https://storage.readest.com",
+        "font-src": "'self' blob: data: asset: http://asset.localhost tauri: https://db.onlinewebfonts.com https://cdn.jsdelivr.net https://fonts.gstatic.com https://cdnjs.cloudflare.com  https://storage.readest.com",
+        "frame-src": "'self' blob: asset: http://asset.localhost https://*.stripe.com",
+        "script-src": "'self' 'unsafe-inline' 'unsafe-eval' data: blob: asset: http://asset.localhost https://*.sentry.io https://*.posthog.com  https://*.stripe.com"
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": [
+            "$RESOURCE/**",
+            "$APPDATA/**/*",
+            "$APPCACHE/**/*",
+            "$TEMP/**/*",
+            "**/MyReader/**/*",
+            "/private/var/mobile/Containers/Data/Application/**/*"
+          ],
+          "deny": []
+        }
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installerHooks": "nsis/installer-hooks.nsh",
+        "installMode": "both"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    },
+    "linux": {
+      "deb": {
+        "section": "text"
+      }
+    },
+    "android": {
+      "minSdkVersion": 26
+    },
+    "iOS": {
+      "developmentTeam": "J5W48D69VR",
+      "infoPlist": "./Info-ios.plist",
+      "minimumSystemVersion": "15.0"
+    },
+    "fileAssociations": [
+      {
+        "name": "epub",
+        "ext": ["epub"],
+        "description": "EPUB file",
+        "mimeType": "application/epub+zip",
+        "role": "Viewer"
+      },
+      {
+        "name": "mobi",
+        "ext": ["mobi"],
+        "description": "MOBI file",
+        "mimeType": "application/x-mobipocket-ebook",
+        "role": "Viewer"
+      },
+      {
+        "name": "azw",
+        "ext": ["azw"],
+        "description": "AZW file",
+        "mimeType": "application/vnd.amazon.ebook",
+        "role": "Viewer"
+      },
+      {
+        "name": "azw3",
+        "ext": ["azw3"],
+        "description": "AZW3 file",
+        "mimeType": "application/vnd.amazon.mobi8-ebook",
+        "role": "Viewer"
+      },
+      {
+        "name": "fb2",
+        "ext": ["fb2"],
+        "description": "FB2 file",
+        "mimeType": "application/x-fictionbook+xml",
+        "role": "Viewer"
+      },
+      {
+        "name": "cbz",
+        "ext": ["cbz"],
+        "description": "CBZ file",
+        "mimeType": "application/vnd.comicbook+zip",
+        "role": "Viewer"
+      },
+      {
+        "name": "pdf",
+        "ext": ["pdf"],
+        "description": "PDF file",
+        "mimeType": "application/pdf",
+        "role": "Viewer"
+      }
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": false
+    },
+    "cli": {
+      "description": "MyReader CLI",
+      "args": [
+        {
+          "name": "file1",
+          "index": 1,
+          "takesValue": true
+        },
+        {
+          "name": "file2",
+          "index": 2,
+          "takesValue": true
+        },
+        {
+          "name": "file3",
+          "index": 3,
+          "takesValue": true
+        },
+        {
+          "name": "file4",
+          "index": 4,
+          "takesValue": true
+        }
+      ]
+    },
+    "deep-link": {
+      "mobile": [
+        { "scheme": ["https"], "host": "web.readest.com", "appLink": true },
+        { "scheme": ["myreader"], "appLink": false }
+      ],
+      "desktop": {
+        "schemes": ["myreader"]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJFMEQ1QjE2OEU1NEIzNTEKUldSUnMxU09GbHNOdmpEaWFMT1crRFpEV2VORzQ2MklxaFc0M1R0ci9xY2c1bENXS0xhM1R1L2sK",
+      "endpoints": [
+        "https://download.readest.com/releases/latest.json",
+        "https://github.com/readest/readest/releases/latest/download/latest.json"
+      ]
+    },
+    "webview-upgrade": {
+      "minUpgradeMajor": 121,
+      "minSupportedMajor": 92
+    }
+  }
+}

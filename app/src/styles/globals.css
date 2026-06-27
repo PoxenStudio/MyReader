@@ -1,0 +1,921 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/InterVariable-Italic.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  border-radius: 10px;
+  scrollbar-gutter: auto !important;
+  overscroll-behavior: none;
+  background-color: transparent;
+
+  --scroll-bg-color: theme('colors.base-200');
+  --safe-area-inset-top: env(safe-area-inset-top);
+  --safe-area-inset-right: env(safe-area-inset-right);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom);
+  --safe-area-inset-left: env(safe-area-inset-left);
+}
+
+/* Fixes the scrollbar gutter issue for DaisyUI */
+/* https://github.com/saadeghi/daisyui/issues/3040#issuecomment-2250530354 */
+:root:has(:is(.modal-open, .modal:target, .modal-toggle:checked + .modal, .modal[open])) {
+  scrollbar-gutter: unset !important;
+}
+
+html[data-page='default'] {
+  background: theme('colors.base-100');
+}
+
+html[data-page='library'] {
+  background: theme('colors.base-200');
+}
+
+html[data-page='reader'] {
+  background: theme('colors.base-100');
+}
+
+body {
+  border-radius: 10px;
+  background-color: transparent;
+  cursor: default;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Hide the native number-input spinner arrows. WebKit on macOS draws
+     them on top of rounded input borders, which looks broken; Firefox
+     respects -moz-appearance: textfield. */
+  .no-spinner {
+    -moz-appearance: textfield;
+  }
+  .no-spinner::-webkit-outer-spin-button,
+  .no-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+.full-height {
+  height: 100vh;
+}
+
+@supports (height: 100dvh) {
+  .full-height {
+    height: 100dvh;
+  }
+}
+
+:root.edge-to-edge .full-height {
+  height: 100vh !important;
+}
+
+foliate-view {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+foliate-fxl {
+  overflow: scroll;
+}
+
+@keyframes scaleUpAndDown {
+  0% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.02);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.hover-bar-anim:hover ~ .foliate-viewer {
+  animation: scaleUpAndDown 0.3s ease forwards;
+}
+
+.window-button {
+  @apply inline-flex h-6 w-6 items-center justify-center rounded-full;
+  @apply transform transition duration-200 ease-in-out hover:scale-105;
+}
+
+.rounded-window {
+  border-radius: 10px;
+}
+
+.rounded-window-top-left {
+  border-top-left-radius: 10px;
+}
+
+.rounded-window-bottom-left {
+  border-bottom-left-radius: 10px;
+}
+
+.rounded-window-top-right {
+  border-top-right-radius: 10px;
+}
+
+.rounded-window-bottom-right {
+  border-bottom-right-radius: 10px;
+}
+
+.window-border {
+  border-radius: 10px;
+  z-index: 99;
+  position: relative;
+}
+
+.window-border::before {
+  content: '';
+  z-index: 999;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: 1px solid theme('colors.base-300');
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.dropdown-content {
+  position: relative;
+  @apply bg-base-100;
+  padding: 10px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+  border-radius: 14px;
+}
+
+.dropdown-content::before,
+.dropdown-content::after {
+  content: '';
+  position: absolute;
+  top: -12px;
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+}
+
+.dropdown-content::before {
+  border-bottom: 12px solid theme('colors.base-100');
+  z-index: 1;
+}
+
+.dropdown-content::after {
+  top: -14px;
+  border-bottom: 13px solid rgba(0, 0, 0, 0.02);
+  z-index: 0;
+}
+
+.dropdown-content.bgcolor-base-200 {
+  background-color: theme('colors.base-200');
+}
+
+.dropdown-content.bgcolor-base-200::before {
+  border-bottom: 12px solid theme('colors.base-200');
+  z-index: 1;
+}
+
+.dropdown-content.bordercolor-content::before {
+  border-bottom: 12px solid theme('colors.base-content');
+  z-index: 1;
+}
+
+.dropdown-content.bordercolor-content::after {
+  top: -11px;
+  border-bottom: 13px solid theme('colors.base-100');
+  z-index: 1;
+}
+
+.dropdown-left::before,
+.dropdown-left::after {
+  left: 20px;
+  transform: translateX(0);
+}
+
+.dropdown-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.dropdown-right::before,
+.dropdown-right::after {
+  right: 20px;
+  transform: translateX(0);
+}
+
+.ui-rtl .dropdown-left::before,
+.ui-rtl .dropdown-left::after {
+  left: auto;
+  right: 20px;
+}
+
+.ui-rtl .dropdown-right::before,
+.ui-rtl .dropdown-right::after {
+  right: auto;
+  left: 20px;
+}
+
+.ui-rtl .dropdown-end > :where(.dropdown-content) {
+  inset-inline-end: auto;
+  inset-inline-start: 0;
+}
+
+.ui-rtl .settings-menu,
+.ui-rtl .view-menu {
+  inset-inline-end: auto;
+  inset-inline-start: 0;
+}
+
+.ui-rtl .dropdown-content,
+.ui-rtl .settings-menu,
+.ui-rtl .view-menu {
+  direction: rtl;
+}
+
+.dropdown-content.no-triangle::before,
+.dropdown-content.no-triangle::after {
+  display: none;
+}
+
+.tooltip.no-triangle::before,
+.tooltip.no-triangle::after,
+.tooltip-top.no-triangle::before,
+.tooltip-top.no-triangle::after,
+.tooltip-bottom.no-triangle::before,
+.tooltip-bottom.no-triangle::after {
+  display: none;
+}
+
+.dropdown-content,
+.settings-content {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+@media (max-width: 768px) {
+  .dropdown-content,
+  .settings-content {
+    font-size: 16px;
+  }
+}
+
+.config-item {
+  @apply flex h-14 items-center justify-between p-4;
+  @apply hover:bg-base-100/50;
+}
+
+.config-item > span {
+  @apply line-clamp-2;
+}
+
+.collapse-arrow > .collapse-title:after {
+  top: var(--top-override, default-value);
+  inset-inline-end: var(--end-override, default-value);
+}
+
+.search-bar {
+  max-height: 0;
+  visibility: hidden;
+  overflow: visible;
+  transition: max-height 0.3s ease-out;
+}
+
+.search-bar-visible {
+  max-height: 100%;
+  visibility: visible;
+}
+
+.pull-refresh-loading {
+  position: fixed;
+  width: 100%;
+  background-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-lighter);
+  z-index: 10;
+}
+
+.content {
+  font-size: 16px;
+}
+
+@media (max-width: 480px) {
+  .content {
+    font-size: 20px;
+  }
+}
+
+@media (min-width: 481px) and (max-width: 1024px) {
+  .content {
+    font-size: 18.4px;
+  }
+}
+
+.content.font-size-base {
+  font-size: 1em !important;
+  line-height: 1.5em;
+}
+
+.content.font-size-sm {
+  font-size: 0.875em !important;
+  line-height: 1.25em;
+}
+
+.content.font-size-xs {
+  font-size: 0.75em !important;
+  line-height: 1em;
+}
+
+.writing-vertical-rl {
+  writing-mode: vertical-rl;
+}
+
+.direction-rtl {
+  direction: rtl;
+}
+
+.drop-zone {
+  position: relative;
+}
+
+.drag-over {
+  border: 2px dashed #4a90e2 !important;
+  background-color: rgba(74, 144, 226, 0.1) !important;
+  transition: all 0.2s ease-in-out;
+}
+
+.drag-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 20;
+  pointer-events: none;
+}
+
+.drop-zone.drag-over .drag-overlay {
+  display: block;
+}
+
+.drop-indicator {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  padding: 20px;
+  background-color: theme('colors.base-300');
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  pointer-events: none;
+}
+
+.drop-zone.drag-over .drop-indicator {
+  display: block;
+}
+
+.touch-target {
+  position: relative;
+}
+
+.touch-target::before {
+  content: '';
+  position: absolute;
+  inset: -12px;
+}
+
+.no-context-menu {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.no-context-menu img,
+.no-context-menu a {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.book-spine {
+  background-image:
+    linear-gradient(
+      180deg,
+      hsla(0, 0%, 95%, 0.2) 0%,
+      /* Top highlight */ hsla(0, 0%, 90%, 0.1) 1%,
+      /* Top highlight */ transparent 2%,
+      /* Main book surface */ transparent 50%,
+      /* Main book surface */ hsla(0, 0%, 25%, 0.15) 95%,
+      /* Bottom shadow */ hsla(0, 0%, 15%, 0.2) 100% /* Bottom edge dark */
+    ),
+    linear-gradient(
+      90deg,
+      hsla(0, 0%, 0%, 0.1) 0%,
+      /* Left binding shadow */ hsla(0, 0%, 20%, 0.2) 0.5%,
+      /* Dark transition */ hsla(0, 0%, 95%, 0.4) 0.8%,
+      /* Peak highlight */ hsla(0, 0%, 85%, 0.4) 2%,
+      /* Peak highlight */ hsla(0, 0%, 60%, 0.3) 2.8%,
+      /* Gradient highlight */ hsla(0, 0%, 40%, 0.2) 4.2%,
+      /* Shadow between highlights */ hsla(0, 0%, 70%, 0.15) 4.6%,
+      /* Second peak highlight */ hsla(0, 0%, 60%, 0.15) 5.4%,
+      /* Second gradient highlight */ hsla(0, 0%, 40%, 0.1) 6%,
+      /* Transition shadow */ transparent 88%,
+      /* Main book surface */ hsla(0, 0%, 30%, 0.1) 99%,
+      /* Right edge highlight */ hsla(0, 0%, 30%, 0.2) 99.5%,
+      /* Right edge shadow */ hsla(0, 0%, 10%, 0.2) 100% /* Right binding edge */
+    );
+  mask: linear-gradient(180deg, black 0%, rgba(0, 0, 0, 0.9) 50%, rgba(0, 0, 0, 0.5) 100%);
+}
+
+.visible-focus-inset-2:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 2px transparent,
+    inset 0 0 0 3px #6396e7;
+}
+
+.window-button {
+  position: relative;
+}
+
+.window-button::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+input[type='range'].slider-input {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+@keyframes spin-counterclockwise {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+.btn-ghost.btn-active {
+  background-color: theme('colors.base-300');
+}
+
+.animate-reverse-spin {
+  animation: spin-counterclockwise 1s linear;
+}
+
+[data-eink='true'] [class*='shadow-'] {
+  box-shadow: none !important;
+}
+
+[data-eink='true'] [class*='text-base-content'] {
+  color: theme('colors.base-content') !important;
+}
+
+[data-eink='true'] [class*='text-blue'] {
+  color: theme('colors.base-content') !important;
+  font-weight: normal;
+}
+
+[data-eink='true'] [class*='text-red'] {
+  color: theme('colors.base-content') !important;
+  font-weight: normal;
+}
+
+[data-eink='true'] [class*='text-neutral-content'] {
+  color: theme('colors.base-content') !important;
+}
+
+[data-eink='true'] [class*='placeholder']::placeholder {
+  color: theme('colors.base-content') !important;
+}
+
+[data-eink='true'] [class*='bg-base-content'] {
+  background-color: theme('colors.base-content') !important;
+}
+
+[data-eink='true'] [class*='font-light'] {
+  font-weight: normal !important;
+}
+
+[data-eink='true'] [class*='text-bold-in-eink'] {
+  font-weight: bold;
+}
+
+[data-eink='true'] .eink-bordered {
+  border-width: 1px !important;
+  border-color: theme('colors.base-content') !important;
+  background-color: theme('colors.base-100') !important;
+}
+
+[data-eink='true'] input.search-input,
+[data-eink='true'] input.search-input:focus {
+  border-width: 1px !important;
+  border-radius: 9999px;
+  border-color: theme('colors.base-content') !important;
+  background-color: theme('colors.base-100') !important;
+}
+
+[data-eink='true'] .modal-box {
+  box-shadow: none !important;
+  border-width: 1px !important;
+  border-color: theme('colors.base-content') !important;
+}
+
+[data-eink='true'] .dialog-overlay {
+  background-color: transparent !important;
+}
+
+/* Decorative-only artwork (gradient wave) reads as noise on e-ink. */
+[data-eink='true'] .login-dialog-art {
+  display: none !important;
+}
+
+[data-eink='true'] .menu-container {
+  background-color: theme('colors.base-100') !important;
+  border: 1px solid theme('colors.base-content') !important;
+}
+
+[data-eink='true'] hr {
+  border-color: theme('colors.base-content/0.75') !important;
+}
+
+[data-eink='true'] button,
+[data-eink='true'] .btn {
+  color: theme('colors.base-content') !important;
+}
+
+/* btn-contrast — a solid, high-contrast CTA: base-content background with a
+   base-100 label. Theme-neutral (unlike the colored btn-primary); fits the
+   minimalist themes and is already e-ink-correct. */
+.btn-contrast {
+  background-color: theme('colors.base-content') !important;
+  border: 1px solid theme('colors.base-content') !important;
+  color: theme('colors.base-100') !important;
+}
+.btn-contrast:hover {
+  opacity: 0.9;
+}
+
+[data-eink='true'] .btn-primary,
+[data-eink='true'] .btn-outline,
+[data-eink='true'] .btn-contrast {
+  background-color: theme('colors.base-content') !important;
+  border: 1px solid theme('colors.base-content') !important;
+  color: theme('colors.base-100') !important;
+}
+
+[data-eink='true'] .bg-primary {
+  background-color: theme('colors.base-100') !important;
+  border: 1px solid theme('colors.base-content') !important;
+  color: theme('colors.base-content') !important;
+}
+
+[data-eink='true'] .dropdown-toggle {
+  background-color: theme('colors.transparent') !important;
+}
+
+[data-eink='true'] .opds-navigation .card {
+  background-color: theme('colors.base-100') !important;
+  border: 1px solid theme('colors.base-content') !important;
+}
+
+[data-eink='true'] .booknote-item {
+  background-color: theme('colors.base-100') !important;
+  border: 1px solid theme('colors.base-content') !important;
+}
+
+[data-eink='true'] .booknote-text {
+  background-color: theme('colors.base-100') !important;
+}
+
+[data-eink='true'] .bookitem-main,
+[data-eink='true'] .groupitem-main {
+  border: 1px solid theme('colors.base-content') !important;
+}
+
+[data-eink='true'] .popup-container {
+  border: 1px solid theme('colors.base-content') !important;
+  background-color: theme('colors.base-100') !important;
+}
+
+[data-eink='true'] .popup-triangle-outer {
+  color: theme('colors.base-content') !important;
+}
+
+[data-eink='true'] .popup-triangle-inner {
+  color: theme('colors.base-100') !important;
+}
+
+[data-eink='true'] .annotation-notes {
+  transform-origin: top left;
+  transform: translate(-1px, -1px);
+}
+
+[data-eink='true'] .alert {
+  color: theme('colors.base-content') !important;
+  border: 1px solid theme('colors.base-content') !important;
+  background-color: theme('colors.base-100') !important;
+}
+
+[data-eink='true'] input[type='checkbox'] {
+  --tglbg: theme('colors.base-100') !important;
+}
+
+.no-transitions * {
+  transition: none !important;
+}
+
+/* settings highlight animation for command palette */
+@keyframes settings-highlight-pulse {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: theme('colors.primary/0.15');
+  }
+}
+
+.settings-highlight {
+  animation: settings-highlight-pulse 0.5s ease-in-out 2;
+  border-radius: 8px;
+}
+
+/* View Transitions for library navigation */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.3s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html[data-nav-direction='forward'] ::view-transition-old(root) {
+  animation-name: slide-fade-out-left;
+}
+
+html[data-nav-direction='forward'] ::view-transition-new(root) {
+  animation-name: slide-fade-in-right;
+}
+
+html[data-nav-direction='back'] ::view-transition-old(root) {
+  animation-name: slide-fade-out-right;
+}
+
+html[data-nav-direction='back'] ::view-transition-new(root) {
+  animation-name: slide-fade-in-left;
+}
+
+/* Forward animations */
+@keyframes slide-fade-out-left {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+}
+
+@keyframes slide-fade-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Back animations */
+@keyframes slide-fade-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+}
+
+@keyframes slide-fade-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Simpler fade for reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.15s;
+  }
+
+  ::view-transition-old(root) {
+    animation-name: simple-fade-out !important;
+  }
+
+  ::view-transition-new(root) {
+    animation-name: simple-fade-in !important;
+  }
+
+  @keyframes simple-fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes simple-fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
+/* Atmosphere overlay */
+#atmosphere-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 999;
+  opacity: 0;
+  transition: opacity 700ms var(--ease-out, ease-out);
+}
+
+body.atmosphere #atmosphere-overlay {
+  opacity: 0.5;
+}
+
+@keyframes spin-cw {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(180deg);
+  }
+}
+
+@keyframes spin-ccw {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-180deg);
+  }
+}
+
+.animate-spin-cw {
+  animation: spin-cw 0.6s ease-in-out;
+}
+
+.animate-spin-ccw {
+  animation: spin-ccw 0.6s ease-in-out;
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  10% {
+    transform: rotate(-8deg);
+  }
+  20% {
+    transform: rotate(8deg);
+  }
+  30% {
+    transform: rotate(-8deg);
+  }
+  40% {
+    transform: rotate(8deg);
+  }
+  50% {
+    transform: rotate(-6deg);
+  }
+  60% {
+    transform: rotate(6deg);
+  }
+  70% {
+    transform: rotate(-4deg);
+  }
+  80% {
+    transform: rotate(4deg);
+  }
+  90% {
+    transform: rotate(-2deg);
+  }
+}
+
+.animate-shake {
+  animation: shake 0.8s ease-in-out;
+}
+
+@keyframes pin-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-8px);
+  }
+  40% {
+    transform: translateX(8px);
+  }
+  60% {
+    transform: translateX(-6px);
+  }
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+.animate-pin-shake {
+  animation: pin-shake 0.4s ease-in-out;
+}
+
+@keyframes pin-cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-pin-cursor-blink {
+  animation: pin-cursor-blink 1s step-end infinite;
+}
+
+/*
+ * Suppress the daisyUI / browser focus ring on text inputs and
+ * textareas. The element's own border (input-bordered, textarea-bordered)
+ * already conveys focus via color shift, so the additional outer ring
+ * was visually redundant and read as a "double border". Buttons keep
+ * their focus ring for accessibility — only typed-in surfaces lose it.
+ */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):focus,
+input:not([type='checkbox']):not([type='radio']):not([type='range']):focus-visible,
+input:not([type='checkbox']):not([type='radio']):not([type='range']):focus-within,
+textarea:focus,
+textarea:focus-visible,
+textarea:focus-within,
+.input:focus,
+.input:focus-visible,
+.input:focus-within,
+.textarea:focus,
+.textarea:focus-visible,
+.textarea:focus-within {
+  outline: none !important;
+  box-shadow: none !important;
+}

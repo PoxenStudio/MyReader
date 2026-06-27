@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="webview_upgrade_outdated_message">Android System WebView ist veraltet. Bitte aktualisieren oder installieren Sie es, damit diese App korrekt angezeigt wird.</string>
+</resources>

@@ -1,0 +1,399 @@
+import clsx from 'clsx';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { MdArrowBack } from 'react-icons/md';
+
+import { BookDoc } from '@/libs/document';
+import { useReaderStore } from '@/store/readerStore';
+import { useBookDataStore } from '@/store/bookDataStore';
+import { useFoliateEvents } from '../hooks/useFoliateEvents';
+import { useCustomFontStore } from '@/store/customFontStore';
+import { useResponsiveSize } from '@/hooks/useResponsiveSize';
+import { getFootnoteStyles, getStyles, getThemeCode } from '@/utils/style';
+import { getPopupPosition, getPosition, Position } from '@/utils/sel';
+import { FootnoteHandler } from 'foliate-js/footnotes.js';
+import { mountAdditionalFonts, mountCustomFont } from '@/styles/fonts';
+import { eventDispatcher } from '@/utils/event';
+import { shouldCheckAsFootnote } from '../utils/footnoteHeuristics';
+import { FoliateView } from '@/types/view';
+import { isCJKLang } from '@/utils/lang';
+import { Overlay } from '@/components/Overlay';
+import Popup from '@/components/Popup';
+
+interface FootnotePopupProps {
+  bookKey: string;
+  bookDoc: BookDoc;
+}
+
+const popupWidth = 360;
+const popupHeight = 88;
+
+const FootnotePopup: React.FC<FootnotePopupProps> = ({ bookKey, bookDoc }) => {
+  const footnoteRef = useRef<HTMLDivElement>(null);
+  const footnoteViewRef = useRef<FoliateView | null>(null);
+  const trianglePositionRef = useRef<Position | null>(null);
+  const [trianglePosition, setTrianglePosition] = useState<Position | null>();
+  const [popupPosition, setPopupPosition] = useState<Position | null>();
+  const [showPopup, setShowPopup] = useState(false);
+
+  const { getBookData } = useBookDataStore();
+  const { getView, getViewSettings } = useReaderStore();
+  const { getLoadedFonts } = useCustomFontStore();
+  const view = getView(bookKey);
+  const viewSettings = getViewSettings(bookKey)!;
+  const [footnoteHandler] = useState(() => new FootnoteHandler());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const footnoteHrefRef = useRef<string | null>(null);
+  const historyRef = useRef<{ items: Record<string, unknown>[]; index: number }>({
+    items: [],
+    index: -1,
+  });
+  const [canGoBack, setCanGoBack] = useState(false);
+  const canGoBackRef = useRef(canGoBack);
+
+  const [gridRect, setGridRect] = useState<DOMRect | null>(null);
+  const [responsiveWidth, setResponsiveWidth] = useState(popupWidth);
+  const [responsiveHeight, setResponsiveHeight] = useState(popupHeight);
+  const sizeAdjustCountRef = useRef(0);
+  const maxSizeAdjustCount = 3;
+  const size18 = useResponsiveSize(18);
+  const popupPadding = useResponsiveSize(10);
+
+  const getMaxHeight = useCallback(() => {
+    let availableHeight = window.innerHeight - 2 * popupPadding;
+    if (trianglePositionRef.current?.dir === 'up') {
+      availableHeight = trianglePositionRef.current.point.y - popupPadding;
+    } else if (trianglePositionRef.current?.dir === 'down') {
+      availableHeight = window.innerHeight - trianglePositionRef.current.point.y - popupPadding;
+    }
+    return availableHeight;
+  }, [popupPadding]);
+
+  const getMaxWidth = useCallback(() => {
+    let availableWidth = Math.min(window.innerWidth - 2 * popupPadding, 720);
+    if (trianglePositionRef.current?.dir === 'left') {
+      availableWidth = trianglePositionRef.current.point.x - popupPadding;
+    } else if (trianglePositionRef.current?.dir === 'right') {
+      availableWidth = window.innerWidth - trianglePositionRef.current.point.x - popupPadding;
+    }
+    return availableWidth;
+  }, [popupPadding]);
+
+  const getResponsivePopupSize = (size: number, isVertical: boolean) => {
+    const maxSize = isVertical ? window.innerWidth : window.innerHeight;
+    return Math.min(size, maxSize - popupPadding - 12);
+  };
+
+  const clipPopupWith = (size: number) => {
+    return Math.min(size, window.innerWidth - popupPadding - 12);
+  };
+
+  const clipPopupHeight = (size: number) => {
+    return Math.min(size, window.innerHeight - popupPadding - 12);
+  };
+
+  useEffect(() => {
+    const getHashFromHref = (href: string | null) => {
+      if (!href) return null;
+      const hashIndex = href.indexOf('#');
+      if (hashIndex !== -1) {
+        return href.substring(hashIndex + 1);
+      }
+      return null;
+    };
+    const handleBeforeRender = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const { view } = detail;
+      view.addEventListener('link', (e: Event) => {
+        e.preventDefault();
+        const { detail: popupLinkDetail } = e as CustomEvent;
+        const footnoteAnchorId = getHashFromHref(footnoteHrefRef.current);
+        const linkAnchor = popupLinkDetail.a as HTMLAnchorElement;
+        if (linkAnchor && linkAnchor.getAttribute('id') === footnoteAnchorId) return;
+
+        popupLinkDetail['follow'] = true;
+        const history = historyRef.current;
+        const items = [...history.items.slice(0, history.index + 1), popupLinkDetail];
+        historyRef.current = { items, index: items.length - 1 };
+        setCanGoBack(true);
+        canGoBackRef.current = true;
+        footnoteHandler.handle(bookDoc, e)?.catch((err) => {
+          console.warn(err);
+          getView(bookKey)?.goTo(popupLinkDetail.href);
+          setShowPopup(false);
+        });
+      });
+      view.addEventListener('load', (e: CustomEvent) => {
+        const { doc } = e.detail;
+        const bookData = getBookData(bookKey)!;
+        mountAdditionalFonts(doc, isCJKLang(bookData.book?.primaryLanguage));
+        getLoadedFonts().forEach((font) => {
+          mountCustomFont(doc, font);
+        });
+      });
+      footnoteViewRef.current = view;
+      footnoteRef.current?.replaceChildren(view);
+      const { renderer } = view;
+      const viewSettings = getViewSettings(bookKey)!;
+      const backButtonMargin = canGoBackRef.current ? 32 : 0;
+      renderer.setAttribute('flow', 'scrolled');
+      renderer.setAttribute('no-preload', '');
+      renderer.setAttribute('no-background', '');
+      renderer.setAttribute('margin-top', `${viewSettings.vertical ? 0 : backButtonMargin}px`);
+      renderer.setAttribute('margin-right', `${viewSettings.vertical ? backButtonMargin : 0}px`);
+      renderer.setAttribute('margin-bottom', '0px');
+      renderer.setAttribute('margin-left', '0px');
+      renderer.setAttribute('gap', '0%');
+      const themeCode = getThemeCode();
+      const popupTheme = { ...themeCode };
+      const popupContainer = document.getElementById('popup-container');
+      if (popupContainer) {
+        const backgroundColor = getComputedStyle(popupContainer).backgroundColor;
+        popupTheme.bg = backgroundColor;
+      }
+      const mainStyles = getStyles(viewSettings, popupTheme, getLoadedFonts());
+      const footnoteStyles = getFootnoteStyles();
+      renderer.setStyles?.(`${mainStyles}\n${footnoteStyles}`);
+    };
+
+    const handleRender = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      // console.log('render footnote', detail);
+      const { view, href } = detail;
+      footnoteHrefRef.current = href;
+      sizeAdjustCountRef.current = 0;
+      view.addEventListener('relocate', () => {
+        if (sizeAdjustCountRef.current >= maxSizeAdjustCount) return;
+        sizeAdjustCountRef.current += 1;
+        const { renderer } = view as FoliateView;
+        const viewSettings = getViewSettings(bookKey)!;
+        if (viewSettings.vertical) {
+          const responsiveWidth = clipPopupWith(
+            Math.min(getResponsivePopupSize(renderer.viewSize, true), getMaxWidth()),
+          );
+          setResponsiveWidth(responsiveWidth);
+          const scrollRatio = renderer.viewSize / responsiveWidth;
+          if (scrollRatio > 1.5) {
+            setResponsiveHeight(
+              clipPopupHeight(Math.min(popupWidth * scrollRatio, getMaxHeight())),
+            );
+          }
+        } else {
+          const responsiveHeight = clipPopupHeight(
+            Math.min(getResponsivePopupSize(renderer.viewSize, false), getMaxHeight()),
+          );
+          setResponsiveHeight(responsiveHeight);
+          const scrollRatio = renderer.viewSize / responsiveHeight;
+          if (scrollRatio > 1.5) {
+            setResponsiveWidth(clipPopupWith(Math.min(popupWidth * scrollRatio, getMaxWidth())));
+          }
+        }
+        setShowPopup(true);
+      });
+    };
+
+    footnoteHandler.addEventListener('before-render', handleBeforeRender);
+    footnoteHandler.addEventListener('render', handleRender);
+    return () => {
+      footnoteHandler.removeEventListener('before-render', handleBeforeRender);
+      footnoteHandler.removeEventListener('render', handleRender);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  useEffect(() => {
+    if (showPopup) {
+      containerRef.current?.focus();
+    }
+  }, [showPopup]);
+
+  useEffect(() => {
+    if (viewSettings.vertical) {
+      setResponsiveWidth(clipPopupWith(popupHeight));
+      setResponsiveHeight(clipPopupHeight(Math.max(popupWidth, window.innerHeight / 4)));
+    } else {
+      setResponsiveWidth(clipPopupWith(Math.max(popupWidth, window.innerWidth / 4)));
+      setResponsiveHeight(clipPopupHeight(popupHeight));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewSettings, trianglePosition]);
+
+  useEffect(() => {
+    if (trianglePosition && gridRect) {
+      const popupPos = getPopupPosition(
+        trianglePosition,
+        gridRect,
+        responsiveWidth,
+        responsiveHeight,
+        popupPadding,
+      );
+      setPopupPosition(popupPos);
+    }
+  }, [trianglePosition, gridRect, responsiveWidth, responsiveHeight, popupPadding]);
+
+  const docLinkHandler = async (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    // console.log('doc link click', detail);
+    const gridFrame = document.querySelector(`#gridcell-${bookKey}`);
+    if (!gridFrame) return;
+    const rect = gridFrame.getBoundingClientRect();
+    const viewSettings = getViewSettings(bookKey)!;
+    const triangPos = getPosition(detail.a, rect, popupPadding, viewSettings.vertical);
+    setGridRect(rect);
+    setTrianglePosition(triangPos);
+    trianglePositionRef.current = triangPos;
+
+    const { a: anchor } = detail as { a: HTMLAnchorElement };
+    const footnoteClasses = ['duokan-footnote', 'footnote-link', 'footnote'];
+    if (footnoteClasses.some((cls) => anchor.classList.contains(cls))) {
+      detail['follow'] = true;
+    }
+    if (shouldCheckAsFootnote(anchor)) {
+      detail['check'] = true;
+    }
+    historyRef.current = { items: [detail], index: 0 };
+    setCanGoBack(false);
+    canGoBackRef.current = false;
+    footnoteHandler.handle(bookDoc, event)?.catch((err) => {
+      console.warn(err);
+      const detail = (event as CustomEvent).detail;
+      view?.goTo(detail.href);
+    });
+  };
+
+  const handleBack = () => {
+    const history = historyRef.current;
+    if (history.index <= 0) return;
+    const newIndex = history.index - 1;
+    historyRef.current = { ...history, index: newIndex };
+    setCanGoBack(newIndex > 0);
+    canGoBackRef.current = newIndex > 0;
+    const detail = history.items[newIndex]!;
+    const syntheticEvent = new CustomEvent('link', {
+      detail: { ...detail, follow: true },
+      cancelable: true,
+    });
+    footnoteHandler.handle(bookDoc, syntheticEvent);
+  };
+
+  const closePopup = () => {
+    const view = footnoteRef.current?.querySelector('foliate-view') as FoliateView;
+    view?.close();
+    view?.remove();
+  };
+
+  const handleDismissPopup = () => {
+    closePopup();
+    historyRef.current = { items: [], index: -1 };
+    canGoBackRef.current = false;
+    sizeAdjustCountRef.current = 0;
+    trianglePositionRef.current = null;
+    setCanGoBack(false);
+    setGridRect(null);
+    setPopupPosition(null);
+    setTrianglePosition(null);
+    setResponsiveWidth(popupWidth);
+    setResponsiveHeight(popupHeight);
+    setShowPopup(false);
+  };
+
+  // Handle custom footnote popup event from iframe event
+  const handleFootnotePopupEvent = (event: CustomEvent) => {
+    const { element, footnote } = event.detail;
+    const gridFrame = document.querySelector(`#gridcell-${bookKey}`);
+    if (!gridFrame) return;
+    const rect = gridFrame.getBoundingClientRect();
+    const viewSettings = getViewSettings(bookKey)!;
+    const triangPos = getPosition(element, rect, popupPadding, viewSettings.vertical);
+    if (footnoteRef.current) {
+      const elem = document.createElement('p');
+      elem.textContent = footnote;
+      elem.setAttribute('style', `padding: 1em; hanging-punctuation: allow-end last;`);
+      elem.style.visibility = 'hidden';
+      if (viewSettings.vertical) {
+        elem.style.height = `${responsiveHeight}px`;
+      } else {
+        elem.style.width = `${responsiveWidth}px`;
+      }
+      document.body.appendChild(elem);
+      const popupSize = elem.getBoundingClientRect();
+      if (viewSettings.vertical) {
+        setResponsiveWidth(getResponsivePopupSize(popupSize.width, true));
+      } else {
+        setResponsiveHeight(getResponsivePopupSize(popupSize.height, false));
+      }
+      document.body.removeChild(elem);
+
+      elem.style.visibility = 'visible';
+      footnoteRef.current.replaceChildren(elem);
+      setGridRect(rect);
+      setTrianglePosition(triangPos);
+      trianglePositionRef.current = triangPos;
+      setShowPopup(true);
+    }
+  };
+
+  useFoliateEvents(view, {
+    onLinkClick: docLinkHandler,
+  });
+
+  useEffect(() => {
+    window.addEventListener('resize', handleDismissPopup);
+    eventDispatcher.on('footnote-popup', handleFootnotePopupEvent);
+    return () => {
+      window.removeEventListener('resize', handleDismissPopup);
+      eventDispatcher.off('footnote-popup', handleFootnotePopupEvent);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (footnoteViewRef.current) {
+      footnoteRef.current?.replaceChildren(footnoteViewRef.current);
+    }
+  }, [footnoteRef]);
+
+  return (
+    <div ref={containerRef} role='toolbar' tabIndex={-1}>
+      {showPopup && <Overlay onDismiss={handleDismissPopup} />}
+      <Popup
+        isOpen={showPopup}
+        width={responsiveWidth}
+        height={responsiveHeight}
+        position={showPopup ? popupPosition! : undefined}
+        trianglePosition={showPopup ? trianglePosition! : undefined}
+        className='select-text overflow-y-auto'
+        onDismiss={handleDismissPopup}
+      >
+        {canGoBack && (
+          <div
+            className={clsx(
+              'absolute flex h-8 w-full pt-2',
+              viewSettings.vertical ? 'justify-end pe-2' : 'justify-start ps-2',
+            )}
+          >
+            <button
+              type='button'
+              onClick={handleBack}
+              className={clsx(
+                'btn btn-ghost btn-circle eink-bordered text-base-content bg-base-200/80 hover:bg-base-200',
+                'z-10 h-8 min-h-8 w-8 p-0 shadow-sm',
+              )}
+            >
+              <MdArrowBack size={size18} />
+            </button>
+          </div>
+        )}
+        <div
+          className='footnote-content'
+          ref={footnoteRef}
+          style={{
+            width: `${responsiveWidth}px`,
+            height: `${responsiveHeight}px`,
+          }}
+        ></div>
+      </Popup>
+    </div>
+  );
+};
+
+export default FootnotePopup;

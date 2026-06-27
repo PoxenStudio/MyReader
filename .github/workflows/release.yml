@@ -1,0 +1,411 @@
+name: Release MyReader
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions: read-all
+
+jobs:
+  get-release:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.get-release.outputs.release_id }}
+      release_tag: ${{ steps.get-release.outputs.release_tag }}
+      release_note: ${{ steps.get-release-notes.outputs.release_note }}
+      release_version: ${{ steps.get-release-notes.outputs.release_version }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: setup node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - name: get version
+        run: echo "PACKAGE_VERSION=$(node -p "require('./app/package.json').version")" >> $GITHUB_ENV
+      - name: get release
+        id: get-release
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const { data } = await github.rest.repos.getLatestRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            })
+            core.setOutput('release_id', data.id);
+            core.setOutput('release_tag', data.tag_name);
+      - name: get release notes
+        id: get-release-notes
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('fs');
+            const version = require('./app/package.json').version;
+            const releaseNotesFileContent = fs.readFileSync('./app/release-notes.json', 'utf8');
+            const releaseNotes = JSON.parse(releaseNotesFileContent).releases[version] || {};
+            const notes = releaseNotes.notes || [];
+            const releaseNote = notes.map((note, index) => `${index + 1}. ${note}`).join(' ');
+            console.log('Formatted release note:', releaseNote);
+            core.setOutput('release_version', version);
+            core.setOutput('release_note', releaseNote);
+
+  update-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    needs: get-release
+
+    steps:
+      - name: update release
+        id: update-release
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          release_id: ${{ needs.get-release.outputs.release_id }}
+          release_tag: ${{ needs.get-release.outputs.release_tag }}
+          release_note: ${{ needs.get-release.outputs.release_note }}
+        with:
+          script: |
+            const { data } = await github.rest.repos.generateReleaseNotes({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: process.env.release_tag,
+            })
+            const notes = process.env.release_note.split(/\d+\.\s/).filter(Boolean);
+            const formattedNotes = notes.map(note => `* ${note.trim()}`).join("\n");
+            const body = `## Release Highlight\n${formattedNotes}\n\n${data.body}`;
+            github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: process.env.release_id,
+              body: body,
+              draft: false,
+              prerelease: false
+            })
+
+  build-koreader-plugin:
+    needs: get-release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+  build-tauri:
+    needs: get-release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - os: ubuntu-latest
+            release: android
+            rust_target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          - os: ubuntu-22.04
+            release: linux
+            arch: x86_64
+            rust_target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04-arm
+            release: linux
+            arch: aarch64
+            rust_target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            release: macos
+            arch: aarch64
+            rust_target: x86_64-apple-darwin,aarch64-apple-darwin
+            args: '--target universal-apple-darwin'
+          - os: windows-latest
+            release: windows
+            arch: x86_64
+            rust_target: x86_64-pc-windows-msvc
+            args: '--target x86_64-pc-windows-msvc --bundles nsis'
+          - os: windows-latest
+            release: windows
+            arch: aarch64
+            rust_target: aarch64-pc-windows-msvc
+            args: '--target aarch64-pc-windows-msvc --bundles nsis'
+
+    runs-on: ${{ matrix.config.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: initialize git submodules
+        run: git submodule update --init --recursive
+
+      - name: setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: setup node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: setup Java (for Android build only)
+        if: matrix.config.release == 'android'
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: setup Android SDK (for Android build only)
+        if: matrix.config.release == 'android'
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      - name: install NDK (for Android build only)
+        if: matrix.config.release == 'android'
+        run: sdkmanager "ndk;28.2.13676358"
+
+      - name: install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: copy pdfjs-dist and simplecc-dist to public directory
+        run: pnpm --filter @poxenstudio/myreader setup-vendors
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: ${{ matrix.config.rust_target }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.config.os }}-${{ matrix.config.release }}-${{ matrix.config.arch }}-cargo
+
+      - name: install dependencies (ubuntu only)
+        if: contains(matrix.config.os, 'ubuntu') && matrix.config.release != 'android' && matrix.config.arch != 'armhf'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig-dev libgtk-3-dev libwebkit2gtk-4.1 libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1 libjavascriptcoregtk-4.1-dev gir1.2-javascriptcoregtk-4.1 gir1.2-webkit2-4.1 libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: install dependencies (ubuntu only - armhf specific)
+        if: contains(matrix.config.os, 'ubuntu') && matrix.config.arch == 'armhf'
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig-dev:armhf libgtk-3-dev:armhf libwebkit2gtk-4.1-dev:armhf libappindicator3-dev:armhf librsvg2-dev:armhf gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+          echo 'PKG_CONFIG_ALLOW_CROSS=1' >> $GITHUB_ENV
+          echo 'PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig' >> $GITHUB_ENV
+          echo 'PKG_CONFIG_SYSROOT_DIR=/usr/arm-linux-gnueabihf' >> $GITHUB_ENV
+          echo 'CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc' >> $GITHUB_ENV
+          echo 'CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_RUSTFLAGS=--cfg=io_uring_skip_arch_check' >> $GITHUB_ENV
+
+      - name: create .env.local file for Next.js
+        run: |
+          echo "NEXT_PUBLIC_POSTHOG_KEY=${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}" >> .env.local
+          echo "NEXT_PUBLIC_POSTHOG_HOST=${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}" >> .env.local
+          echo "NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" >> .env.local
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" >> .env.local
+          echo "NEXT_PUBLIC_APP_PLATFORM=tauri" >> .env.local
+          cp .env.local app/.env.local
+
+      - name: build and upload Android apks
+        if: matrix.config.release == 'android'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cd app/
+          rm -rf src-tauri/gen/android
+          pnpm tauri android init
+          pnpm tauri icon ../../data/icons/myreader-book.png
+          git checkout .
+
+          pushd src-tauri/gen/android
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
+          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
+          base64 -d <<< "${{ secrets.ANDROID_KEY_BASE64 }}" > $RUNNER_TEMP/keystore.jks
+          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
+
+          popd
+          version=${{ needs.get-release.outputs.release_version }}
+          apk_path=src-tauri/gen/android/app/build/outputs/apk/universal/release
+          universial_apk=MyReader_${version}_universal.apk
+          arm64_apk=MyReader_${version}_arm64.apk
+          pnpm tauri android build
+          cp ${apk_path}/app-universal-release.apk $universial_apk
+          pnpm tauri android build -t aarch64
+          cp ${apk_path}/app-universal-release.apk $arm64_apk
+
+          echo "Uploading $universial_apk to GitHub release"
+          gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk --clobber
+          echo "Uploading $arm64_apk to GitHub release"
+          gh release upload ${{ needs.get-release.outputs.release_tag }} $arm64_apk --clobber
+          echo "Uploading signatures to GitHub release"
+          pnpm tauri signer sign $universial_apk
+          pnpm tauri signer sign $arm64_apk
+          gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk.sig --clobber
+          gh release upload ${{ needs.get-release.outputs.release_tag }} $arm64_apk.sig --clobber
+
+      - name: download and update latest.json for Android release
+        if: matrix.config.release == 'android'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd app/
+          # Use -f so curl fails on HTTP errors instead of writing the 404 body
+          # ("Not Found") into latest.json and clobbering the release asset with
+          # invalid JSON, which then breaks tauri-action's updater merge on every
+          # subsequent build.
+          if ! curl -fsSL https://github.com/poxenstudio/myreader/releases/latest/download/latest.json -o latest.json; then
+            echo "::error::Failed to download existing latest.json; aborting to avoid clobbering the release asset."
+            exit 1
+          fi
+          if ! jq empty latest.json 2>/dev/null; then
+            echo "::error::Existing latest.json is not valid JSON; aborting."
+            exit 1
+          fi
+
+          version=${{ needs.get-release.outputs.release_version }}
+          universial_apk_url="https://github.com/poxenstudio/myreader/releases/download/${{ needs.get-release.outputs.release_tag }}/MyReader_${version}_universal.apk"
+          arm64_apk_url="https://github.com/poxenstudio/myreader/releases/download/${{ needs.get-release.outputs.release_tag }}/MyReader_${version}_arm64.apk"
+
+          universial_sig=$(cat MyReader_${version}_universal.apk.sig)
+          arm64_sig=$(cat MyReader_${version}_arm64.apk.sig)
+
+          jq --arg url "$universial_apk_url" \
+              --arg sig "$universial_sig" \
+              '.platforms["android-universal"] = {signature: $sig, url: $url}' latest.json > tmp.$$.json && mv tmp.$$.json latest.json
+
+          jq --arg url "$arm64_apk_url" \
+              --arg sig "$arm64_sig" \
+              '.platforms["android-arm64"] = {signature: $sig, url: $url}' latest.json > tmp.$$.json && mv tmp.$$.json latest.json
+
+          echo "Uploading updated latest.json to GitHub release"
+          gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
+
+      - name: Override tauri-cli with custom AppImage format (Linux)
+        if: matrix.config.release == 'linux'
+        run: cargo install tauri-cli --git https://github.com/tauri-apps/tauri --branch feat/truly-portable-appimage --force
+
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        if: matrix.config.release != 'android'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NODE_OPTIONS: '--max-old-space-size=8192'
+        with:
+          projectPath: app
+          # On Linux, build with the Rust `cargo tauri` CLI installed in the
+          # step above so the new (truly-portable AppImage) bundler is used.
+          # Without this, tauri-action falls back to the npm @tauri-apps/cli.
+          tauriScript: ${{ matrix.config.release == 'linux' && 'cargo tauri' || '' }}
+          releaseId: ${{ needs.get-release.outputs.release_id }}
+          releaseBody: ${{ needs.get-release.outputs.release_note }}
+          args: ${{ matrix.config.args || '' }}
+
+      - name: upload release notes to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Uploading release notes to GitHub release"
+          gh release upload ${{ needs.get-release.outputs.release_tag }} app/release-notes.json --clobber
+
+      - name: build and upload portable binaries (Windows only)
+        if: matrix.config.os == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          echo "Building Portable Binaries"
+          pushd app/
+          echo "NEXT_PUBLIC_PORTABLE_APP=true" >> .env.local
+          pnpm tauri build ${{ matrix.config.args }}
+
+          popd
+          echo "Uploading Portable Binaries"
+          arch=${{ matrix.config.arch }}
+          version=${{ needs.get-release.outputs.release_version }}
+
+          if [ "$arch" = "x86_64" ]; then
+            bin_file="MyReader_${version}_x64-portable.exe"
+          elif [ "$arch" = "aarch64" ]; then
+            bin_file="MyReader_${version}_arm64-portable.exe"
+          else
+            echo "Unknown architecture: $arch"
+            exit 1
+          fi
+
+          exe_file="target/${{ matrix.config.rust_target }}/release/myreader.exe"
+          # Browsers on Windows won't download zip files that contain exe files
+          # so upload the exe files instead. This is totally stupid.
+          # powershell.exe -Command "Compress-Archive -Path $exe_file -DestinationPath $bin_file -Force"
+          cp $exe_file $bin_file
+
+          echo "Uploading $bin_file to GitHub release"
+          gh release upload ${{ needs.get-release.outputs.release_tag }} $bin_file --clobber
+
+          echo "Signing portable binary"
+          pushd app/
+          pnpm tauri signer sign "../../$bin_file"
+          popd
+          echo "Uploading signature to GitHub release"
+          gh release upload ${{ needs.get-release.outputs.release_tag }} $bin_file.sig --clobber
+
+      - name: download and update latest.json for Windows portable release
+        if: matrix.config.os == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # Use -f so curl fails on HTTP errors instead of writing the 404 body
+          # ("Not Found") into latest.json and clobbering the release asset with
+          # invalid JSON, which then breaks tauri-action's updater merge on every
+          # subsequent build.
+          if ! curl -fsSL https://github.com/poxenstudio/myreader/releases/latest/download/latest.json -o latest.json; then
+            echo "::error::Failed to download existing latest.json; aborting to avoid clobbering the release asset."
+            exit 1
+          fi
+          if ! jq empty latest.json 2>/dev/null; then
+            echo "::error::Existing latest.json is not valid JSON; aborting."
+            exit 1
+          fi
+
+          version=${{ needs.get-release.outputs.release_version }}
+          arch=${{ matrix.config.arch }}
+
+          if [ "$arch" = "x86_64" ]; then
+            bin_file="MyReader_${version}_x64-portable.exe"
+            platform_key="windows-x86_64-portable"
+          elif [ "$arch" = "aarch64" ]; then
+            bin_file="MyReader_${version}_arm64-portable.exe"
+            platform_key="windows-aarch64-portable"
+          else
+            echo "Unknown architecture: $arch"
+            exit 1
+          fi
+
+          portable_url="https://github.com/poxenstudio/myreader/releases/download/${{ needs.get-release.outputs.release_tag }}/$bin_file"
+          portable_sig=$(cat $bin_file.sig)
+
+          jq --arg url "$portable_url" \
+              --arg sig "$portable_sig" \
+              --arg key "$platform_key" \
+              '.platforms[$key] = {signature: $sig, url: $url}' latest.json > tmp.$$.json && mv tmp.$$.json latest.json
+
+          echo "Uploading updated latest.json to GitHub release"
+          gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
+
+  upload-to-r2:
+    needs: [get-release, build-tauri]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/upload-to-r2.yml
+    with:
+      tag: ${{ needs.get-release.outputs.release_tag }}
+    secrets: inherit

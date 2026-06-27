@@ -1,0 +1,127 @@
+use std::sync::OnceLock;
+
+/// Known e-ink device manufacturers and brands (case-insensitive matching)
+const EINK_MANUFACTURERS: &[&str] = &[
+    "onyx",       // BOOX devices
+    "boox",       // BOOX devices (alternate)
+    "amazon",     // Kindle devices
+    "kobo",       // Kobo e-readers
+    "remarkable", // reMarkable tablets
+    "pocketbook", // PocketBook e-readers
+    "boyue",      // Boyue/Likebook devices
+    "likebook",   // Likebook devices
+    "dasung",     // Dasung e-ink monitors
+    "bigme",      // Bigme e-readers
+    "hisense",    // Hisense e-ink phones (A5, A7, etc.)
+    "hanvon",     // Hanvon e-readers
+    "tolino",     // Tolino e-readers
+    "bookeen",    // Bookeen e-readers
+    "supernote",  // Supernote devices
+    "mobiscribe", // Mobiscribe e-readers
+    "xiaomi",     // Xiaomi InkPalm (needs model check)
+    "meebook",    // Meebook e-readers
+];
+
+/// Known e-ink device models (for manufacturers that also make non-e-ink devices)
+const EINK_MODELS: &[&str] = &[
+    "kindle",
+    "a5pro",
+    "a7cc", // Hisense e-ink models
+    "a7e",
+    "a9",
+    "inkpalm", // Xiaomi InkPalm
+    "eink",
+    "e-ink",
+    "paper",
+    "note air",
+    "note2",
+    "note3",
+    "note5",
+    "nova",
+    "poke",
+    "leaf",
+    "page",
+    "tab ultra",
+    "max lumi",
+];
+
+fn get_system_property(prop: &str) -> Option<String> {
+    use std::ffi::CString;
+    let name = CString::new(prop).ok()?;
+    let mut buf = [0u8; libc::PROP_VALUE_MAX as usize];
+    // SAFETY: __system_property_get writes at most PROP_VALUE_MAX bytes (including the
+    // trailing NUL) into the provided buffer and returns the number of bytes written
+    // excluding the NUL. `name` is a valid NUL-terminated C string for the duration
+    // of the call.
+    let len = unsafe {
+        libc::__system_property_get(name.as_ptr(), buf.as_mut_ptr() as *mut libc::c_char)
+    };
+    if len <= 0 {
+        return None;
+    }
+    let value = std::str::from_utf8(&buf[..len as usize]).ok()?;
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+/// Check if the current Android device is an e-ink device.
+///
+/// The result is cached on first call so subsequent calls are free.
+pub fn is_eink_device() -> bool {
+    static IS_EINK: OnceLock<bool> = OnceLock::new();
+    *IS_EINK.get_or_init(detect_eink_device)
+}
+
+fn detect_eink_device() -> bool {
+    // Get device manufacturer and model
+    let manufacturer = get_system_property("ro.product.manufacturer")
+        .or_else(|| get_system_property("ro.product.brand"))
+        .unwrap_or_default()
+        .to_lowercase();
+
+    let model = get_system_property("ro.product.model")
+        .or_else(|| get_system_property("ro.product.device"))
+        .unwrap_or_default()
+        .to_lowercase();
+
+    let device = get_system_property("ro.product.device")
+        .unwrap_or_default()
+        .to_lowercase();
+
+    // Check if manufacturer matches known e-ink manufacturers
+    for eink_manufacturer in EINK_MANUFACTURERS {
+        if manufacturer.contains(eink_manufacturer) {
+            // Special case for manufacturers that make both e-ink and non-e-ink devices
+            if *eink_manufacturer == "hisense" || *eink_manufacturer == "xiaomi" {
+                // Need to also check the model for these manufacturers
+                for eink_model in EINK_MODELS {
+                    if model.contains(eink_model) || device.contains(eink_model) {
+                        return true;
+                    }
+                }
+            } else {
+                return true;
+            }
+        }
+    }
+
+    // Check if model matches known e-ink models
+    for eink_model in EINK_MODELS {
+        if model.contains(eink_model) || device.contains(eink_model) {
+            return true;
+        }
+    }
+
+    // Check for e-ink specific system properties
+    if let Some(eink_support) = get_system_property("ro.eink.support") {
+        if eink_support == "1" || eink_support.to_lowercase() == "true" {
+            return true;
+        }
+    }
+
+    // Check for BOOX specific property
+    if get_system_property("ro.onyx.devicename").is_some() {
+        return true;
+    }
+
+    false
+}

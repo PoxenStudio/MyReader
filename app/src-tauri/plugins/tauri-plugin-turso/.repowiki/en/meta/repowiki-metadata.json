@@ -1,0 +1,126 @@
+{
+  "version": "2025-02-25",
+  "last_commit": "ef66553",
+  "knowledge_relations": [
+    {
+      "id": 1,
+      "source_id": "root-system-overview",
+      "target_id": "architecture-overview",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: root-system-overview -> architecture-overview",
+      "gmt_create": "2025-02-25T06:00:00.000000+08:00",
+      "gmt_modified": "2025-02-25T06:00:00.000000+08:00"
+    },
+    {
+      "id": 2,
+      "source_id": "root-system-overview",
+      "target_id": "backend-services",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: root-system-overview -> backend-services",
+      "gmt_create": "2025-02-25T06:00:00.000000+08:00",
+      "gmt_modified": "2025-02-25T06:00:00.000000+08:00"
+    },
+    {
+      "id": 3,
+      "source_id": "root-system-overview",
+      "target_id": "frontend-application",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: root-system-overview -> frontend-application",
+      "gmt_create": "2025-02-25T06:00:00.000000+08:00",
+      "gmt_modified": "2025-02-25T06:00:00.000000+08:00"
+    },
+    {
+      "id": 4,
+      "source_id": "root-system-overview",
+      "target_id": "getting-started-guide",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: root-system-overview -> getting-started-guide",
+      "gmt_create": "2025-02-25T06:00:00.000000+08:00",
+      "gmt_modified": "2025-02-25T06:00:00.000000+08:00"
+    },
+    {
+      "id": 5,
+      "source_id": "root-system-overview",
+      "target_id": "technology-stack",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: root-system-overview -> technology-stack",
+      "gmt_create": "2025-02-25T06:00:00.000000+08:00",
+      "gmt_modified": "2025-02-25T06:00:00.000000+08:00"
+    },
+    {
+      "id": 6,
+      "source_id": "architecture-overview",
+      "target_id": "backend-services",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "RELATED",
+      "extra": "Architecture describes backend implementation",
+      "gmt_create": "2025-02-25T06:00:00.000000+08:00",
+      "gmt_modified": "2025-02-25T06:00:00.000000+08:00"
+    },
+    {
+      "id": 7,
+      "source_id": "architecture-overview",
+      "target_id": "frontend-application",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "RELATED",
+      "extra": "Architecture describes frontend implementation",
+      "gmt_create": "2025-02-25T06:00:00.000000+08:00",
+      "gmt_modified": "2025-02-25T06:00:00.000000+08:00"
+    },
+    {
+      "id": 8,
+      "source_id": "getting-started-guide",
+      "target_id": "technology-stack",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "RELATED",
+      "extra": "Getting started requires understanding technology stack",
+      "gmt_create": "2025-02-25T06:00:00.000000+08:00",
+      "gmt_modified": "2025-02-25T06:00:00.000000+08:00"
+    }
+  ],
+  "wiki_items": [
+    {
+      "id": "root-system-overview",
+      "title": "System Overview",
+      "path": "content/System Overview.md"
+    },
+    {
+      "id": "architecture-overview",
+      "title": "Architecture",
+      "path": "content/Architecture/Architecture.md"
+    },
+    {
+      "id": "backend-services",
+      "title": "Backend Services",
+      "path": "content/Backend/Backend Services.md"
+    },
+    {
+      "id": "frontend-application",
+      "title": "Frontend Application",
+      "path": "content/Frontend/Frontend Application.md"
+    },
+    {
+      "id": "getting-started-guide",
+      "title": "Getting Started Guide",
+      "path": "content/Getting Started Guide.md"
+    },
+    {
+      "id": "technology-stack",
+      "title": "Technology Stack",
+      "path": "content/Technology Stack.md"
+    }
+  ]
+}

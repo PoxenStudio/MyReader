@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Traditional Chinese. Android resource qualifiers use the legacy
+  language+region form `values-zh-rTW/`. Hong Kong (zh-rHK) and Macao
+  (zh-rMO) speakers will also fall here over the default zh/ since they
+  use Traditional script.
+-->
+<resources>
+    <string name="webview_upgrade_outdated_message">Android System WebView 版本過舊，請更新或安裝該元件以確保此應用程式正常顯示。</string>
+</resources>

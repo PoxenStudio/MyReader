@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Visibility for the WebView candidate packages we probe at upgrade time.
+         Android 11+ blocks PackageManager.getPackageInfo() for any package not
+         declared here (or whitelisted globally with QUERY_ALL_PACKAGES). The
+         first entry is the only one we actually swap to; the rest are probed
+         purely so the diagnostic logs can show what's installed. -->
+    <queries>
+        <package android:name="com.google.android.webview" />
+        <package android:name="com.google.android.webview.beta" />
+        <package android:name="com.google.android.webview.dev" />
+        <package android:name="com.google.android.webview.canary" />
+        <package android:name="com.android.webview" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.huawei.webview" />
+    </queries>
+
+    <application>
+        <!-- App Startup's single ContentProvider runs registered Initializers
+             during process attach, before Application.onCreate. We declare it
+             here so consumers don't need any manifest edits; AGP merges this
+             into the host's manifest. tools:node="merge" is the default for
+             <provider> but is explicit here in case the host also pulls in
+             androidx.startup transitively. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="com.readest.webview_upgrade.WebViewUpgradeInitializer"
+                android:value="androidx.startup" />
+        </provider>
+    </application>
+</manifest>

@@ -1,0 +1,807 @@
+import clsx from 'clsx';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { convertBlobUrlToDataUrl, BookDoc, getDirection } from '@/libs/document';
+import { BOOK_IDS_SEPARATOR } from '@/services/constants';
+import { BookConfig, PageInfo } from '@/types/book';
+import { FoliateView, wrappedFoliateView } from '@/types/view';
+import { Insets } from '@/types/misc';
+import { useEnv } from '@/context/EnvContext';
+import { useThemeStore } from '@/store/themeStore';
+import { useReaderStore } from '@/store/readerStore';
+import { useBookDataStore } from '@/store/bookDataStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { useCustomFontStore } from '@/store/customFontStore';
+import { useParallelViewStore } from '@/store/parallelViewStore';
+import { useMouseEvent, useTouchEvent, useLongPressEvent } from '../hooks/useIframeEvents';
+import { useBrightnessGesture } from '../hooks/useBrightnessGesture';
+import BrightnessOverlay from './BrightnessOverlay';
+import { usePagination, viewPagination } from '../hooks/usePagination';
+import { useFoliateEvents } from '../hooks/useFoliateEvents';
+import { useProgressAutoSave } from '../hooks/useProgressAutoSave';
+import { useBackgroundTexture } from '@/hooks/useBackgroundTexture';
+import { useAutoFocus } from '@/hooks/useAutoFocus';
+import { useTranslation } from '@/hooks/useTranslation';
+import { useEinkMode } from '@/hooks/useEinkMode';
+import { useWebDAVSync } from '../hooks/useWebDAVSync';
+import { useNativeSync } from '../hooks/useNativeSync';
+import {
+  applyFixedlayoutStyles,
+  applyImageStyle,
+  applyScrollbarStyle,
+  applyScrollModeClass,
+  applyTableStyle,
+  applyTableTouchScroll,
+  applyThemeModeClass,
+  applyTranslationStyle,
+  getStyles,
+  getThemeCode,
+  keepTextAlignment,
+  transformStylesheet,
+} from '@/utils/style';
+import { mountAdditionalFonts, mountCustomFont } from '@/styles/fonts';
+import { layoutWarichu, relayoutWarichu } from '@/utils/warichu';
+import { getBookDirFromLanguage, getBookDirFromWritingMode, getBookHash } from '@/utils/book';
+import { getIndexFromCfi } from '@/utils/cfi';
+import { useUICSS } from '@/hooks/useUICSS';
+import {
+  handleKeydown,
+  handleKeyup,
+  handleMousedown,
+  handleMouseup,
+  handleClick,
+  handleWheel,
+  handleTouchStart,
+  handleTouchMove,
+  handleTouchEnd,
+  addLongPressListeners,
+} from '../utils/iframeEventHandlers';
+import { getMaxInlineSize } from '@/utils/config';
+import { getDirFromUILanguage } from '@/utils/rtl';
+import { isTauriAppPlatform } from '@/services/environment';
+import { TransformContext } from '@/services/transformers/types';
+import { transformContent } from '@/services/transformService';
+import { lockScreenOrientation } from '@/utils/bridge';
+import { useTextTranslation } from '../hooks/useTextTranslation';
+import { useBookCoverAutoSave } from '../hooks/useAutoSaveBookCover';
+import { manageSyntaxHighlighting } from '@/utils/highlightjs';
+import { getViewInsets } from '@/utils/insets';
+import { handleA11yNavigation } from '@/utils/a11y';
+import { isCJKLang } from '@/utils/lang';
+import { getLocale } from '@/utils/misc';
+import { isFontType } from '@/utils/font';
+import { ParagraphControl } from './paragraph';
+import Spinner from '@/components/Spinner';
+import ImageViewer from './ImageViewer';
+import TableViewer from './TableViewer';
+
+declare global {
+  interface Window {
+    eval(script: string): void;
+  }
+}
+
+const FoliateViewer: React.FC<{
+  bookKey: string;
+  bookDoc: BookDoc;
+  config: BookConfig;
+  gridInsets: Insets;
+  contentInsets: Insets;
+}> = ({ bookKey, bookDoc, config, gridInsets, contentInsets: insets }) => {
+  const _ = useTranslation();
+  const searchParams = useSearchParams();
+  const { appService, envConfig } = useEnv();
+  const { themeCode, isDarkMode } = useThemeStore();
+  const { settings } = useSettingsStore();
+  const { loadFont, loadCustomFonts, getLoadedFonts, getAvailableFonts } = useCustomFontStore();
+  const { getView, setView: setFoliateView, setViewInited, setProgress } = useReaderStore();
+  const setPreviewMode = useReaderStore((s) => s.setPreviewMode);
+  const { getViewState, getProgress, getViewSettings, setViewSettings } = useReaderStore();
+  const { getParallels } = useParallelViewStore();
+  const { getBookData } = useBookDataStore();
+  const { applyBackgroundTexture } = useBackgroundTexture();
+  const { applyEinkMode } = useEinkMode();
+  const { registerBrightnessListeners, overlayVisible, overlayLevel } =
+    useBrightnessGesture(bookKey);
+  const bookData = getBookData(bookKey);
+  const viewState = getViewState(bookKey);
+  const viewSettings = getViewSettings(bookKey);
+
+  const viewRef = useRef<FoliateView | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isViewCreated = useRef(false);
+  const doubleClickDisabled = useRef(!!viewSettings?.disableDoubleClick);
+  const [toastMessage, setToastMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [scrollMargins, setScrollMargins] = useState({ top: 0, bottom: 0 });
+  const docLoaded = useRef(false);
+
+  useAutoFocus<HTMLDivElement>({ ref: containerRef });
+
+  useEffect(() => {
+    const timer = setTimeout(() => setToastMessage(''), 2000);
+    return () => clearTimeout(timer);
+  }, [toastMessage]);
+
+  useUICSS(bookKey);
+  useProgressAutoSave(bookKey);
+  useBookCoverAutoSave(bookKey);
+  useWebDAVSync(bookKey);
+  useNativeSync(bookKey);
+  useTextTranslation(bookKey, viewRef.current);
+
+  const progressRelocateHandler = (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    const atEnd = viewRef.current?.renderer.atEnd || false;
+    const { current, next, total } = detail.location as PageInfo;
+    const currentPage = atEnd && total > 0 ? total - 1 : current;
+    const pageInfo = { current: currentPage, next, total };
+    setProgress(
+      bookKey,
+      detail.cfi,
+      detail.tocItem,
+      detail.section,
+      pageInfo,
+      detail.time,
+      detail.range,
+    );
+  };
+
+  const getDocTransformHandler = ({ width, height }: { width: number; height: number }) => {
+    return (event: Event) => {
+      const { detail } = event as CustomEvent;
+      detail.data = Promise.resolve(detail.data)
+        .then((data) => {
+          const viewSettings = getViewSettings(bookKey);
+          const bookData = getBookData(bookKey);
+          if (viewSettings && detail.type === 'text/css')
+            return transformStylesheet(data, width, height, viewSettings.vertical);
+          const isHtml = detail.type === 'application/xhtml+xml' || detail.type === 'text/html';
+          if (viewSettings && bookData && isHtml) {
+            const ctx: TransformContext = {
+              bookKey,
+              viewSettings,
+              width,
+              height,
+              isFixedLayout: bookData.isFixedLayout,
+              primaryLanguage: bookData.book?.primaryLanguage,
+              userLocale: getLocale(),
+              content: data,
+              sectionHref: detail.name,
+              transformers: [
+                'style',
+                'punctuation',
+                'footnote',
+                'whitespace',
+                'language',
+                'sanitizer',
+                'simplecc',
+                'proofread',
+                'warichu',
+              ],
+            };
+            return Promise.resolve(transformContent(ctx));
+          }
+          return data;
+        })
+        .catch((e) => {
+          console.error(new Error(`Failed to load ${detail.name}`, { cause: e }));
+          return '';
+        });
+    };
+  };
+
+  const skipToReadingPosition = useCallback(() => {
+    const view = getView(bookKey);
+    const progress = getProgress(bookKey);
+    if (view && progress) {
+      view.renderer.scrollToAnchor?.(progress.range);
+    }
+  }, [getView, getProgress, bookKey]);
+
+  const skipToNextSection = useCallback(() => {
+    const view = getView(bookKey);
+    const viewSettings = getViewSettings(bookKey);
+    viewPagination(view, viewSettings, 'down', 'section');
+  }, [bookKey]);
+
+  const docLoadHandler = (event: Event) => {
+    docLoaded.current = true;
+    if (bookDoc.rendition?.layout === 'pre-paginated') {
+      setLoading(false); // Fixed layout doesn't emit 'stabilized' event
+    }
+    const detail = (event as CustomEvent).detail;
+    console.log('doc index loaded:', detail.index);
+    if (detail.doc) {
+      const renderer = viewRef.current?.renderer;
+      const writingDir = renderer?.setStyles && getDirection(detail.doc);
+      const viewSettings = getViewSettings(bookKey)!;
+      const bookData = getBookData(bookKey)!;
+
+      const newVertical =
+        writingDir?.vertical || viewSettings.writingMode.includes('vertical') || false;
+      const newRtl =
+        writingDir?.rtl ||
+        getDirFromUILanguage() === 'rtl' ||
+        viewSettings.writingMode.includes('rl') ||
+        false;
+      if (viewSettings.vertical !== newVertical || viewSettings.rtl !== newRtl) {
+        viewSettings.vertical = newVertical;
+        viewSettings.rtl = newRtl;
+        setViewSettings(bookKey, { ...viewSettings });
+      }
+
+      if (!bookData?.isFixedLayout) {
+        mountAdditionalFonts(detail.doc, isCJKLang(bookData.book?.primaryLanguage));
+      }
+
+      getLoadedFonts().forEach((font) => {
+        mountCustomFont(detail.doc, font);
+      });
+
+      if (bookDoc.rendition?.layout === 'pre-paginated') {
+        applyFixedlayoutStyles(detail.doc, viewSettings);
+        const themeCode = getThemeCode();
+        if (bookData.book?.format === 'PDF' && themeCode && renderer) {
+          renderer.pageColors = viewSettings.applyThemeToPDF
+            ? {
+                background: themeCode.bg,
+                foreground: themeCode.fg,
+              }
+            : undefined;
+        }
+      }
+
+      applyImageStyle(detail.doc);
+      applyTableStyle(detail.doc);
+      applyTableTouchScroll(detail.doc);
+      applyThemeModeClass(detail.doc, isDarkMode);
+      applyScrollModeClass(detail.doc, viewSettings.scrolled || false);
+      applyScrollbarStyle(document, viewSettings.hideScrollbar || false);
+      keepTextAlignment(detail.doc);
+      handleA11yNavigation(viewRef.current, detail.doc, {
+        skipToLastPosCallback: skipToReadingPosition,
+        skipToLastPosLabel: _('Skip to last reading position'),
+        skipToNextSectionCallback: skipToNextSection,
+        skipToNextSectionLabel: _('End of this section. Continue to the next.'),
+      });
+
+      // Inline scripts in tauri platforms are not executed by default
+      if (viewSettings.allowScript && isTauriAppPlatform()) {
+        evalInlineScripts(detail.doc);
+      }
+
+      // only call on load if we have highlighting turned on.
+      if (viewSettings.codeHighlighting) {
+        manageSyntaxHighlighting(detail.doc, viewSettings);
+      }
+
+      setTimeout(() => {
+        const sectionIndex = detail.index;
+        const booknotes = config.booknotes || [];
+        booknotes
+          .filter(
+            (item) =>
+              !item.deletedAt &&
+              item.type === 'annotation' &&
+              item.style &&
+              getIndexFromCfi(item.cfi) === sectionIndex,
+          )
+          .map((annotation) => {
+            try {
+              viewRef.current?.addAnnotation(annotation);
+            } catch (err) {
+              console.warn('Failed to add annotation', { annotation, error: err });
+            }
+          });
+      }, 100);
+
+      if (!detail.doc.isEventListenersAdded) {
+        // listened events in iframes are posted to the main window
+        // and then used by useMouseEvent and useTouchEvent
+        // and more gesture events can be detected in the iframeEventHandlers
+        detail.doc.isEventListenersAdded = true;
+        detail.doc.addEventListener('keydown', handleKeydown.bind(null, bookKey));
+        detail.doc.addEventListener('keyup', handleKeyup.bind(null, bookKey));
+        detail.doc.addEventListener('mousedown', handleMousedown.bind(null, bookKey));
+        detail.doc.addEventListener('mouseup', handleMouseup.bind(null, bookKey));
+        detail.doc.addEventListener('click', handleClick.bind(null, bookKey, doubleClickDisabled));
+        detail.doc.addEventListener('wheel', handleWheel.bind(null, bookKey));
+        detail.doc.addEventListener('touchstart', handleTouchStart.bind(null, bookKey));
+        detail.doc.addEventListener('touchmove', handleTouchMove.bind(null, bookKey));
+        detail.doc.addEventListener('touchend', handleTouchEnd.bind(null, bookKey));
+        addLongPressListeners(bookKey, detail.doc);
+        registerBrightnessListeners(detail.doc);
+      }
+    }
+  };
+
+  const evalInlineScripts = (doc: Document) => {
+    if (doc.defaultView && doc.defaultView.frameElement) {
+      const iframe = doc.defaultView.frameElement as HTMLIFrameElement;
+      const scripts = doc.querySelectorAll('script:not([src])');
+      scripts.forEach((script, index) => {
+        const scriptContent = script.textContent || script.innerHTML;
+        try {
+          console.warn('Evaluating inline scripts in iframe');
+          iframe.contentWindow?.eval(scriptContent);
+        } catch (error) {
+          console.error(`Error executing iframe script ${index + 1}:`, error);
+        }
+      });
+    }
+  };
+
+  const stabilizedHandler = useCallback(() => {
+    setLoading(false);
+    // Layout/relayout warichu after paginator has set column-width via columnize()
+    const contents = viewRef.current?.renderer?.getContents?.() || [];
+    for (const { doc } of contents) {
+      if (doc) {
+        const hasPending = doc.querySelectorAll('.warichu-pending').length > 0;
+        const hasExisting = doc.querySelectorAll('.warichu-head').length > 0;
+        if (hasPending) {
+          layoutWarichu(doc);
+        } else if (hasExisting) {
+          relayoutWarichu(doc);
+        }
+      }
+    }
+  }, []);
+
+  const docRelocateHandler = (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    if (detail.reason !== 'scroll' && detail.reason !== 'page') return;
+
+    // First user-initiated navigation after a deep-link landing — promote
+    // the preview into the real reading position. Subsequent progress writes
+    // can flow normally.
+    setPreviewMode(bookKey, false);
+
+    const parallelViews = getParallels(bookKey);
+    if (parallelViews && parallelViews.size > 0) {
+      parallelViews.forEach((key) => {
+        if (key !== bookKey) {
+          const target = getView(key)?.renderer;
+          if (target) {
+            target.goTo?.({ index: detail.index, anchor: detail.fraction });
+          }
+        }
+      });
+    }
+  };
+
+  const { handlePageFlip } = usePagination(bookKey, viewRef, containerRef);
+  const mouseHandlers = useMouseEvent(bookKey, handlePageFlip);
+  const touchHandlers = useTouchEvent(bookKey);
+
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedTableHtml, setSelectedTableHtml] = useState<string | null>(null);
+  const [imageList, setImageList] = useState<{ src: string; cfi: string | null }[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
+
+  const handleImagePress = useCallback(async (src: string) => {
+    try {
+      // Get all images from the current document
+      const docs = viewRef.current?.renderer.getContents();
+      const allImages: { src: string; cfi: string | null }[] = [];
+
+      docs?.forEach(({ doc, index }) => {
+        const elements = doc.querySelectorAll('img, svg');
+        elements.forEach((el) => {
+          if (index === undefined) return;
+          if (el.localName === 'img') {
+            const img = el as HTMLImageElement;
+            if (img.src && img.parentNode) {
+              const range = doc.createRange();
+              range.selectNodeContents(img);
+              const cfi = viewRef.current?.getCFI(index, range) || null;
+              allImages.push({ src: img.src, cfi });
+            }
+          } else if (el.localName === 'svg') {
+            const svg = el as unknown as SVGSVGElement;
+            const svgImage = svg.querySelector('image');
+            const href =
+              svgImage?.getAttribute('href') ||
+              svgImage?.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+            if (href) {
+              const range = doc.createRange();
+              range.selectNodeContents(svg);
+              const cfi = viewRef.current?.getCFI(index, range) || null;
+              allImages.push({ src: href, cfi });
+            }
+          }
+        });
+      });
+
+      // Find the index of the pressed image
+      const index = allImages.findIndex((img) => img.src === src);
+
+      setImageList(allImages);
+      setCurrentImageIndex(index >= 0 ? index : 0);
+
+      const dataUrl = await convertBlobUrlToDataUrl(src);
+      setSelectedImage(dataUrl);
+    } catch (error) {
+      console.error('Failed to load image:', error);
+    }
+  }, []);
+
+  const handleTablePress = useCallback((html: string) => {
+    setSelectedTableHtml(html);
+  }, []);
+
+  const handlePreviousImage = useCallback(async () => {
+    if (currentImageIndex > 0 && imageList.length > 0) {
+      const newIndex = currentImageIndex - 1;
+      setCurrentImageIndex(newIndex);
+      try {
+        const { src, cfi } = imageList[newIndex]!;
+        const dataUrl = await convertBlobUrlToDataUrl(src);
+        setSelectedImage(dataUrl);
+        if (cfi && viewRef.current) {
+          viewRef.current?.goTo(cfi);
+        }
+      } catch (error) {
+        console.error('Failed to load previous image:', error);
+      }
+    }
+  }, [currentImageIndex, imageList]);
+
+  const handleNextImage = useCallback(async () => {
+    if (currentImageIndex < imageList.length - 1 && imageList.length > 0) {
+      const newIndex = currentImageIndex + 1;
+      setCurrentImageIndex(newIndex);
+      try {
+        const { src, cfi } = imageList[newIndex]!;
+        const dataUrl = await convertBlobUrlToDataUrl(src);
+        setSelectedImage(dataUrl);
+        if (cfi && viewRef.current) {
+          viewRef.current?.goTo(cfi);
+        }
+      } catch (error) {
+        console.error('Failed to load next image:', error);
+      }
+    }
+  }, [currentImageIndex, imageList]);
+
+  const handleCloseImage = useCallback(() => {
+    setSelectedImage(null);
+    setImageList([]);
+    setCurrentImageIndex(0);
+  }, []);
+
+  useLongPressEvent(bookKey, handleImagePress, handleTablePress);
+
+  useFoliateEvents(viewRef.current, {
+    onLoad: docLoadHandler,
+    onStabilized: stabilizedHandler,
+    onRelocate: progressRelocateHandler,
+    onRendererRelocate: docRelocateHandler,
+  });
+
+  useEffect(() => {
+    if (isViewCreated.current) return;
+    isViewCreated.current = true;
+
+    setTimeout(() => setLoading(true), 200);
+
+    const openBook = async () => {
+      console.log('Opening book', bookKey);
+      await import('foliate-js/view.js');
+      const view = wrappedFoliateView(document.createElement('foliate-view') as FoliateView);
+      view.id = `foliate-view-${bookKey}`;
+      containerRef.current?.appendChild(view);
+
+      const viewSettings = getViewSettings(bookKey)!;
+      const writingMode = viewSettings.writingMode;
+      if (writingMode) {
+        const settingsDir = getBookDirFromWritingMode(writingMode);
+        const languageDir = getBookDirFromLanguage(bookDoc.metadata.language);
+        if (settingsDir !== 'auto') {
+          bookDoc.dir = settingsDir;
+        } else if (languageDir !== 'auto') {
+          bookDoc.dir = languageDir;
+        }
+      }
+
+      if (bookDoc.rendition?.layout === 'pre-paginated' && bookDoc.sections) {
+        bookDoc.rendition.spread = viewSettings.spreadMode;
+        const coverSide = bookDoc.dir === 'rtl' ? 'right' : 'left';
+        bookDoc.sections[0]!.pageSpread = viewSettings.keepCoverSpread ? '' : coverSide;
+      }
+
+      await view.open(bookDoc);
+      // make sure we can listen renderer events after opening book
+      viewRef.current = view;
+      setFoliateView(bookKey, view);
+
+      const { book } = view;
+
+      book.transformTarget?.addEventListener('load', async (event: Event) => {
+        const { detail } = event as CustomEvent<{
+          isScript: boolean;
+          type: string;
+          href: string;
+          url?: string;
+          allow?: boolean;
+        }>;
+        if (detail.isScript) {
+          detail.allow = viewSettings.allowScript ?? false;
+        }
+        if (isFontType(detail.type) && detail.href?.startsWith('fonts/')) {
+          const fontFileName = detail.href.split('/').pop()?.toLowerCase();
+          getAvailableFonts().forEach(async (font) => {
+            const customFontFileName = font.path.split('/').pop()?.toLowerCase();
+            if (fontFileName && fontFileName === customFontFileName) {
+              if (!font.loaded) {
+                const loadedFont = await loadFont(envConfig, font.id);
+                font.blobUrl = loadedFont?.blobUrl;
+              }
+              if (font.blobUrl) {
+                detail.url = font.blobUrl;
+              }
+            }
+          });
+        }
+      });
+      const viewWidth = appService?.isMobile ? screen.width : window.innerWidth;
+      const viewHeight = appService?.isMobile ? screen.height : window.innerHeight;
+      const width = viewWidth - insets.left - insets.right;
+      const height = viewHeight - insets.top - insets.bottom;
+      book.transformTarget?.addEventListener('data', getDocTransformHandler({ width, height }));
+      view.renderer.setStyles?.(getStyles(viewSettings, undefined, getLoadedFonts()));
+      applyTranslationStyle(viewSettings);
+
+      doubleClickDisabled.current = viewSettings.disableDoubleClick!;
+      const animated = viewSettings.animated!;
+      const eink = viewSettings.isEink!;
+      const maxColumnCount = viewSettings.maxColumnCount!;
+      const maxInlineSize = getMaxInlineSize(viewSettings);
+      const maxBlockSize = viewSettings.maxBlockSize!;
+      const screenOrientation = viewSettings.screenOrientation!;
+      if (appService?.isMobileApp) {
+        await lockScreenOrientation({ orientation: screenOrientation });
+      }
+      if (animated) {
+        view.renderer.setAttribute('animated', '');
+      } else {
+        view.renderer.removeAttribute('animated');
+      }
+      if (viewSettings.disableSwipe) {
+        view.renderer.setAttribute('no-swipe', '');
+      } else {
+        view.renderer.removeAttribute('no-swipe');
+      }
+      if (appService?.isAndroidApp) {
+        if (eink) {
+          view.renderer.setAttribute('eink', '');
+        } else {
+          view.renderer.removeAttribute('eink');
+        }
+        applyEinkMode(eink);
+      }
+      if (bookDoc?.rendition?.layout === 'pre-paginated') {
+        view.renderer.setAttribute('zoom', viewSettings.zoomMode);
+        view.renderer.setAttribute('spread', viewSettings.spreadMode);
+        view.renderer.setAttribute('scale-factor', viewSettings.zoomLevel);
+      } else {
+        view.renderer.setAttribute('max-column-count', maxColumnCount);
+        view.renderer.setAttribute('max-inline-size', `${maxInlineSize}px`);
+        view.renderer.setAttribute('max-block-size', `${maxBlockSize}px`);
+      }
+      applyMarginAndGap();
+
+      // If the URL carries ?cfi=... (e.g. opened from a deep link / annotation
+      // export link), use it as the initial location instead of the saved one.
+      // Only applies to the primary book — first id in the route's `ids` —
+      // so parallel views don't all jump to the same CFI.
+      const cfiParam = searchParams?.get('cfi');
+      const idsParam =
+        searchParams?.get('ids') ?? window.location.pathname.split('/reader/')[1] ?? '';
+      const primaryId = idsParam.split(BOOK_IDS_SEPARATOR).filter(Boolean)[0];
+      const thisId = getBookHash(bookKey);
+      const overrideLocation = cfiParam && primaryId === thisId ? cfiParam : null;
+
+      const lastLocation = overrideLocation ?? config.location;
+      if (lastLocation) {
+        await view.init({ lastLocation });
+      } else {
+        await view.goToFraction(0);
+      }
+      setViewInited(bookKey, true);
+
+      // The reader is showing a deep-link target, not the user's actual reading
+      // position. Mark the view as a preview so progress writers (auto-save,
+      // WebDAV sync) skip until the user takes a reading action. The
+      // flag clears on the first user-initiated relocate (page / scroll) in
+      // docRelocateHandler below.
+      if (overrideLocation) {
+        setPreviewMode(bookKey, true);
+      }
+    };
+
+    openBook();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const applyMarginAndGap = () => {
+    const viewSettings = getViewSettings(bookKey)!;
+    const viewState = getViewState(bookKey);
+    const viewInsets = getViewInsets(viewSettings);
+    const showDoubleBorder = viewSettings.vertical && viewSettings.doubleBorder;
+    const showDoubleBorderHeader = showDoubleBorder && viewSettings.showHeader;
+    const showDoubleBorderFooter = showDoubleBorder && viewSettings.showFooter;
+    const showTopHeader = viewSettings.showHeader && !viewSettings.vertical;
+    const showBottomFooter = viewSettings.showFooter && !viewSettings.vertical;
+    const moreTopInset = showTopHeader ? Math.max(0, 16 - insets.top) : 0;
+    const ttsBarHeight =
+      viewState?.ttsEnabled && viewSettings.showTTSBar ? 52 + gridInsets.bottom * 0.33 : 0;
+    const moreBottomInset = showBottomFooter
+      ? Math.max(0, Math.max(ttsBarHeight, 16) - insets.bottom)
+      : Math.max(0, ttsBarHeight);
+    const moreRightInset = showDoubleBorderHeader ? 32 : 0;
+    const moreLeftInset = showDoubleBorderFooter ? 32 : 0;
+    const topMargin = (showTopHeader ? insets.top : viewInsets.top) + moreTopInset;
+    const rightMargin = insets.right + moreRightInset;
+    const bottomMargin = (showBottomFooter ? insets.bottom : viewInsets.bottom) + moreBottomInset;
+    const leftMargin = insets.left + moreLeftInset;
+    viewRef.current?.renderer.setAttribute('margin-top', `${topMargin}px`);
+    viewRef.current?.renderer.setAttribute('margin-right', `${rightMargin}px`);
+    viewRef.current?.renderer.setAttribute('margin-bottom', `${bottomMargin}px`);
+    viewRef.current?.renderer.setAttribute('margin-left', `${leftMargin}px`);
+
+    if (viewSettings.scrolled) {
+      const headerVisible = showTopHeader;
+      const footerVisible = showBottomFooter;
+      const safeBottomPadding = appService?.hasSafeAreaInset ? gridInsets.bottom * 0.33 : 0;
+      const footerBarHeight = safeBottomPadding + viewSettings.marginBottomPx;
+      const scrollTop = headerVisible ? gridInsets.top + viewSettings.marginTopPx : 0;
+      const scrollBottom = footerVisible ? Math.max(footerBarHeight, ttsBarHeight) : ttsBarHeight;
+      setScrollMargins({ top: scrollTop, bottom: scrollBottom });
+    } else {
+      setScrollMargins({ top: 0, bottom: 0 });
+    }
+    viewRef.current?.renderer.setAttribute('gap', `${viewSettings.gapPercent}%`);
+    if (viewSettings.scrolled) {
+      viewRef.current?.renderer.setAttribute('flow', 'scrolled');
+      if (viewSettings.noContinuousScroll) {
+        viewRef.current?.renderer.setAttribute('no-continuous-scroll', '');
+      } else {
+        viewRef.current?.renderer.removeAttribute('no-continuous-scroll');
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (viewRef.current && viewRef.current.renderer) {
+      const renderer = viewRef.current.renderer;
+      const viewSettings = getViewSettings(bookKey)!;
+      viewRef.current.renderer.setStyles?.(getStyles(viewSettings, undefined, getLoadedFonts()));
+      const docs = viewRef.current.renderer.getContents();
+      docs.forEach(({ doc }) => {
+        if (bookDoc.rendition?.layout === 'pre-paginated') {
+          applyFixedlayoutStyles(doc, viewSettings);
+        }
+        applyThemeModeClass(doc, isDarkMode);
+        applyScrollModeClass(doc, viewSettings.scrolled || false);
+        applyScrollbarStyle(document, viewSettings.hideScrollbar || false);
+      });
+
+      if (bookData?.book?.format === 'PDF' && themeCode && renderer) {
+        renderer.pageColors = viewSettings.applyThemeToPDF
+          ? {
+              background: themeCode.bg,
+              foreground: themeCode.fg,
+            }
+          : undefined;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    themeCode,
+    isDarkMode,
+    viewSettings?.scrolled,
+    viewSettings?.overrideColor,
+    viewSettings?.invertImgColorInDark,
+    viewSettings?.applyThemeToPDF,
+    viewSettings?.hideScrollbar,
+  ]);
+
+  useEffect(() => {
+    const mountCustomFonts = async () => {
+      await loadCustomFonts(envConfig);
+      getLoadedFonts().forEach((font) => {
+        mountCustomFont(document, font);
+        const docs = viewRef.current?.renderer.getContents();
+        docs?.forEach(({ doc }) => mountCustomFont(doc, font));
+      });
+    };
+    if (settings.customFonts) {
+      mountCustomFonts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.customFonts, envConfig]);
+
+  useEffect(() => {
+    if (!viewSettings) return;
+    applyBackgroundTexture(envConfig, viewSettings);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    viewSettings?.backgroundTextureId,
+    viewSettings?.backgroundOpacity,
+    viewSettings?.backgroundSize,
+    applyBackgroundTexture,
+  ]);
+
+  useEffect(() => {
+    if (viewRef.current && viewRef.current.renderer) {
+      doubleClickDisabled.current = !!viewSettings?.disableDoubleClick;
+    }
+  }, [viewSettings?.disableDoubleClick]);
+
+  useEffect(() => {
+    if (viewRef.current && viewRef.current.renderer && viewSettings) {
+      applyMarginAndGap();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    insets.top,
+    insets.right,
+    insets.bottom,
+    insets.left,
+    viewSettings?.doubleBorder,
+    viewSettings?.showHeader,
+    viewSettings?.showFooter,
+    viewSettings?.showTTSBar,
+    viewSettings?.scrolled,
+    viewSettings?.noContinuousScroll,
+    viewState?.ttsEnabled,
+  ]);
+
+  return (
+    <>
+      {selectedImage && (
+        <ImageViewer
+          gridInsets={gridInsets}
+          src={selectedImage}
+          onClose={handleCloseImage}
+          onPrevious={currentImageIndex > 0 ? handlePreviousImage : undefined}
+          onNext={currentImageIndex < imageList.length - 1 ? handleNextImage : undefined}
+        />
+      )}
+      {selectedTableHtml && (
+        <TableViewer
+          gridInsets={gridInsets}
+          html={selectedTableHtml}
+          isDarkMode={isDarkMode}
+          onClose={() => setSelectedTableHtml(null)}
+        />
+      )}
+      <div
+        ref={containerRef}
+        role='main'
+        aria-label={_('Book Content')}
+        className={clsx(
+          'foliate-viewer absolute h-[100%] w-[100%] focus:outline-none',
+          viewState?.loading && 'bg-base-100',
+        )}
+        style={{
+          paddingTop: scrollMargins.top,
+          paddingBottom: scrollMargins.bottom,
+        }}
+        {...mouseHandlers}
+        {...touchHandlers}
+      />
+      <BrightnessOverlay visible={overlayVisible} level={overlayLevel} />
+      <ParagraphControl bookKey={bookKey} viewRef={viewRef} gridInsets={gridInsets} />
+      {((!docLoaded.current && loading) || viewState?.loading) && (
+        <div className='absolute left-0 top-0 z-10 flex h-full w-full items-center justify-center'>
+          <Spinner loading={true} />
+        </div>
+      )}
+    </>
+  );
+};
+
+export default FoliateViewer;

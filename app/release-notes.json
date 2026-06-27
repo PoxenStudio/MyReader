@@ -1,0 +1,8 @@
+{
+  "releases": {
+    "0.1.0": {
+      "date": "2026-06-28",
+      "notes": ["Initial release"]
+    }
+  }
+}

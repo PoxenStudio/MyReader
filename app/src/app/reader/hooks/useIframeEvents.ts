@@ -1,0 +1,333 @@
+import { useEffect, useRef } from 'react';
+import { useReaderStore } from '@/store/readerStore';
+import { useBookDataStore } from '@/store/bookDataStore';
+import { eventDispatcher } from '@/utils/event';
+import { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL } from '@/services/constants';
+import { createWheelGestureDetector } from '@/app/reader/utils/wheelGesture';
+import { dispatchTouchInterceptors, TouchDetail } from './useTouchInterceptor';
+
+export const useMouseEvent = (
+  bookKey: string,
+  handlePageFlip: (msg: MessageEvent | React.MouseEvent<HTMLDivElement, MouseEvent>) => void,
+) => {
+  const { hoveredBookKey } = useReaderStore();
+  // Keep the latest handlePageFlip in a ref so the wheel-driven flip path
+  // always invokes the most recent closure, independent of when listeners
+  // were registered.
+  const handlePageFlipRef = useRef(handlePageFlip);
+  useEffect(() => {
+    handlePageFlipRef.current = handlePageFlip;
+  }, [handlePageFlip]);
+  // Filters the raw wheel stream so a touch-surface mouse (e.g. Magic Mouse)
+  // — which emits a flood of tiny events plus an inertial momentum tail for
+  // one physical gesture — flips exactly one page instead of cascading
+  // through several. See wheelGesture.ts.
+  const wheelDetectorRef = useRef<ReturnType<typeof createWheelGestureDetector> | null>(null);
+  if (!wheelDetectorRef.current) {
+    wheelDetectorRef.current = createWheelGestureDetector();
+  }
+  const handleMouseEvent = (msg: MessageEvent | React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+    if (msg instanceof MessageEvent) {
+      if (msg.data && msg.data.bookKey === bookKey) {
+        if (msg.data.type === 'iframe-wheel') {
+          if (msg.data.ctrlKey) {
+            // Pinch/ctrl-wheel zoom is not a page-turn gesture — drop any
+            // travel accumulated so far so it can't bleed into a later flip.
+            wheelDetectorRef.current!.reset();
+            if (msg.data.deltaY > 0) {
+              eventDispatcher.dispatch('zoom-out', { factor: Math.abs(msg.data.deltaY) / 100 });
+            } else if (msg.data.deltaY < 0) {
+              eventDispatcher.dispatch('zoom-in', { factor: Math.abs(msg.data.deltaY) / 100 });
+            }
+          } else {
+            const flip = wheelDetectorRef.current!.feed({
+              deltaX: msg.data.deltaX ?? 0,
+              deltaY: msg.data.deltaY ?? 0,
+              deltaMode: msg.data.deltaMode ?? 0,
+              timeStamp: Date.now(),
+            });
+            if (flip) {
+              handlePageFlipRef.current(
+                new MessageEvent('message', {
+                  data: { ...msg.data, deltaX: flip.deltaX, deltaY: flip.deltaY },
+                }),
+              );
+            }
+          }
+        } else {
+          handlePageFlip(msg);
+        }
+      }
+    } else if (msg.type !== 'wheel') {
+      handlePageFlip(msg);
+    }
+  };
+
+  useEffect(() => {
+    window.addEventListener('message', handleMouseEvent);
+    return () => {
+      window.removeEventListener('message', handleMouseEvent);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookKey, hoveredBookKey]);
+
+  return {
+    onClick: handlePageFlip,
+    onWheel: handleMouseEvent,
+  };
+};
+
+export const useLongPressEvent = (
+  bookKey: string,
+  handleImagePress: (src: string) => void,
+  handleTablePress: (html: string) => void,
+) => {
+  const handleLongPress = (msg: MessageEvent) => {
+    if (msg.data && msg.data.bookKey === bookKey && msg.data.type === 'iframe-long-press') {
+      if (msg.data.elementType === 'image') {
+        handleImagePress(msg.data.src);
+      } else if (msg.data.elementType === 'table') {
+        handleTablePress(msg.data.html);
+      }
+    }
+  };
+
+  useEffect(() => {
+    window.addEventListener('message', handleLongPress);
+    return () => {
+      window.removeEventListener('message', handleLongPress);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookKey]);
+};
+
+interface IframeTouch {
+  clientX: number;
+  clientY: number;
+  screenX: number;
+  screenY: number;
+}
+
+interface IframeTouchEvent {
+  timeStamp: number;
+  targetTouches: IframeTouch[];
+}
+
+export const useTouchEvent = (bookKey: string) => {
+  const { getBookData } = useBookDataStore();
+  const { hoveredBookKey, setHoveredBookKey, getViewSettings, getView } = useReaderStore();
+
+  const touchStartRef = useRef<IframeTouch | null>(null);
+  const touchEndRef = useRef<IframeTouch | null>(null);
+  const touchStartTimeRef = useRef<number | null>(null);
+  const touchEndTimeRef = useRef<number | null>(null);
+  const touchConsumedRef = useRef(false);
+  const isPinchingRef = useRef(false);
+  const initialPinchDistRef = useRef(0);
+  const initialZoomRef = useRef(100);
+  const lastPinchRatioRef = useRef(1);
+
+  const getTouchDistance = (t0: IframeTouch, t1: IframeTouch) => {
+    // Use screenX/screenY instead of clientX/clientY because pinchZoom
+    // applies a CSS transform to the iframe's parent, which changes the
+    // iframe's coordinate space and causes clientX/clientY to oscillate
+    const dx = t1.screenX - t0.screenX;
+    const dy = t1.screenY - t0.screenY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const buildTouchDetail = (
+    phase: 'start' | 'move' | 'end',
+    touch: IframeTouch,
+    touchStart: IframeTouch,
+    startTime: number | null,
+    endTime: number | null,
+  ): TouchDetail => ({
+    phase,
+    touch: { screenX: touch.screenX, screenY: touch.screenY },
+    touchStart: { screenX: touchStart.screenX, screenY: touchStart.screenY },
+    deltaX: touch.screenX - touchStart.screenX,
+    deltaY: touch.screenY - touchStart.screenY,
+    deltaT: endTime && startTime ? endTime - startTime : 0,
+  });
+
+  const onTouchStart = (e: IframeTouchEvent | React.TouchEvent<HTMLDivElement>) => {
+    const t0 = e.targetTouches[0] as IframeTouch | undefined;
+    const t1 = e.targetTouches[1] as IframeTouch | undefined;
+    if (t0 && t1) {
+      const bookData = getBookData(bookKey);
+      if (bookData?.isFixedLayout) {
+        isPinchingRef.current = true;
+        initialPinchDistRef.current = getTouchDistance(t0, t1);
+        initialZoomRef.current = getViewSettings(bookKey)?.zoomLevel ?? 100;
+        lastPinchRatioRef.current = 1;
+        touchStartRef.current = null;
+        touchEndRef.current = null;
+        return;
+      }
+    }
+    if (!t0) return;
+    touchStartRef.current = t0;
+    touchStartTimeRef.current = 'timeStamp' in e ? e.timeStamp : Date.now();
+    touchConsumedRef.current = false;
+    const detail = buildTouchDetail(
+      'start',
+      t0,
+      t0,
+      touchStartTimeRef.current,
+      touchStartTimeRef.current,
+    );
+    dispatchTouchInterceptors(bookKey, detail);
+  };
+
+  const onTouchMove = (e: IframeTouchEvent | React.TouchEvent<HTMLDivElement>) => {
+    const t0 = e.targetTouches[0] as IframeTouch | undefined;
+    const t1 = e.targetTouches[1] as IframeTouch | undefined;
+    if (isPinchingRef.current && t0 && t1) {
+      const currentDist = getTouchDistance(t0, t1);
+      if (initialPinchDistRef.current > 0) {
+        const ratio = currentDist / initialPinchDistRef.current;
+        lastPinchRatioRef.current = ratio;
+        const renderer = getView(bookKey)?.renderer;
+        renderer?.pinchZoom?.(ratio);
+      }
+      return;
+    }
+    if (!touchStartRef.current) return;
+    const touch = t0;
+    if (touch) {
+      touchEndRef.current = touch;
+      touchEndTimeRef.current = 'timeStamp' in e ? e.timeStamp : Date.now();
+      const detail = buildTouchDetail(
+        'move',
+        touch,
+        touchStartRef.current,
+        touchStartTimeRef.current,
+        touchEndTimeRef.current,
+      );
+      if (dispatchTouchInterceptors(bookKey, detail)) {
+        touchConsumedRef.current = true;
+        return;
+      }
+    }
+    if (touchConsumedRef.current) return;
+    const { current: touchStart } = touchStartRef;
+    const { current: touchEnd } = touchEndRef;
+    if (hoveredBookKey && touchEnd) {
+      const viewSettings = getViewSettings(bookKey)!;
+      const deltaY = touchEnd.screenY - touchStart.screenY;
+      const deltaX = touchEnd.screenX - touchStart.screenX;
+      if (!viewSettings!.scrolled && !viewSettings!.vertical) {
+        if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+          setHoveredBookKey(null);
+        }
+      } else {
+        setHoveredBookKey(null);
+      }
+    }
+  };
+
+  const onTouchEnd = (e: IframeTouchEvent | React.TouchEvent<HTMLDivElement>) => {
+    if (isPinchingRef.current) {
+      const t0 = e.targetTouches[0] as IframeTouch | undefined;
+      const t1 = e.targetTouches[1] as IframeTouch | undefined;
+      if (t0 && t1) return; // still pinching with 2+ fingers
+      isPinchingRef.current = false;
+      const renderer = getView(bookKey)?.renderer;
+      if (renderer && initialPinchDistRef.current > 0) {
+        renderer.pinchEnd?.();
+        const newZoom = Math.round(initialZoomRef.current * lastPinchRatioRef.current);
+        const clampedZoom = Math.max(MIN_ZOOM_LEVEL, Math.min(MAX_ZOOM_LEVEL, newZoom));
+        eventDispatcher.dispatch('pinch-zoom', { zoomLevel: clampedZoom });
+      }
+      touchStartRef.current = null;
+      touchEndRef.current = null;
+      return;
+    }
+    if (!touchStartRef.current) return;
+
+    const touch = e.targetTouches[0];
+    if (touch) {
+      touchEndRef.current = touch;
+      touchEndTimeRef.current = 'timeStamp' in e ? e.timeStamp : Date.now();
+    }
+
+    const { current: touchStart } = touchStartRef;
+    const { current: touchEnd } = touchEndRef;
+
+    // Dispatch end to interceptors, then check if the gesture was consumed
+    if (touchEnd && touchStart) {
+      const detail = buildTouchDetail(
+        'end',
+        touchEnd,
+        touchStart,
+        touchStartTimeRef.current,
+        touchEndTimeRef.current,
+      );
+      dispatchTouchInterceptors(bookKey, detail);
+    }
+
+    if (touchConsumedRef.current) {
+      touchConsumedRef.current = false;
+      touchStartRef.current = null;
+      touchEndRef.current = null;
+      return;
+    }
+
+    // Gesture was not consumed — handle hover bar toggle
+    if (touchEnd && touchStart) {
+      const windowWidth = window.innerWidth;
+      const deltaY = touchEnd.screenY - touchStart.screenY;
+      const deltaX = touchEnd.screenX - touchStart.screenX;
+      if (
+        deltaY < -10 &&
+        Math.abs(deltaY) > Math.abs(deltaX) * 2 &&
+        Math.abs(deltaX) < windowWidth * 0.3
+      ) {
+        const viewSettings = getViewSettings(bookKey)!;
+        const bookData = getBookData(bookKey)!;
+        if (
+          !viewSettings!.scrolled &&
+          !viewSettings!.vertical &&
+          (!bookData.isFixedLayout || viewSettings.zoomLevel <= 100)
+        ) {
+          setHoveredBookKey(hoveredBookKey ? null : bookKey);
+        }
+      } else {
+        if (hoveredBookKey) {
+          setHoveredBookKey(null);
+        }
+      }
+    }
+
+    touchConsumedRef.current = false;
+    touchStartRef.current = null;
+    touchEndRef.current = null;
+  };
+
+  const handleTouch = (msg: MessageEvent) => {
+    if (msg.data && msg.data.bookKey === bookKey) {
+      if (msg.data.type === 'iframe-touchstart') {
+        onTouchStart(msg.data);
+      } else if (msg.data.type === 'iframe-touchmove') {
+        onTouchMove(msg.data);
+      } else if (msg.data.type === 'iframe-touchend') {
+        onTouchEnd(msg.data);
+      }
+    }
+  };
+
+  useEffect(() => {
+    window.addEventListener('message', handleTouch);
+    return () => {
+      window.removeEventListener('message', handleTouch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoveredBookKey]);
+
+  return {
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd,
+  };
+};

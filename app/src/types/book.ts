@@ -1,0 +1,480 @@
+import { BookMetadata } from '@/libs/document';
+import { TTSHighlightOptions } from '@/services/tts/types';
+import { TTSMediaMetadataMode } from '@/services/tts/types';
+import type { AnnotationLinkType } from '@/utils/deeplink';
+import { AnnotationToolType } from './annotator';
+
+export type BookFormat =
+  | 'EPUB'
+  | 'PDF'
+  | 'MOBI'
+  | 'AZW'
+  | 'AZW3'
+  | 'CBZ'
+  | 'FB2'
+  | 'FBZ'
+  | 'TXT'
+  | 'MD';
+export type BookNoteType = 'bookmark' | 'annotation' | 'excerpt';
+export type ReadingStatus = 'unread' | 'reading' | 'finished';
+export type HighlightStyle = 'highlight' | 'underline' | 'squiggly';
+export type StorageType = 'local' | 'cloud';
+// Predefined highlight colors, can be extended with custom hex colors
+export type HighlightColor = 'red' | 'yellow' | 'green' | 'blue' | 'violet' | string;
+export const DEFAULT_HIGHLIGHT_COLORS = ['red', 'yellow', 'green', 'blue', 'violet'] as const;
+export type DefaultHighlightColor = (typeof DEFAULT_HIGHLIGHT_COLORS)[number];
+// A user-added highlight color with optional label
+export interface UserHighlightColor {
+  hex: string;
+  label?: string;
+}
+export type ReadingRulerColor = 'transparent' | 'yellow' | 'green' | 'blue' | 'rose';
+
+export interface ParagraphModeConfig {
+  enabled: boolean;
+}
+
+export const FIXED_LAYOUT_FORMATS: Set<BookFormat> = new Set(['PDF', 'CBZ']);
+
+/**
+ * Lookup tables built from a Book[] for O(1) hash and metaHash queries during
+ * batch import. Mutated in place by importBook so subsequent files in the
+ * same batch see books added by earlier files. Defined here (rather than in
+ * services/bookService) so the AppService interface in types/system can
+ * reference it without an inline `import(...)` type.
+ */
+export interface BookLookupIndex {
+  byHash: Map<string, Book>;
+  byMetaKey: Map<string, Book[]>; // key = `${metaHash}:${format}`
+}
+
+/**
+ * User-facing options for AppService.importBook. The bookService implementation
+ * extends this with required callbacks (saveBookConfig / generateCoverImageUrl)
+ * that are bound by the AppService instance.
+ */
+export interface ImportBookOptions {
+  /** Whether to copy the file into the Books directory. Defaults to true. */
+  saveBook?: boolean;
+  /** Whether to extract and save a cover image. Defaults to true. */
+  saveCover?: boolean;
+  /** Whether to overwrite an existing file at the same path. Defaults to false. */
+  overwrite?: boolean;
+  /** Whether the import is transient (not stored long-term). Defaults to false. */
+  transient?: boolean;
+  /**
+   * If true, do NOT copy the source file into Books/<hash>/. Instead, persist
+   * an absolute filePath on the Book and let isBookAvailable / loadBookContent
+   * fall back to it. The caller is responsible for verifying the source is
+   * already inside the user's chosen library root (customRootDir) so that the
+   * file remains stable across launches. Sidecar files (cover.png, config.json,
+   * nav.json) are still written to Books/<hash>/ as usual. Defaults to false.
+   */
+  inPlace?: boolean;
+  /** Pre-built lookup index for O(1) dedup during batch imports. */
+  lookupIndex?: BookLookupIndex;
+}
+
+export interface Book {
+  // if Book is a remote book we just lazy load the book content via url
+  url?: string;
+  // if Book is a transient local book we can load the book content via filePath
+  filePath?: string;
+  // Partial md5 hash of the book file, used as the unique identifier
+  hash: string;
+  // Remote book id on the MyBooks server, recorded when downloaded from MyBooks. Defaults to 0.
+  bookId?: number;
+  // Metadata md5 hash, used to aggregate different versions of the same book
+  metaHash?: string;
+  // Storage type: 'local' for locally stored books, 'cloud' for cloud-only books
+  storageType?: StorageType;
+  format: BookFormat;
+  // Format the book was originally provided in, before any silent conversion
+  // (e.g. TXT is converted to EPUB since DocumentLoader has no TXT parser).
+  // Undefined means format already reflects the original source. Used to show
+  // the user-facing format badge as the original rather than the converted format.
+  sourceFormat?: BookFormat;
+  title: string; // editable title from metadata
+  sourceTitle?: string; // parsed when the book is imported and used to locate the file
+  author: string;
+  group?: string; // deprecated in favor of groupId and groupName
+  groupId?: string;
+  groupName?: string;
+  tags?: string[];
+  coverImageUrl?: string | null;
+
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number | null;
+
+  uploadedAt?: number | null;
+  downloadedAt?: number | null;
+  coverDownloadedAt?: number | null;
+  syncedAt?: number | null;
+
+  lastUpdated?: number; // deprecated in favor of updatedAt
+  progress?: [number, number]; // Add progress field: [current, total], 1-based page number
+  readingStatus?: ReadingStatus;
+  primaryLanguage?: string;
+
+  metadata?: BookMetadata;
+
+  files?: { format: BookFormat; size: number; href: string }[];
+  originCoverUrl?: string | null;
+}
+
+export interface BookGroupType {
+  id: string;
+  name: string;
+}
+
+export interface PageInfo {
+  current: number;
+  next?: number;
+  total: number;
+}
+
+// Remaining time of the book in minutes
+export interface TimeInfo {
+  section: number;
+  total: number;
+}
+
+export interface BookNote {
+  bookHash?: string;
+  metaHash?: string;
+  id: string;
+  type: BookNoteType;
+  cfi: string; // Canonicalized CFI for the note location
+  xpointer0?: string; // Start XPointer for the note location
+  xpointer1?: string; // End XPointer for the note location
+  page?: number;
+  text?: string;
+  style?: HighlightStyle;
+  color?: HighlightColor;
+  note: string;
+  /**
+   * If true, this annotation should be applied to every occurrence of `text`
+   * within the same section (chapter/spine item), in addition to the original
+   * range identified by `cfi`. Defaults to false / undefined (single-range).
+   * Only meaningful for annotations that have a `text` value; ignored for
+   * bookmarks and excerpts, and for fixed-layout formats (e.g. PDF).
+   */
+  global?: boolean;
+
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number | null;
+}
+
+export interface BooknoteGroup {
+  id: number;
+  href: string;
+  label: string;
+  booknotes: BookNote[];
+}
+
+export type WritingMode = 'auto' | 'horizontal-tb' | 'horizontal-rl' | 'vertical-rl';
+
+export interface BookLayout {
+  marginTopPx: number;
+  marginBottomPx: number;
+  marginLeftPx: number;
+  marginRightPx: number;
+  marginPx?: number; // deprecated
+  compactMarginTopPx: number;
+  compactMarginBottomPx: number;
+  compactMarginLeftPx: number;
+  compactMarginRightPx: number;
+  compactMarginPx?: number; // deprecated
+  gapPercent: number;
+  scrolled: boolean;
+  noContinuousScroll: boolean;
+  disableClick: boolean;
+  disableSwipe: boolean;
+  fullscreenClickArea: boolean;
+  swapClickArea: boolean;
+  disableDoubleClick: boolean;
+  volumeKeysToFlip: boolean;
+  maxColumnCount: number;
+  maxInlineSize: number;
+  maxBlockSize: number;
+  writingMode: WritingMode;
+  vertical: boolean;
+  rtl: boolean;
+  scrollingOverlap: number;
+  allowScript: boolean;
+  hideScrollbar: boolean;
+}
+
+export interface BookStyle {
+  zoomLevel: number;
+  paragraphMargin: number;
+  lineHeight: number;
+  wordSpacing: number;
+  letterSpacing: number;
+  textIndent: number;
+  fullJustification: boolean;
+  hyphenation: boolean;
+  theme: string;
+  backgroundTextureId: string;
+  backgroundOpacity: number;
+  backgroundSize: string;
+  highlightOpacity: number;
+  codeHighlighting: boolean;
+  codeLanguage: string;
+  userStylesheet: string;
+  userUIStylesheet: string;
+
+  overrideFont: boolean;
+  overrideLayout: boolean;
+  overrideColor: boolean;
+  useBookLayout: boolean;
+
+  // fixed-layout specific
+  zoomMode: 'fit-page' | 'fit-width' | 'original-size' | 'custom';
+  spreadMode: 'auto' | 'none';
+  keepCoverSpread: boolean;
+  invertImgColorInDark: boolean;
+  applyThemeToPDF: boolean;
+}
+
+export interface BookFont {
+  serifFont: string;
+  sansSerifFont: string;
+  monospaceFont: string;
+  defaultFont: string;
+  defaultCJKFont: string;
+  defaultFontSize: number;
+  minimumFontSize: number;
+  fontWeight: number;
+}
+
+export type ConvertChineseVariant =
+  | 'none'
+  | 's2t'
+  | 't2s'
+  | 's2tw'
+  | 's2hk'
+  | 's2twp'
+  | 'tw2s'
+  | 'hk2s'
+  | 'tw2sp';
+
+export interface BookLanguage {
+  replaceQuotationMarks: boolean;
+  convertChineseVariant: ConvertChineseVariant;
+}
+
+export type ProgressBarMode = 'remaining' | 'progress' | 'battery' | 'time' | 'all' | 'none';
+export interface ViewConfig {
+  sideBarTab: string;
+  uiLanguage: string;
+  sortedTOC: boolean;
+
+  doubleBorder: boolean;
+  borderColor: string;
+
+  showHeader: boolean;
+  showFooter: boolean;
+  showRemainingTime: boolean;
+  showRemainingPages: boolean;
+  showProgressInfo: boolean;
+  showCurrentTime: boolean;
+  use24HourClock: boolean;
+  showCurrentBatteryStatus: boolean;
+  showBatteryPercentage: boolean;
+  tapToToggleFooter: boolean;
+  showPaginationButtons: boolean;
+  progressStyle: 'percentage' | 'fraction';
+  progressInfoMode: ProgressBarMode;
+
+  animated: boolean;
+  isEink: boolean;
+  isColorEink: boolean;
+
+  paragraphMode: ParagraphModeConfig;
+
+  readingRulerEnabled: boolean;
+  readingRulerLines: number;
+  readingRulerPosition: number;
+  readingRulerOpacity: number;
+  readingRulerColor: ReadingRulerColor;
+}
+
+export interface TTSConfig {
+  ttsRate: number;
+  ttsVoice: string;
+  ttsLocation: string;
+  showTTSBar: boolean;
+  ttsHighlightOptions: TTSHighlightOptions;
+  ttsMediaMetadata: TTSMediaMetadataMode;
+}
+
+export interface TranslatorConfig {
+  translationEnabled: boolean;
+  translationProvider: string;
+  translateTargetLang: string;
+  showTranslateSource: boolean;
+  ttsReadAloudText: string;
+}
+
+export interface NoteExportConfig {
+  includeTitle: boolean;
+  includeAuthor: boolean;
+  includeDate: boolean;
+  includeChapterTitles: boolean;
+  includeQuotes: boolean;
+  includeNotes: boolean;
+  includePageNumber: boolean;
+  includeTimestamp: boolean;
+  includeChapterSeparator: boolean;
+  linkType: AnnotationLinkType;
+  noteSeparator: string;
+  useCustomTemplate: boolean;
+  customTemplate: string;
+  exportAsPlainText: boolean;
+}
+
+export interface AnnotatorConfig {
+  enableAnnotationQuickActions: boolean;
+  annotationQuickAction: AnnotationToolType | null;
+  copyToNotebook: boolean;
+  noteExportConfig: NoteExportConfig;
+}
+
+export interface ScreenConfig {
+  screenOrientation: 'auto' | 'portrait' | 'landscape';
+}
+
+export type ProofreadScope = 'selection' | 'book' | 'library';
+
+export interface ProofreadRule {
+  id: string;
+  scope: ProofreadScope;
+  pattern: string;
+  replacement: string;
+  cfi?: string;
+  sectionHref?: string;
+  enabled: boolean;
+  isRegex: boolean;
+  order: number; // Lower numbers apply first
+  wholeWord?: boolean; // Match whole words only (uses \b word boundaries)
+  caseSensitive?: boolean; // Case-sensitive matching (default true)
+  onlyForTTS?: boolean; // Only replace text for TTS, not in the book display (only for book/library scope)
+}
+
+export interface ProofreadRulesConfig {
+  proofreadRules?: ProofreadRule[];
+}
+
+export interface ViewSettingsConfig {
+  isGlobal: boolean;
+}
+
+export interface ViewSettings
+  extends BookLayout,
+    BookStyle,
+    BookFont,
+    BookLanguage,
+    ViewConfig,
+    TTSConfig,
+    TranslatorConfig,
+    ScreenConfig,
+    ProofreadRulesConfig,
+    AnnotatorConfig,
+    ViewSettingsConfig {}
+
+export interface BookProgress {
+  location: string;
+  sectionHref: string;
+  sectionLabel: string;
+  section: PageInfo;
+  pageinfo: PageInfo;
+  timeinfo: TimeInfo;
+  index: number;
+  range: Range;
+  page: number;
+}
+
+export interface BookSearchConfig {
+  scope: 'book' | 'section';
+  matchCase: boolean;
+  matchWholeWords: boolean;
+  matchDiacritics: boolean;
+  index?: number;
+  query?: string;
+  acceptNode?: (node: Node) => number;
+
+  // pre-cached search results
+  results?: BookSearchResult[] | BookSearchMatch[] | null;
+}
+
+export interface SearchExcerpt {
+  pre: string;
+  match: string;
+  post: string;
+}
+
+export interface BookSearchMatch {
+  cfi: string;
+  excerpt: SearchExcerpt;
+}
+
+export interface BookSearchResult {
+  index?: number;
+  label: string;
+  subitems: BookSearchMatch[];
+  progress?: number;
+}
+
+export const BOOK_CONFIG_SCHEMA_VERSION = 1;
+
+export interface BookConfig {
+  schemaVersion?: number;
+  bookHash?: string;
+  metaHash?: string;
+  progress?: [number, number]; // [current pagenum, total pagenum], 1-based page number
+  location?: string; // CFI of the current location
+  xpointer?: string; // XPointer of the current location (for Koreader interoperability)
+  booknotes?: BookNote[];
+  rsvpPosition?: { cfi: string; wordText: string };
+  searchConfig?: Partial<BookSearchConfig>;
+  viewSettings?: Partial<ViewSettings>;
+
+  lastSyncedAtConfig?: number;
+  lastSyncedAtNotes?: number;
+  lastPushedAtConfig?: number;
+  lastPushedAtNotes?: number;
+  foliateImportedAt?: number;
+
+  updatedAt: number;
+}
+
+export interface BookDataRecord {
+  id: string;
+  book_hash: string;
+  meta_hash?: string;
+  user_id: string;
+  updated_at: number | null;
+  deleted_at: number | null;
+}
+
+// Wire records for the mybooks `/api/sync` Legacy Record Sync endpoint.
+// See document/MyBooks_Sync_API.md §1 / document/MyBooks_Sync_WS_Design.md §11.
+export type BookRecord = BookDataRecord & Book;
+export type BookNoteRecord = BookDataRecord & BookNote;
+export type BookConfigRecord = BookDataRecord & BookConfig;
+
+export interface BooksGroup {
+  id: string;
+  name: string;
+  displayName: string;
+  books: Book[];
+
+  updatedAt: number;
+}
+export interface BookContent {
+  book: Book;
+  file: File;
+}

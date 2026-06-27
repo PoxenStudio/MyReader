@@ -1,0 +1,38 @@
+{
+  "productName": "todo-app",
+  "version": "0.1.0",
+  "identifier": "todolist.turso.demo",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "theme": "Dark",
+        "fullscreen": false,
+        "height": 1000,
+        "width": 1200,
+        "resizable": true,
+        "title": "Todo App - turso Demo"
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

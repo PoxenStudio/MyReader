@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Default English copy. Per-locale variants live in sibling values-<lang>/
+  directories; Android picks one based on the device's current system locale,
+  falling back to this file when no match is found.
+-->
+<resources>
+    <string name="webview_upgrade_outdated_message">Android System WebView is outdated. Please update or install it for this app to display correctly.</string>
+</resources>

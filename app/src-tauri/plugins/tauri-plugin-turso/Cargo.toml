@@ -1,0 +1,28 @@
+[package]
+name = "tauri-plugin-turso"
+version = "0.1.0"
+authors = ["Huakun"]
+description = "Tauri plugin for turso with encryption and drizzle ORM support"
+edition = "2021"
+license = "MIT"
+rust-version = "1.77.2"
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+links = "tauri-plugin-turso"
+
+[dependencies]
+tauri = { version = "2.10.0" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2"
+indexmap = { version = "2", features = ["serde"] }
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread"] }
+futures = "0.3"
+turso = { version = "0.6.0-pre.9", default-features = false }
+turso_core = { version = "0.6.0-pre.9", default-features = false, features = ["fts"] }
+
+[build-dependencies]
+tauri-plugin = { version = "2.5.3", features = ["build"] }
+
+[features]
+default = ["encryption"]
+encryption = []
