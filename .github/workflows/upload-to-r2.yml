@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Download release assets
         run: |
-          gh release download "${{ inputs.tag }}" --repo readest/readest --dir ./release-assets
+          gh release download "${{ inputs.tag }}" --repo ${{ github.repository }} --dir ./release-assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -54,10 +54,6 @@ jobs:
           secret_access_key = $RELEASE_R2_SECRET_ACCESS_KEY
           endpoint = https://${RELEASE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com
           EOF
-
-      - name: Modify latest.json download URLs
-        run: |
-          GITHUB_BASE_URL="https://github.com/readest/readest/releases/download"
 
       - name: Upload to R2
         run: |

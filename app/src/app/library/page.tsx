@@ -1045,6 +1045,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         timeout: 1000,
         message: _('Book deleted: {{title}}', { title: book.title }),
       });
+      return true;
     } catch (error) {
       eventDispatcher.dispatch('toast', {
         type: 'error',
@@ -1053,6 +1054,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
             ? error.message
             : _('Failed to delete book: {{title}}', { title: book.title }),
       });
+      return false;
     }
   };
 
