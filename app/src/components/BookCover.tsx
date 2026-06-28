@@ -86,7 +86,10 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
         return;
       }
 
-      const isRemoteUrl = coverUrl.startsWith('http://') || coverUrl.startsWith('https://');
+      const isLocalAssetUrl =
+        coverUrl.startsWith('asset://') || coverUrl.includes('asset.localhost');
+      const isRemoteUrl =
+        !isLocalAssetUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://'));
 
       if (!isTauriAppPlatform() || !isRemoteUrl) {
         setDisplayImageUrl(coverUrl);
