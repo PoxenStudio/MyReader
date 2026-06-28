@@ -7,6 +7,10 @@ on:
 
 permissions: read-all
 
+env:
+  # TODO: flip to 'true' once a Tauri updater signing key (TAURI_SIGNING_PRIVATE_KEY) is available.
+  ENABLE_TAURI_SIGNING: 'false'
+
 jobs:
   get-release:
     permissions:
@@ -291,17 +295,26 @@ jobs:
           gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk --clobber
           echo "Uploading $arm64_apk to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} $arm64_apk --clobber
-          echo "Uploading signatures to GitHub release"
-          pnpm tauri signer sign $universial_apk
-          pnpm tauri signer sign $arm64_apk
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk.sig --clobber
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $arm64_apk.sig --clobber
+          if [ "$ENABLE_TAURI_SIGNING" = "true" ]; then
+            echo "Uploading signatures to GitHub release"
+            pnpm tauri signer sign $universial_apk
+            pnpm tauri signer sign $arm64_apk
+            gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk.sig --clobber
+            gh release upload ${{ needs.get-release.outputs.release_tag }} $arm64_apk.sig --clobber
+          else
+            echo "Skipping APK signature upload: ENABLE_TAURI_SIGNING is false"
+          fi
 
       - name: download and update latest.json for Android release
         if: matrix.config.release == 'android'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if [ "$ENABLE_TAURI_SIGNING" != "true" ]; then
+            echo "Skipping latest.json update for Android: ENABLE_TAURI_SIGNING is false"
+            exit 0
+          fi
+
           cd app/
           # Use -f so curl fails on HTTP errors instead of writing the 404 body
           # ("Not Found") into latest.json and clobbering the release asset with
@@ -343,8 +356,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -373,10 +386,10 @@ jobs:
         if: matrix.config.os == 'windows-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_PRIVATE_KEY_PASSWORD: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         shell: bash
         run: |
           echo "Building Portable Binaries"
@@ -407,12 +420,16 @@ jobs:
           echo "Uploading $bin_file to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} $bin_file --clobber
 
-          echo "Signing portable binary"
-          pushd app/
-          pnpm tauri signer sign "../../$bin_file"
-          popd
-          echo "Uploading signature to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $bin_file.sig --clobber
+          if [ "$ENABLE_TAURI_SIGNING" = "true" ]; then
+            echo "Signing portable binary"
+            pushd app/
+            pnpm tauri signer sign "../../$bin_file"
+            popd
+            echo "Uploading signature to GitHub release"
+            gh release upload ${{ needs.get-release.outputs.release_tag }} $bin_file.sig --clobber
+          else
+            echo "Skipping portable binary signature: ENABLE_TAURI_SIGNING is false"
+          fi
 
       - name: download and update latest.json for Windows portable release
         if: matrix.config.os == 'windows-latest'
@@ -420,6 +437,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          if [ "$ENABLE_TAURI_SIGNING" != "true" ]; then
+            echo "Skipping latest.json update for Windows portable: ENABLE_TAURI_SIGNING is false"
+            exit 0
+          fi
+
           # Use -f so curl fails on HTTP errors instead of writing the 404 body
           # ("Not Found") into latest.json and clobbering the release asset with
           # invalid JSON, which then breaks tauri-action's updater merge on every
