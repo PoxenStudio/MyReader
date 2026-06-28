@@ -133,6 +133,7 @@ jobs:
               "release": "linux",
               "arch": "x86_64",
               "rust_target": "x86_64-unknown-linux-gnu",
+              "args": "--bundles deb",
               "manual": true
             },
             {
@@ -140,6 +141,7 @@ jobs:
               "release": "linux",
               "arch": "aarch64",
               "rust_target": "aarch64-unknown-linux-gnu",
+              "args": "--bundles deb",
               "manual": false
             },
             {
@@ -352,10 +354,6 @@ jobs:
           echo "Uploading updated latest.json to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
 
-      - name: Override tauri-cli with custom AppImage format (Linux)
-        if: matrix.config.release == 'linux'
-        run: cargo install tauri-cli --git https://github.com/tauri-apps/tauri --branch feat/truly-portable-appimage --force
-
       # tauri-bundler treats the mere *presence* of APPLE_CERTIFICATE (even
       # set to an empty string) as "a certificate was provided" and tries to
       # `security import` it, so this step must be split in two: the Apple
@@ -365,16 +363,11 @@ jobs:
         if: matrix.config.release != 'android' && env.ENABLE_MACOS_SIGNING != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           NODE_OPTIONS: '--max-old-space-size=8192'
         with:
           projectPath: app
-          # On Linux, build with the Rust `cargo tauri` CLI installed in the
-          # step above so the new (truly-portable AppImage) bundler is used.
-          # Without this, tauri-action falls back to the npm @tauri-apps/cli.
-          tauriScript: ${{ matrix.config.release == 'linux' && 'cargo tauri' || '' }}
           releaseId: ${{ needs.get-release.outputs.release_id }}
           releaseBody: ${{ needs.get-release.outputs.release_note }}
           # When updater signing is disabled, tell the bundler not to create
@@ -388,7 +381,6 @@ jobs:
         if: matrix.config.release != 'android' && env.ENABLE_MACOS_SIGNING == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -400,7 +392,6 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=8192'
         with:
           projectPath: app
-          tauriScript: ${{ matrix.config.release == 'linux' && 'cargo tauri' || '' }}
           releaseId: ${{ needs.get-release.outputs.release_id }}
           releaseBody: ${{ needs.get-release.outputs.release_note }}
           args: ${{ matrix.config.args || '' }} ${{ env.ENABLE_TAURI_SIGNING != 'true' && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
