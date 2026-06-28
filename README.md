@@ -22,6 +22,12 @@
 4. Library中的搜索区分当前书架为本地图书时即搜索本地图书，其它情况则为使用MyBooks的搜索接口进行搜索，并使用书架展示。
 5. 支持将阅读数据同步到MyBooks。
 
+## 安装运行
+在Release中下载对应平台的安装包进行安装。所有安装包都没有进行签名，macOS下需要下载后对下载的dmg执行如下命令:
+```
+sudo xattr -rd com.apple.quarantine MyReader-<xxxxxxxxxxx>.dmg
+```
+
 ## Development
 
 请按照以下步骤克隆并构建项目。
