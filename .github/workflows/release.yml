@@ -2,11 +2,6 @@ name: Release MyReader
 
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to build a draft release for (e.g. v1.2.3)'
-        required: true
-        type: string
   release:
     types: [published]
 
@@ -15,7 +10,7 @@ permissions: read-all
 jobs:
   get-release:
     permissions:
-      contents: read
+      contents: write
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.get-release.outputs.release_id || steps.create-draft-release.outputs.release_id }}
@@ -25,8 +20,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
       - name: setup node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
       - name: get version
@@ -48,7 +41,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          tag: ${{ inputs.tag }}
+          tag: ${{ github.ref_name }}
         with:
           script: |
             const { data } = await github.rest.repos.createRelease({
@@ -109,14 +102,6 @@ jobs:
               draft: false,
               prerelease: false
             })
-
-  build-koreader-plugin:
-    needs: get-release
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
 
   set-matrix:
     runs-on: ubuntu-latest
@@ -472,13 +457,3 @@ jobs:
 
           echo "Uploading updated latest.json to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
-
-  upload-to-r2:
-    if: github.event_name == 'release'
-    needs: [get-release, build-tauri]
-    permissions:
-      contents: read
-    uses: ./.github/workflows/upload-to-r2.yml
-    with:
-      tag: ${{ needs.get-release.outputs.release_tag }}
-    secrets: inherit
