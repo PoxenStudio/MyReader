@@ -8,6 +8,26 @@ import { LibraryCoverFitType, LibraryViewModeType } from '@/types/settings';
 import { formatAuthors, formatTitle } from '@/utils/book';
 import { isTauriAppPlatform } from '@/services/environment';
 
+const COVER_CACHE_NAME = 'myreader-book-covers-v1';
+
+async function getCachedCover(url: string): Promise<Response | null> {
+  try {
+    if (!('caches' in window)) return null;
+    const cache = await caches.open(COVER_CACHE_NAME);
+    return cache.match(url);
+  } catch {
+    return null;
+  }
+}
+
+async function cacheCover(url: string, response: Response): Promise<void> {
+  try {
+    if (!('caches' in window)) return;
+    const cache = await caches.open(COVER_CACHE_NAME);
+    await cache.put(url, response.clone());
+  } catch {}
+}
+
 interface BookCoverProps {
   book: Book;
   mode?: LibraryViewModeType;
@@ -99,9 +119,22 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
 
       const fetchCover = async () => {
         try {
-          info(
-            `[BookCover] Starting to fetch remote cover for book: ${book.title} (${book.hash})`,
-          ).catch(() => {});
+          const cachedResponse = await getCachedCover(coverUrl);
+          if (cachedResponse) {
+            info(`[BookCover] Using cached cover for book: ${book.title} (${book.hash})`).catch(
+              () => {},
+            );
+            const blob = await cachedResponse.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            objectUrlRef.current = objectUrl;
+            setDisplayImageUrl(objectUrl);
+            toggleImageVisibility(true);
+            return;
+          }
+
+          info(`[BookCover] Fetching remote cover for book: ${book.title} (${book.hash})`).catch(
+            () => {},
+          );
           info(`[BookCover] Cover URL: ${coverUrl}`).catch(() => {});
 
           const response = await (tauriFetch as unknown as typeof fetch)(coverUrl, {
@@ -126,6 +159,8 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
             throw new Error(`Cover response was not an image (Content-Type: ${contentType})`);
           }
 
+          await cacheCover(coverUrl, response);
+
           const blob = await response.blob();
           info(
             `[BookCover] Remote cover blob size: ${blob.size} bytes, type: ${contentType}`,
@@ -136,7 +171,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
           setDisplayImageUrl(objectUrl);
           toggleImageVisibility(true);
           info(
-            `[BookCover] Remote cover loaded successfully for book: ${book.title} (${book.hash})`,
+            `[BookCover] Remote cover loaded and cached for book: ${book.title} (${book.hash})`,
           ).catch(() => {});
         } catch (error) {
           const errorMsg = `[BookCover] Failed to fetch remote cover for book: ${book.title} (${book.hash}): ${error}`;
