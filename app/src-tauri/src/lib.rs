@@ -245,6 +245,11 @@ struct SingleInstancePayload {
     cwd: String,
 }
 
+// reqwest's NoProxy parser (used by tauri-plugin-http) accepts CIDR ranges, so
+// listing the private-network ranges here covers any LAN IP (e.g. a self-hosted
+// server at 192.168.x.x) instead of an enumerated list of addresses.
+const NO_PROXY_VALUE: &str = "127.0.0.1,localhost,::1,0.0.0.0,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,fc00::/7,fe80::/10";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // reqwest (used by tauri-plugin-http) applies macOS system proxy settings via
@@ -256,7 +261,7 @@ pub fn run() {
     for var in &["NO_PROXY", "no_proxy"] {
         if std::env::var(var).is_err() {
             // SAFETY: called before any threads are spawned or reqwest clients built.
-            unsafe { std::env::set_var(var, "127.0.0.1,localhost,::1,0.0.0.0") };
+            unsafe { std::env::set_var(var, NO_PROXY_VALUE) };
         }
     }
 
@@ -588,4 +593,73 @@ pub fn run() {
                 }
             },
         );
+}
+
+#[cfg(test)]
+mod no_proxy_tests {
+    use super::NO_PROXY_VALUE;
+    use std::net::IpAddr;
+
+    fn cidr_contains(entry: &str, ip: IpAddr) -> bool {
+        let (base, bits) = match entry.split_once('/') {
+            Some((b, bits)) => (b, bits.parse::<u32>().unwrap()),
+            None => (entry, if ip.is_ipv4() { 32 } else { 128 }),
+        };
+        let base: IpAddr = match base.parse() {
+            Ok(base) => base,
+            Err(_) => return false,
+        };
+        match (base, ip) {
+            (IpAddr::V4(b), IpAddr::V4(i)) => {
+                let mask = if bits == 0 {
+                    0
+                } else {
+                    u32::MAX << (32 - bits)
+                };
+                (u32::from(b) & mask) == (u32::from(i) & mask)
+            }
+            (IpAddr::V6(b), IpAddr::V6(i)) => {
+                let mask: u128 = if bits == 0 {
+                    0
+                } else {
+                    u128::MAX << (128 - bits)
+                };
+                (u128::from(b) & mask) == (u128::from(i) & mask)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_covered(addr: &str) -> bool {
+        let ip: IpAddr = match addr.parse() {
+            Ok(ip) => ip,
+            Err(_) => return false,
+        };
+        NO_PROXY_VALUE
+            .split(',')
+            .any(|entry| cidr_contains(entry, ip))
+    }
+
+    #[test]
+    fn covers_private_lan_addresses() {
+        for addr in [
+            "192.168.31.102",
+            "10.1.2.3",
+            "172.20.1.1",
+            "169.254.5.5",
+            "127.0.0.1",
+            "::1",
+            "fe80::1",
+            "fc00:1234::1",
+        ] {
+            assert!(is_covered(addr), "{addr} should bypass the proxy");
+        }
+    }
+
+    #[test]
+    fn does_not_cover_public_addresses() {
+        for addr in ["8.8.8.8", "2606:4700:4700::1111"] {
+            assert!(!is_covered(addr), "{addr} should not bypass the proxy");
+        }
+    }
 }
