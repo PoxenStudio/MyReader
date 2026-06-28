@@ -10,6 +10,11 @@ permissions: read-all
 env:
   # TODO: flip to 'true' once a Tauri updater signing key (TAURI_SIGNING_PRIVATE_KEY) is available.
   ENABLE_TAURI_SIGNING: 'false'
+  # TODO: flip to 'true' once a valid Apple Developer codesigning certificate
+  # (APPLE_CERTIFICATE et al.) is configured. Until then the macOS build must
+  # skip codesigning, otherwise tauri-action fails trying to import it into
+  # the keychain (SecKeychainItemImport: invalid parameters).
+  ENABLE_MACOS_SIGNING: 'false'
 
 jobs:
   get-release:
@@ -351,8 +356,36 @@ jobs:
         if: matrix.config.release == 'linux'
         run: cargo install tauri-cli --git https://github.com/tauri-apps/tauri --branch feat/truly-portable-appimage --force
 
+      # tauri-bundler treats the mere *presence* of APPLE_CERTIFICATE (even
+      # set to an empty string) as "a certificate was provided" and tries to
+      # `security import` it, so this step must be split in two: the Apple
+      # codesigning env vars can only be omitted entirely, not emptied, when
+      # ENABLE_MACOS_SIGNING is false.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
-        if: matrix.config.release != 'android'
+        if: matrix.config.release != 'android' && env.ENABLE_MACOS_SIGNING != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          NODE_OPTIONS: '--max-old-space-size=8192'
+        with:
+          projectPath: app
+          # On Linux, build with the Rust `cargo tauri` CLI installed in the
+          # step above so the new (truly-portable AppImage) bundler is used.
+          # Without this, tauri-action falls back to the npm @tauri-apps/cli.
+          tauriScript: ${{ matrix.config.release == 'linux' && 'cargo tauri' || '' }}
+          releaseId: ${{ needs.get-release.outputs.release_id }}
+          releaseBody: ${{ needs.get-release.outputs.release_note }}
+          # When updater signing is disabled, tell the bundler not to create
+          # updater artifacts at all. Otherwise the Rust bundler reads
+          # createUpdaterArtifacts: true from tauri.conf.json and always
+          # tries to sign with TAURI_SIGNING_PRIVATE_KEY, even when that env
+          # var is set to an empty string, which fails to decode as a key.
+          args: ${{ matrix.config.args || '' }} ${{ env.ENABLE_TAURI_SIGNING != 'true' && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
+
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        if: matrix.config.release != 'android' && env.ENABLE_MACOS_SIGNING == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
@@ -367,13 +400,10 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=8192'
         with:
           projectPath: app
-          # On Linux, build with the Rust `cargo tauri` CLI installed in the
-          # step above so the new (truly-portable AppImage) bundler is used.
-          # Without this, tauri-action falls back to the npm @tauri-apps/cli.
           tauriScript: ${{ matrix.config.release == 'linux' && 'cargo tauri' || '' }}
           releaseId: ${{ needs.get-release.outputs.release_id }}
           releaseBody: ${{ needs.get-release.outputs.release_note }}
-          args: ${{ matrix.config.args || '' }}
+          args: ${{ matrix.config.args || '' }} ${{ env.ENABLE_TAURI_SIGNING != 'true' && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
 
       - name: upload release notes to GitHub release
         env:
@@ -395,7 +425,15 @@ jobs:
           echo "Building Portable Binaries"
           pushd app/
           echo "NEXT_PUBLIC_PORTABLE_APP=true" >> .env.local
-          pnpm tauri build ${{ matrix.config.args }}
+          # See the comment on the tauri-action `args` input above: skip
+          # updater artifact creation entirely when signing is disabled,
+          # since createUpdaterArtifacts:true in tauri.conf.json otherwise
+          # always tries to sign with an (empty) private key and fails.
+          BUILD_ARGS=(${{ matrix.config.args }})
+          if [ "$ENABLE_TAURI_SIGNING" != "true" ]; then
+            BUILD_ARGS+=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
+          fi
+          pnpm tauri build "${BUILD_ARGS[@]}"
 
           popd
           echo "Uploading Portable Binaries"
