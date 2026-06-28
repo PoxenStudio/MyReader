@@ -2,6 +2,11 @@ name: Release MyReader
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build a draft release for (e.g. v1.2.3)'
+        required: true
+        type: string
   release:
     types: [published]
 
@@ -13,25 +18,46 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     outputs:
-      release_id: ${{ steps.get-release.outputs.release_id }}
-      release_tag: ${{ steps.get-release.outputs.release_tag }}
+      release_id: ${{ steps.get-release.outputs.release_id || steps.create-draft-release.outputs.release_id }}
+      release_tag: ${{ steps.get-release.outputs.release_tag || steps.create-draft-release.outputs.release_tag }}
       release_note: ${{ steps.get-release-notes.outputs.release_note }}
       release_version: ${{ steps.get-release-notes.outputs.release_version }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
       - name: setup node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
       - name: get version
         run: echo "PACKAGE_VERSION=$(node -p "require('./app/package.json').version")" >> $GITHUB_ENV
       - name: get release
         id: get-release
+        if: github.event_name == 'release'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const { data } = await github.rest.repos.getLatestRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
+            })
+            core.setOutput('release_id', data.id);
+            core.setOutput('release_tag', data.tag_name);
+      - name: create draft release for selected tag
+        id: create-draft-release
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          tag: ${{ inputs.tag }}
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: process.env.tag,
+              name: process.env.tag,
+              draft: true,
+              generate_release_notes: true,
             })
             core.setOutput('release_id', data.id);
             core.setOutput('release_tag', data.tag_name);
@@ -51,6 +77,7 @@ jobs:
             core.setOutput('release_note', releaseNote);
 
   update-release:
+    if: github.event_name == 'release'
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -91,40 +118,85 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
 
+  set-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: compute build matrix
+        id: set-matrix
+        run: |
+          cat > full-matrix.json <<'EOF'
+          [
+            {
+              "os": "ubuntu-latest",
+              "release": "android",
+              "rust_target": "aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android",
+              "manual": false
+            },
+            {
+              "os": "ubuntu-22.04",
+              "release": "linux",
+              "arch": "x86_64",
+              "rust_target": "x86_64-unknown-linux-gnu",
+              "manual": true
+            },
+            {
+              "os": "ubuntu-22.04-arm",
+              "release": "linux",
+              "arch": "aarch64",
+              "rust_target": "aarch64-unknown-linux-gnu",
+              "manual": false
+            },
+            {
+              "os": "macos-latest",
+              "release": "macos",
+              "arch": "aarch64",
+              "rust_target": "x86_64-apple-darwin,aarch64-apple-darwin",
+              "args": "--target universal-apple-darwin",
+              "manual": false
+            },
+            {
+              "os": "macos-latest",
+              "release": "macos",
+              "arch": "aarch64-only",
+              "rust_target": "aarch64-apple-darwin",
+              "args": "--target aarch64-apple-darwin",
+              "manual": true
+            },
+            {
+              "os": "windows-latest",
+              "release": "windows",
+              "arch": "x86_64",
+              "rust_target": "x86_64-pc-windows-msvc",
+              "args": "--target x86_64-pc-windows-msvc --bundles nsis",
+              "manual": true
+            },
+            {
+              "os": "windows-latest",
+              "release": "windows",
+              "arch": "aarch64",
+              "rust_target": "aarch64-pc-windows-msvc",
+              "args": "--target aarch64-pc-windows-msvc --bundles nsis",
+              "manual": false
+            }
+          ]
+          EOF
+          if [ "${{ github.event_name }}" = "release" ]; then
+            matrix=$(jq -c '.' full-matrix.json)
+          else
+            matrix=$(jq -c '[.[] | select(.manual == true)]' full-matrix.json)
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   build-tauri:
-    needs: get-release
+    needs: [get-release, set-matrix]
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - os: ubuntu-latest
-            release: android
-            rust_target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-          - os: ubuntu-22.04
-            release: linux
-            arch: x86_64
-            rust_target: x86_64-unknown-linux-gnu
-          - os: ubuntu-22.04-arm
-            release: linux
-            arch: aarch64
-            rust_target: aarch64-unknown-linux-gnu
-          - os: macos-latest
-            release: macos
-            arch: aarch64
-            rust_target: x86_64-apple-darwin,aarch64-apple-darwin
-            args: '--target universal-apple-darwin'
-          - os: windows-latest
-            release: windows
-            arch: x86_64
-            rust_target: x86_64-pc-windows-msvc
-            args: '--target x86_64-pc-windows-msvc --bundles nsis'
-          - os: windows-latest
-            release: windows
-            arch: aarch64
-            rust_target: aarch64-pc-windows-msvc
-            args: '--target aarch64-pc-windows-msvc --bundles nsis'
+        config: ${{ fromJSON(needs.set-matrix.outputs.matrix) }}
 
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 60
@@ -402,6 +474,7 @@ jobs:
           gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
 
   upload-to-r2:
+    if: github.event_name == 'release'
     needs: [get-release, build-tauri]
     permissions:
       contents: read
