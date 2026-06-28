@@ -14,7 +14,8 @@ async function getCachedCover(url: string): Promise<Response | null> {
   try {
     if (!('caches' in window)) return null;
     const cache = await caches.open(COVER_CACHE_NAME);
-    return cache.match(url);
+    const response = await cache.match(url);
+    return response ?? null;
   } catch {
     return null;
   }
