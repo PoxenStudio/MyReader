@@ -1,9 +1,12 @@
 import clsx from 'clsx';
 import Image from 'next/image';
 import { memo, useEffect, useRef, useState } from 'react';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { info, error as tauriError } from '@tauri-apps/plugin-log';
 import { Book } from '@/types/book';
 import { LibraryCoverFitType, LibraryViewModeType } from '@/types/settings';
 import { formatAuthors, formatTitle } from '@/utils/book';
+import { isTauriAppPlatform } from '@/services/environment';
 
 interface BookCoverProps {
   book: Book;
@@ -30,10 +33,21 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     onAspectRatioChange,
   }) => {
     const coverRef = useRef<HTMLDivElement>(null);
+    const objectUrlRef = useRef<string | null>(null);
     const [imageLoaded, setImageLoaded] = useState(false);
     const [imageError, setImageError] = useState(false);
+    const [displayImageUrl, setDisplayImageUrl] = useState<string | null>(null);
 
     const shouldShowSpine = showSpine && imageLoaded && !imageError;
+
+    useEffect(() => {
+      return () => {
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
+        }
+      };
+    }, []);
 
     const toggleImageVisibility = (showImage: boolean) => {
       if (coverRef.current) {
@@ -66,8 +80,73 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     };
 
     useEffect(() => {
-      toggleImageVisibility(true);
-    }, [book.metadata?.coverImageUrl, book.coverImageUrl]);
+      const coverUrl = book.metadata?.coverImageUrl || book.coverImageUrl;
+      if (!coverUrl) {
+        toggleImageVisibility(false);
+        return;
+      }
+
+      const isRemoteUrl = coverUrl.startsWith('http://') || coverUrl.startsWith('https://');
+
+      if (!isTauriAppPlatform() || !isRemoteUrl) {
+        setDisplayImageUrl(coverUrl);
+        toggleImageVisibility(true);
+        return;
+      }
+
+      const fetchCover = async () => {
+        try {
+          info(
+            `[BookCover] Starting to fetch remote cover for book: ${book.title} (${book.hash})`,
+          ).catch(() => {});
+          info(`[BookCover] Cover URL: ${coverUrl}`).catch(() => {});
+
+          const response = await (tauriFetch as unknown as typeof fetch)(coverUrl, {
+            method: 'GET',
+            headers: {
+              Accept: 'image/*',
+            },
+          });
+
+          if (!response.ok) {
+            const errorMsg = `[BookCover] Remote cover request failed with status ${response.status}: ${coverUrl}`;
+            console.error(errorMsg);
+            tauriError(errorMsg).catch(() => {});
+            throw new Error(`Cover request failed with status ${response.status}`);
+          }
+
+          const contentType = response.headers.get('Content-Type') ?? '';
+          if (!contentType.startsWith('image/')) {
+            const errorMsg = `[BookCover] Remote cover response was not an image (Content-Type: ${contentType}): ${coverUrl}`;
+            console.error(errorMsg);
+            tauriError(errorMsg).catch(() => {});
+            throw new Error(`Cover response was not an image (Content-Type: ${contentType})`);
+          }
+
+          const blob = await response.blob();
+          info(
+            `[BookCover] Remote cover blob size: ${blob.size} bytes, type: ${contentType}`,
+          ).catch(() => {});
+
+          const objectUrl = URL.createObjectURL(blob);
+          objectUrlRef.current = objectUrl;
+          setDisplayImageUrl(objectUrl);
+          toggleImageVisibility(true);
+          info(
+            `[BookCover] Remote cover loaded successfully for book: ${book.title} (${book.hash})`,
+          ).catch(() => {});
+        } catch (error) {
+          const errorMsg = `[BookCover] Failed to fetch remote cover for book: ${book.title} (${book.hash}): ${error}`;
+          console.error(errorMsg);
+          tauriError(errorMsg).catch(() => {});
+          toggleImageVisibility(false);
+        }
+      };
+
+      fetchCover();
+    }, [book.metadata?.coverImageUrl, book.coverImageUrl, book.hash, book.title]);
+
+    const hasDisplayUrl = !!displayImageUrl;
 
     return (
       <div
@@ -76,16 +155,18 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
       >
         {coverFit === 'crop' ? (
           <>
-            <Image
-              src={book.metadata?.coverImageUrl || book.coverImageUrl!}
-              alt={book.title}
-              fill={true}
-              loading='lazy'
-              draggable={false}
-              className={clsx('cover-image crop-cover-img object-cover', imageClassName)}
-              onLoad={handleImageLoad}
-              onError={handleImageError}
-            />
+            {hasDisplayUrl && (
+              <Image
+                src={displayImageUrl!}
+                alt={book.title}
+                fill={true}
+                loading='lazy'
+                draggable={false}
+                className={clsx('cover-image crop-cover-img object-cover', imageClassName)}
+                onLoad={handleImageLoad}
+                onError={handleImageError}
+              />
+            )}
             <div
               className={`book-spine absolute inset-0 ${shouldShowSpine ? 'visible' : 'invisible'}`}
             />
@@ -98,21 +179,23 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
                 mode === 'grid' ? 'items-end' : 'items-center',
               )}
             >
-              <Image
-                src={book.metadata?.coverImageUrl || book.coverImageUrl!}
-                alt={book.title}
-                width={0}
-                height={0}
-                sizes='100vw'
-                loading='lazy'
-                draggable={false}
-                className={clsx(
-                  'cover-image fit-cover-img h-auto max-h-full w-auto max-w-full shadow-md',
-                  imageClassName,
-                )}
-                onLoad={handleImageLoad}
-                onError={handleImageError}
-              />
+              {hasDisplayUrl && (
+                <Image
+                  src={displayImageUrl!}
+                  alt={book.title}
+                  width={0}
+                  height={0}
+                  sizes='100vw'
+                  loading='lazy'
+                  draggable={false}
+                  className={clsx(
+                    'cover-image fit-cover-img h-auto max-h-full w-auto max-w-full shadow-md',
+                    imageClassName,
+                  )}
+                  onLoad={handleImageLoad}
+                  onError={handleImageError}
+                />
+              )}
               <div
                 className={`book-spine absolute inset-0 ${shouldShowSpine ? 'visible' : 'invisible'}`}
               />
@@ -126,6 +209,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
             'text-neutral-content text-center font-serif font-medium',
             isPreview ? 'bg-base-200/50' : 'bg-base-100',
             imageClassName,
+            !hasDisplayUrl && '!visible',
           )}
         >
           <div className='flex h-1/2 items-center justify-center'>
@@ -157,7 +241,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     return (
       prevProps.book.coverImageUrl === nextProps.book.coverImageUrl &&
       prevProps.book.metadata?.coverImageUrl === nextProps.book.metadata?.coverImageUrl &&
-      prevProps.book.updatedAt === nextProps.book.updatedAt &&
+      prevProps.book.hash === nextProps.book.hash &&
       prevProps.mode === nextProps.mode &&
       prevProps.coverFit === nextProps.coverFit &&
       prevProps.isPreview === nextProps.isPreview &&

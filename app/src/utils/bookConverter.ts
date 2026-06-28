@@ -5,6 +5,7 @@
 
 import { Book, BookFormat, ReadingStatus } from '@/types/book';
 import type { MyBooksBook } from '@/services/mybooksService';
+import { isTauriAppPlatform } from '@/services/environment';
 
 /**
  * 构建封面图片的代理路径
@@ -80,6 +81,12 @@ function getPrimaryFormat(files: Array<{ format: string; size: number }>): BookF
   return 'EPUB';
 }
 
+function buildDirectCoverUrl(host: string, path: string): string {
+  const normalizedHost = host.endsWith('/') ? host.slice(0, -1) : host;
+  const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+  return `${normalizedHost}/${normalizedPath}`;
+}
+
 /**
  * 将 MyBooksBook 转换为本地 Book 类型
  * @param cloudBook - MyReader API 返回的书籍对象
@@ -88,29 +95,39 @@ function getPrimaryFormat(files: Array<{ format: string; size: number }>): BookF
 export function convertMyBooksToLocalBook(cloudBook: MyBooksBook): Book {
   const now = Date.now();
 
-  // 获取封面图片 URL，优先使用 thumb，然后使用 img
   let coverImageUrl: string | null = null;
   let originCoverUrl: string | null = null;
   const host = typeof window !== 'undefined' ? localStorage.getItem('mybooks_host') : null;
 
   if (host) {
-    // 对 host 进行编码，作为查询参数传递给代理
-    const encodedHost = encodeURIComponent(host);
+    if (isTauriAppPlatform()) {
+      if (cloudBook.thumb && cloudBook.thumb.trim()) {
+        coverImageUrl = buildDirectCoverUrl(host, cloudBook.thumb);
+      } else if (cloudBook.img && cloudBook.img.trim()) {
+        coverImageUrl = buildDirectCoverUrl(host, cloudBook.img);
+      }
+      if (cloudBook.img && cloudBook.img.trim()) {
+        originCoverUrl = buildDirectCoverUrl(host, cloudBook.img);
+      }
+    } else {
+      const encodedHost = encodeURIComponent(host);
 
-    // 优先使用 thumb
-    if (cloudBook.thumb && cloudBook.thumb.trim()) {
-      const coverPath = buildCoverProxyPath(cloudBook.thumb);
-      const separator = coverPath.includes('?') ? '&' : '?';
-      coverImageUrl = `${coverPath}${separator}host=${encodedHost}`;
-    } else if (cloudBook.img && cloudBook.img.trim()) {
-      const coverPath = buildCoverProxyPath(cloudBook.img);
-      const separator = coverPath.includes('?') ? '&' : '?';
-      coverImageUrl = `${coverPath}${separator}host=${encodedHost}`;
+      if (cloudBook.thumb && cloudBook.thumb.trim()) {
+        const coverPath = buildCoverProxyPath(cloudBook.thumb);
+        const separator = coverPath.includes('?') ? '&' : '?';
+        coverImageUrl = `${coverPath}${separator}host=${encodedHost}`;
+      } else if (cloudBook.img && cloudBook.img.trim()) {
+        const coverPath = buildCoverProxyPath(cloudBook.img);
+        const separator = coverPath.includes('?') ? '&' : '?';
+        coverImageUrl = `${coverPath}${separator}host=${encodedHost}`;
+      }
+
+      if (cloudBook.img && cloudBook.img.trim()) {
+        const coverPath = buildCoverProxyPath(cloudBook.img);
+        const separator = coverPath.includes('?') ? '&' : '?';
+        originCoverUrl = `${coverPath}${separator}host=${encodedHost}`;
+      }
     }
-
-    const coverPath = buildCoverProxyPath(cloudBook.img);
-    const separator = coverPath.includes('?') ? '&' : '?';
-    originCoverUrl = `${coverPath}${separator}host=${encodedHost}`;
   }
 
   const format = getPrimaryFormat(cloudBook.files || []);
