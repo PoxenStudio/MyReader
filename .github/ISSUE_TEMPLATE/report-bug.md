@@ -25,9 +25,7 @@ assignees: ''
 ## Technical inputs
 
 操作系统：
-
 MyReader 版本：
-
 > **示例：**
 > 操作系统：Android 14 (WebView 135.0)
 > MyReader 版本：0.9.0
