@@ -1,35 +1,35 @@
 ---
-name: Report a bug
-about: Report a bug or a functional regression
-title: 'Example: In DarkMode, a blank square appears in bottom right corner while scrolling'
+name: 报个bug
+about: 报告 bug 或功能回归
+title: '示例：深色模式下滚动时右下角出现空白方块'
 labels: ['type: bug']
 assignees: ''
 ---
 
 ## Bug Description
 
-A clear and concise description of what the current behavior is.
-Please also add **screenshots** of the existing application.
+简洁地描述当前的行为。
+请同时添加现有应用的**截图**。
 
-> **Example:**
-> In DarkMode, when scrollbar are displayed (for example on Companies page, with enough companies in the list), we see a blank square in the bottom right corner
-> [screenshot]
+> **示例：**
+> 在深色模式下，当显示滚动条时（例如在公司列表页面，列表中有足够多的公司），我们在右下角看到一个空白方块
+> [截图]
 
 ## Expected behavior
 
-A clear and concise description of what the expected behavior is.
+简洁地描述期望的行为。
 
-> **Example:**
-> The blank square should be transparent (invisible)
+> **示例：**
+> 空白方块应该是透明的（不可见）
 
 ## Technical inputs
 
-Operating System:
+操作系统：
 
-MyReader Version:
+MyReader 版本：
 
-> **Example:**
-> Operating System: Android 14 (WebView 135.0)
-> MyReader Version: 0.9.0
-> We are displaying custom scrollbars that disappear when the user is not scrolling. See ScrollWrapper.
-> Probably fixable with CSS
+> **示例：**
+> 操作系统：Android 14 (WebView 135.0)
+> MyReader 版本：0.9.0
+> 我们显示自定义滚动条，当用户不滚动时会消失。参见 ScrollWrapper。
+> 可能可以通过 CSS 修复

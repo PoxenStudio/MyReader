@@ -1,23 +1,23 @@
 ---
-name: Feature request
-about: Share an idea or suggestion
-title: 'FR: describing your feature request'
+name: 提个需求
+about: 分享想法或建议
+title: 'FR: 描述您的功能请求'
 labels: enhancement
 assignees: ''
 ---
 
-**Does your feature request involve difficulty for you to complete a task? Please describe.**
+**您的功能请求是否涉及完成任务时遇到困难？请描述。**
 
-> A clear and concise description of what the problem is. Ex. I think it takes too many steps to [...]
+> 清晰简洁地描述问题是什么。例如：我认为[...]需要太多步骤
 
-**Describe the solution you'd like**
+**描述您想要的解决方案**
 
-> A clear and concise description of what you'd like to happen.
+> 清晰简洁地描述您希望发生什么。
 
-**Describe alternatives you've considered**
+**描述您考虑过的替代方案**
 
-> A clear and concise description of any alternative solutions or features you've considered.
+> 清晰简洁地描述您考虑过的任何替代解决方案或功能。
 
-**Additional context**
+**额外上下文**
 
-> Add any additional context or screenshots about the feature request here.
+> 在此添加有关功能请求的任何其他上下文或截图。
