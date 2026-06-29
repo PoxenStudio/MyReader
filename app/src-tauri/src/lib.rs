@@ -271,6 +271,12 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .level_for("tracing", log::LevelFilter::Warn)
                 .level_for("tantivy", log::LevelFilter::Warn)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: None,
+                    }),
+                ])
                 .build(),
         )
         .plugin(tauri_plugin_websocket::init())

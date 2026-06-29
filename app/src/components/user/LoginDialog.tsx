@@ -196,7 +196,7 @@ const LoginDialog: React.FC = () => {
       try {
         result = (await response.json()) as MyBooksLoginResponse;
       } catch {
-        console.error('Non-JSON response:', response.status);
+        console.error('Non-JSON response:', response.status, response.statusText, response.body);
         setError(_('Failed to connect to server'));
         return;
       }
@@ -239,7 +239,11 @@ const LoginDialog: React.FC = () => {
         login(sessionToken, mockUser as unknown as User, host);
         handleClose();
       } else {
-        setError(result.msg || _('Login failed'));
+        console.log('Login response status: ', response.status);
+        console.log('Login response status text: ', response.statusText);
+        console.log('Login response body: ', response.body);
+        console.log('Login response:', result);
+        setError(result.msg || _('Login failed') + ':' + result.err);
       }
     } catch (err) {
       console.error('Login failed:', err);

@@ -8,6 +8,7 @@ import { IconContext } from 'react-icons';
 import { AuthProvider } from '@/context/AuthContext';
 import { useEnv } from '@/context/EnvContext';
 import { CSPostHogProvider } from '@/context/PHContext';
+import { info, warn, error, debug } from '@tauri-apps/plugin-log';
 import { initSystemThemeListener, loadDataTheme } from '@/store/themeStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useCustomTextureStore } from '@/store/customTextureStore';
@@ -35,6 +36,43 @@ import AppLockDialog from '@/components/settings/AppLockDialog';
 import TelemetryConsentDialog from '@/components/TelemetryConsentDialog';
 import LoginDialog from '@/components/user/LoginDialog';
 import { useAppLockStore } from '@/store/appLockStore';
+
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+const originalDebug = console.debug;
+const originalInfo = console.info;
+
+console.log = (...args) => {
+  originalLog.apply(console, args);
+  void info(
+    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+  );
+};
+console.debug = (...args) => {
+  originalDebug.apply(console, args);
+  void debug(
+    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+  );
+};
+console.info = (...args) => {
+  originalInfo.apply(console, args);
+  void info(
+    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+  );
+};
+console.warn = (...args) => {
+  originalWarn.apply(console, args);
+  void warn(
+    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+  );
+};
+console.error = (...args) => {
+  originalError.apply(console, args);
+  void error(
+    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+  );
+};
 
 // One-time, on first launch after this feature ships, decide how to handle
 // PostHog telemetry for the current install:
@@ -112,7 +150,6 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const handlerLanguageChanged = (lng: string) => {
       document.documentElement.lang = lng;
-      // Set RTL class on document for targeted styling without affecting layout
       const dir = getDirFromUILanguage();
       if (dir === 'rtl') {
         document.documentElement.classList.add('ui-rtl');
@@ -124,6 +161,7 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
     const locale = getLocale();
     handlerLanguageChanged(locale);
     i18n.on('languageChanged', handlerLanguageChanged);
+
     return () => {
       i18n.off('languageChanged', handlerLanguageChanged);
     };
