@@ -66,7 +66,14 @@ const MYBOOKS_HOST_KEY = 'mybooks_host';
 const MYBOOKS_USERNAME_KEY = 'mybooks_username';
 const MYBOOKS_REMEMBER_KEY = 'mybooks_remember';
 
-const normalizeHost = (host: string) => (host.endsWith('/') ? host.slice(0, -1) : host);
+export const normalizeHost = (host: string): string => {
+  const trimmed = host.endsWith('/') ? host.slice(0, -1) : host;
+  const match = trimmed.match(/^(https?:\/\/)([^/]+)(\/.*)?$/);
+  if (!match) return trimmed;
+  const [, protocol = '', authority = '', rest = ''] = match;
+  const isBareIPv6 = !authority.startsWith('[') && authority.split(':').length > 2;
+  return isBareIPv6 ? `${protocol}[${authority}]${rest}` : trimmed;
+};
 
 const isValidHost = (host: string): boolean => {
   try {
