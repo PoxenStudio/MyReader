@@ -9,6 +9,7 @@ import { AuthProvider } from '@/context/AuthContext';
 import { useEnv } from '@/context/EnvContext';
 import { CSPostHogProvider } from '@/context/PHContext';
 import { info, warn, error, debug } from '@tauri-apps/plugin-log';
+import { isTauriAppPlatform } from '@/services/environment';
 import { initSystemThemeListener, loadDataTheme } from '@/store/themeStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useCustomTextureStore } from '@/store/customTextureStore';
@@ -43,36 +44,38 @@ const originalError = console.error;
 const originalDebug = console.debug;
 const originalInfo = console.info;
 
-console.log = (...args) => {
-  originalLog.apply(console, args);
-  void info(
-    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
-  );
-};
-console.debug = (...args) => {
-  originalDebug.apply(console, args);
-  void debug(
-    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
-  );
-};
-console.info = (...args) => {
-  originalInfo.apply(console, args);
-  void info(
-    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
-  );
-};
-console.warn = (...args) => {
-  originalWarn.apply(console, args);
-  void warn(
-    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
-  );
-};
-console.error = (...args) => {
-  originalError.apply(console, args);
-  void error(
-    args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
-  );
-};
+if (isTauriAppPlatform() && typeof window !== 'undefined') {
+  console.log = (...args) => {
+    originalLog.apply(console, args);
+    void info(
+      args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+    );
+  };
+  console.debug = (...args) => {
+    originalDebug.apply(console, args);
+    void debug(
+      args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+    );
+  };
+  console.info = (...args) => {
+    originalInfo.apply(console, args);
+    void info(
+      args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+    );
+  };
+  console.warn = (...args) => {
+    originalWarn.apply(console, args);
+    void warn(
+      args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+    );
+  };
+  console.error = (...args) => {
+    originalError.apply(console, args);
+    void error(
+      args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '),
+    );
+  };
+}
 
 // One-time, on first launch after this feature ships, decide how to handle
 // PostHog telemetry for the current install:

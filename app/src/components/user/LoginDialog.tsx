@@ -194,9 +194,20 @@ const LoginDialog: React.FC = () => {
 
       let result: MyBooksLoginResponse;
       try {
-        result = (await response.json()) as MyBooksLoginResponse;
+        result = (await response.clone().json()) as MyBooksLoginResponse;
       } catch {
-        console.error('Non-JSON response:', response.status, response.statusText, response.body);
+        const bodyText = await response.text().catch(() => '<unreadable>');
+        console.error(
+          'Non-JSON response:',
+          response.status,
+          response.statusText,
+          'url:',
+          response.url,
+          'redirected:',
+          response.redirected,
+          'body:',
+          bodyText,
+        );
         setError(_('Failed to connect to server'));
         return;
       }
@@ -241,8 +252,8 @@ const LoginDialog: React.FC = () => {
       } else {
         console.log('Login response status: ', response.status);
         console.log('Login response status text: ', response.statusText);
-        console.log('Login response body: ', response.body);
         console.log('Login response:', result);
+        console.log('Login response body: ', response.body);
         setError(result.msg || _('Login failed') + ':' + result.err);
       }
     } catch (err) {
