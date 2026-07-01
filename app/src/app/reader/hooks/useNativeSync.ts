@@ -48,9 +48,14 @@ export const useNativeSync = (bookKey: string) => {
   const dirtyRef = useRef(false);
   const lastPulledAtRef = useRef(0);
   const hasPulledOnce = useRef(false);
+  const initialPullDoneRef = useRef(false);
 
   const pushNow = useCallback(async () => {
     if (!isReady) return;
+    // Never push before the initial pull-on-open has resolved: pushing local
+    // progress before the pull's remote merge lands would overwrite whatever
+    // newer progress the server holds.
+    if (!initialPullDoneRef.current) return;
     if (useReaderStore.getState().getViewState(bookKey)?.previewMode) return;
 
     const config = getConfig(bookKey);
@@ -110,16 +115,16 @@ export const useNativeSync = (bookKey: string) => {
 
       const localUpdatedAt = config.updatedAt ?? 0;
       const remoteUpdatedAt = remoteConfig?.updatedAt ?? remoteConfig?.updated_at ?? 0;
-      const mergedConfig: BookConfig =
-        remoteConfig && remoteUpdatedAt > localUpdatedAt
-          ? {
-              ...config,
-              progress: remoteConfig.progress ?? config.progress,
-              location: remoteConfig.location ?? config.location,
-              xpointer: remoteConfig.xpointer ?? config.xpointer,
-              updatedAt: remoteUpdatedAt,
-            }
-          : config;
+      const remoteWins = !!remoteConfig && remoteUpdatedAt > localUpdatedAt;
+      const mergedConfig: BookConfig = remoteWins
+        ? {
+            ...config,
+            progress: remoteConfig.progress ?? config.progress,
+            location: remoteConfig.location ?? config.location,
+            xpointer: remoteConfig.xpointer ?? config.xpointer,
+            updatedAt: remoteUpdatedAt,
+          }
+        : config;
 
       const byId = new Map<string, BookNote>();
       for (const n of config.booknotes ?? []) byId.set(n.id, n);
@@ -134,6 +139,13 @@ export const useNativeSync = (bookKey: string) => {
       setConfig(bookKey, mergedConfig);
       const latest = getConfig(bookKey);
       if (latest) await saveConfig(envConfig, bookKey, latest, settings);
+
+      // The remote config landing here doesn't otherwise reach the already-
+      // rendered view (it only opens at `config.location` once, at mount),
+      // so without this the pulled position is silently ignored on screen.
+      if (remoteWins && mergedConfig.location && mergedConfig.location !== config.location) {
+        useReaderStore.getState().getView(bookKey)?.goTo(mergedConfig.location);
+      }
       return true;
     } catch (e) {
       if (e instanceof SyncApiError) {
@@ -173,7 +185,9 @@ export const useNativeSync = (bookKey: string) => {
     if (!progress?.location) return;
     if (hasPulledOnce.current) return;
     hasPulledOnce.current = true;
-    void syncRefs.current.pullNow();
+    void syncRefs.current.pullNow().finally(() => {
+      initialPullDoneRef.current = true;
+    });
   }, [isReady, progress?.location]);
 
   // Auto-push on progress changes.
