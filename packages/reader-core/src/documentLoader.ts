@@ -1,0 +1,206 @@
+import * as epubcfi from 'foliate-js/epubcfi.js';
+import type { BookDoc, BookFormat } from './types';
+import { configureZip } from './zip';
+
+export const CFI = epubcfi;
+
+export const EXTS: Record<BookFormat, string> = {
+  EPUB: 'epub',
+  PDF: 'pdf',
+  MOBI: 'mobi',
+  AZW: 'azw',
+  AZW3: 'azw3',
+  CBZ: 'cbz',
+  FB2: 'fb2',
+  FBZ: 'fbz',
+  TXT: 'txt',
+  MD: 'md',
+};
+
+export class DocumentLoader {
+  private file: File;
+
+  constructor(file: File) {
+    this.file = file;
+  }
+
+  private async isZip(): Promise<boolean> {
+    const arr = new Uint8Array(await this.file.slice(0, 4).arrayBuffer());
+    // Standard local file header signature is PK\x03\x04, but some non-conformant
+    // EPUB writers emit malformed bytes (e.g., PK\x03\x02) on the first entry.
+    // The archive is still readable via the central directory, so don't gate on
+    // the 4th byte. PK\x03 alone is enough to identify a local file header.
+    if (arr[0] === 0x50 && arr[1] === 0x4b && arr[2] === 0x03) {
+      return true;
+    }
+    return await this.hasEOCD();
+  }
+
+  private async hasEOCD(): Promise<boolean> {
+    const maxEOCDSearch = 1024 * 64 + 22;
+    const sliceSize = Math.min(maxEOCDSearch, this.file.size);
+    if (sliceSize < 22) return false;
+    const tail = await this.file.slice(this.file.size - sliceSize, this.file.size).arrayBuffer();
+    const bytes = new Uint8Array(tail);
+    for (let i = bytes.length - 22; i >= 0; i--) {
+      if (
+        bytes[i] === 0x50 &&
+        bytes[i + 1] === 0x4b &&
+        bytes[i + 2] === 0x05 &&
+        bytes[i + 3] === 0x06
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async isPDF(): Promise<boolean> {
+    const arr = new Uint8Array(await this.file.slice(0, 5).arrayBuffer());
+    return (
+      arr[0] === 0x25 && arr[1] === 0x50 && arr[2] === 0x44 && arr[3] === 0x46 && arr[4] === 0x2d
+    );
+  }
+
+  private async makeZipLoader() {
+    const getComment = async (): Promise<string | null> => {
+      const EOCD_SIGNATURE = [0x50, 0x4b, 0x05, 0x06];
+      const maxEOCDSearch = 1024 * 64;
+
+      const sliceSize = Math.min(maxEOCDSearch, this.file.size);
+      const tail = await this.file.slice(this.file.size - sliceSize, this.file.size).arrayBuffer();
+      const bytes = new Uint8Array(tail);
+
+      for (let i = bytes.length - 22; i >= 0; i--) {
+        if (
+          bytes[i] === EOCD_SIGNATURE[0] &&
+          bytes[i + 1] === EOCD_SIGNATURE[1] &&
+          bytes[i + 2] === EOCD_SIGNATURE[2] &&
+          bytes[i + 3] === EOCD_SIGNATURE[3]
+        ) {
+          const commentLength = bytes[i + 20]! + (bytes[i + 21]! << 8);
+          const commentStart = i + 22;
+          const commentBytes = bytes.slice(commentStart, commentStart + commentLength);
+          return new TextDecoder().decode(commentBytes);
+        }
+      }
+
+      return null;
+    };
+
+    await configureZip();
+    const { ZipReader, BlobReader, TextWriter, BlobWriter } = await import('@zip.js/zip.js');
+    type Entry = import('@zip.js/zip.js').Entry;
+    const reader = new ZipReader(new BlobReader(this.file));
+    const entries = await reader.getEntries();
+    const map = new Map(entries.map((entry) => [entry.filename, entry]));
+    const lowercaseMap = new Map<string, Entry | null>();
+    for (const entry of entries) {
+      const lowercaseName = entry.filename.toLowerCase();
+      const existing = lowercaseMap.get(lowercaseName);
+      lowercaseMap.set(
+        lowercaseName,
+        existing && existing.filename !== entry.filename ? null : entry,
+      );
+    }
+    const getEntry = (name: string) =>
+      map.get(name) ?? lowercaseMap.get(name.toLowerCase()) ?? null;
+    const load =
+      (f: (entry: Entry, type?: string) => Promise<string | Blob> | null) =>
+      (name: string, ...args: [string?]) => {
+        const entry = getEntry(name);
+        return entry ? f(entry, ...args) : null;
+      };
+
+    const loadText = load((entry: Entry) =>
+      !entry.directory ? entry.getData(new TextWriter()) : null,
+    );
+    const loadBlob = load((entry: Entry, type?: string) =>
+      !entry.directory ? entry.getData(new BlobWriter(type!)) : null,
+    );
+    const getSize = (name: string) => getEntry(name)?.uncompressedSize ?? 0;
+
+    return { entries, loadText, loadBlob, getSize, getComment, sha1: undefined };
+  }
+
+  private isCBZ(): boolean {
+    return (
+      this.file.type === 'application/vnd.comicbook+zip' || this.file.name.endsWith(`.${EXTS.CBZ}`)
+    );
+  }
+
+  private isFB2(): boolean {
+    return (
+      this.file.type === 'application/x-fictionbook+xml' || this.file.name.endsWith(`.${EXTS.FB2}`)
+    );
+  }
+
+  private isFBZ(): boolean {
+    return (
+      this.file.type === 'application/x-zip-compressed-fb2' ||
+      this.file.name.endsWith('.fb.zip') ||
+      this.file.name.endsWith('.fb2.zip') ||
+      this.file.name.endsWith(`.${EXTS.FBZ}`)
+    );
+  }
+
+  public async open(): Promise<{ book: BookDoc; format: BookFormat }> {
+    let book = null;
+    let format: BookFormat = 'EPUB';
+    if (!this.file.size) {
+      throw new Error('File is empty');
+    }
+    try {
+      if (await this.isZip()) {
+        const loader = await this.makeZipLoader();
+        const { entries } = loader;
+
+        if (this.isCBZ()) {
+          const { makeComicBook } = await import('foliate-js/comic-book.js');
+          book = await makeComicBook(loader, this.file);
+          format = 'CBZ';
+        } else if (this.isFBZ()) {
+          const entry = entries.find((entry) => entry.filename.endsWith(`.${EXTS.FB2}`));
+          const blob = await loader.loadBlob((entry ?? entries[0]!).filename);
+          const { makeFB2 } = await import('foliate-js/fb2.js');
+          book = await makeFB2(blob);
+          format = 'FBZ';
+        } else {
+          const { EPUB } = await import('foliate-js/epub.js');
+          book = await new EPUB(loader).init();
+          format = 'EPUB';
+        }
+      } else if (await this.isPDF()) {
+        const { makePDF } = await import('foliate-js/pdf.js');
+        book = await makePDF(this.file);
+        format = 'PDF';
+      } else if (await (await import('foliate-js/mobi.js')).isMOBI(this.file)) {
+        const fflate = await import('foliate-js/vendor/fflate.js');
+        const { MOBI } = await import('foliate-js/mobi.js');
+        book = await new MOBI({ unzlib: fflate.unzlibSync }).open(this.file);
+        const ext = this.file.name.split('.').pop()?.toLowerCase();
+        switch (ext) {
+          case 'azw':
+            format = 'AZW';
+            break;
+          case 'azw3':
+            format = 'AZW3';
+            break;
+          default:
+            format = 'MOBI';
+        }
+      } else if (this.isFB2()) {
+        const { makeFB2 } = await import('foliate-js/fb2.js');
+        book = await makeFB2(this.file);
+        format = 'FB2';
+      }
+    } catch (e: unknown) {
+      console.error('Failed to open document:', e);
+      if (e instanceof Error && e.message?.includes('not a valid zip')) {
+        throw new Error('Unsupported or corrupted book file');
+      }
+      throw e;
+    }
+    return { book, format } as { book: BookDoc; format: BookFormat };
+  }
+}

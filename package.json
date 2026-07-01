@@ -9,6 +9,8 @@
     "lint:lua": "pnpm --filter @poxenstudio/myreader lint:lua",
     "tauri": "pnpm --filter @poxenstudio/myreader tauri",
     "dev-web": "pnpm --filter @poxenstudio/myreader dev-web",
+    "dev:webcomponent": "pnpm --filter @myreader/reader-webcomponent dev",
+    "build:webcomponent": "pnpm --filter @myreader/reader-webcomponent build",
     "prepare": "husky",
     "fmt:check": "pnpm --filter @poxenstudio/myreader fmt:check",
     "clippy:check": "pnpm --filter @poxenstudio/myreader clippy:check",

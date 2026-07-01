@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>myreader-view demo</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: system-ui, sans-serif;
+      }
+      #host-toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+        border-bottom: 1px solid #ccc;
+      }
+      #status {
+        font-size: 12px;
+        color: #666;
+      }
+      myreader-view {
+        display: block;
+        width: 100%;
+        height: calc(100vh - 41px);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="host-toolbar">
+      <button id="flush-sync">Flush sync</button>
+      <button id="reload">Reload page (test progress round-trip)</button>
+      <span id="status"></span>
+    </div>
+    <myreader-view id="reader" src="test.epub" book-id="demo-book-1"></myreader-view>
+
+    <script type="module" src="../src/index.ts"></script>
+    <script type="module">
+      const reader = document.getElementById('reader');
+      const status = document.getElementById('status');
+
+      // Minimal ReaderSyncAdapter demo implementation backed by localStorage,
+      // per document/MyReader_WebComponent_Design.md §6.2 — deliberately
+      // generic, not MyBooks-specific (see §6.5 for the MyBooks adapter shape).
+      reader.syncAdapter = {
+        async loadProgress(bookId) {
+          const raw = localStorage.getItem(`reader-state:${bookId}`);
+          return raw ? JSON.parse(raw) : null;
+        },
+        async saveProgress(bookId, config, reason) {
+          localStorage.setItem(`reader-state:${bookId}`, JSON.stringify(config));
+          status.textContent = `last sync: ${reason} @ ${new Date().toLocaleTimeString()}`;
+        },
+        onError(error, context) {
+          console.error('sync error', context, error);
+        },
+      };
+
+      reader.addEventListener('myreader-ready', (e) => console.log('myreader-ready', e.detail));
+      reader.addEventListener('myreader-error', (e) => console.error('myreader-error', e.detail));
+      reader.addEventListener('myreader-progress', (e) => console.log('myreader-progress', e.detail));
+      reader.addEventListener('myreader-notechange', (e) => console.log('myreader-notechange', e.detail));
+
+      document.getElementById('flush-sync').addEventListener('click', () => reader.flushSync());
+      document.getElementById('reload').addEventListener('click', () => location.reload());
+    </script>
+  </body>
+</html>

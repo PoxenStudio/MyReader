@@ -1,0 +1,36 @@
+{
+  "name": "@myreader/reader-webcomponent",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": ["dist", "package.json", "README.md"],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "import": "./dist/myreader.esm.js",
+        "require": "./dist/myreader.umd.js"
+      }
+    },
+    "main": "./dist/myreader.umd.js",
+    "module": "./dist/myreader.esm.js"
+  },
+  "scripts": {
+    "dev": "vite --open /demo/index.html",
+    "build": "vite build",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@myreader/reader-core": "workspace:*",
+    "foliate-js": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^7.3.3"
+  }
+}

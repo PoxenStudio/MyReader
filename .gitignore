@@ -16,6 +16,7 @@ docker/.env
 
 # production
 /build
+/packages/reader-webcomponent/dist/
 
 # misc
 .DS_Store
@@ -56,3 +57,4 @@ result*
 .claude/settings.local.json
 
 .gradle
+**/node_modules

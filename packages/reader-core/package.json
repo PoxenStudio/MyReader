@@ -1,0 +1,25 @@
+{
+  "name": "@myreader/reader-core",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@zip.js/zip.js": "^2.8.16",
+    "foliate-js": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.31",
+    "jsdom": "^28.1.0",
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.18"
+  }
+}

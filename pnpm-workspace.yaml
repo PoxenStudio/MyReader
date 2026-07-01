@@ -2,6 +2,8 @@ packages:
   - app
   - app/extensions/*
   - packages/foliate-js
+  - packages/reader-core
+  - packages/reader-webcomponent
 
 allowBuilds:
   core-js: true

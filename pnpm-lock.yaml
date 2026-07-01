@@ -606,6 +606,44 @@ importers:
         specifier: '>=4.59.0'
         version: 4.60.3
 
+  packages/reader-core:
+    dependencies:
+      '@zip.js/zip.js':
+        specifier: ^2.8.16
+        version: 2.8.26
+      foliate-js:
+        specifier: workspace:*
+        version: link:../foliate-js
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.31
+        version: 22.19.19
+      jsdom:
+        specifier: ^28.1.0
+        version: 28.1.0(@noble/hashes@1.8.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.6(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(@vitest/browser-playwright@4.1.6)(@vitest/browser-webdriverio@4.1.6)(@vitest/coverage-v8@4.1.6)(jsdom@28.1.0(@noble/hashes@1.8.0))(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+
+  packages/reader-webcomponent:
+    dependencies:
+      '@myreader/reader-core':
+        specifier: workspace:*
+        version: link:../reader-core
+      foliate-js:
+        specifier: workspace:*
+        version: link:../foliate-js
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vite:
+        specifier: '>=7.3.2 <8'
+        version: 7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0)
+
 packages:
 
   '@acemir/cssom@0.9.31':
@@ -12339,6 +12377,20 @@ snapshots:
       - utf-8-validate
       - vite
 
+  '@vitest/browser-playwright@4.1.6(playwright@1.60.0)(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)':
+    dependencies:
+      '@vitest/browser': 4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)
+      '@vitest/mocker': 4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+      playwright: 1.60.0
+      tinyrainbow: 3.1.0
+      vitest: 4.1.6(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(@vitest/browser-playwright@4.1.6)(@vitest/browser-webdriverio@4.1.6)(@vitest/coverage-v8@4.1.6)(jsdom@28.1.0(@noble/hashes@1.8.0))(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+    transitivePeerDependencies:
+      - bufferutil
+      - msw
+      - utf-8-validate
+      - vite
+    optional: true
+
   '@vitest/browser-webdriverio@4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)(webdriverio@9.27.1)':
     dependencies:
       '@vitest/browser': 4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)
@@ -12349,6 +12401,18 @@ snapshots:
       - msw
       - utf-8-validate
       - vite
+
+  '@vitest/browser-webdriverio@4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)(webdriverio@9.27.1)':
+    dependencies:
+      '@vitest/browser': 4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)
+      vitest: 4.1.6(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(@vitest/browser-playwright@4.1.6)(@vitest/browser-webdriverio@4.1.6)(@vitest/coverage-v8@4.1.6)(jsdom@28.1.0(@noble/hashes@1.8.0))(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+      webdriverio: 9.27.1
+    transitivePeerDependencies:
+      - bufferutil
+      - msw
+      - utf-8-validate
+      - vite
+    optional: true
 
   '@vitest/browser@4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)':
     dependencies:
@@ -12366,6 +12430,24 @@ snapshots:
       - msw
       - utf-8-validate
       - vite
+
+  '@vitest/browser@4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)':
+    dependencies:
+      '@blazediff/core': 1.9.1
+      '@vitest/mocker': 4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+      '@vitest/utils': 4.1.6
+      magic-string: 0.30.21
+      pngjs: 7.0.0
+      sirv: 3.0.2
+      tinyrainbow: 3.1.0
+      vitest: 4.1.6(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(@vitest/browser-playwright@4.1.6)(@vitest/browser-webdriverio@4.1.6)(@vitest/coverage-v8@4.1.6)(jsdom@28.1.0(@noble/hashes@1.8.0))(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+      ws: 8.20.1
+    transitivePeerDependencies:
+      - bufferutil
+      - msw
+      - utf-8-validate
+      - vite
+    optional: true
 
   '@vitest/coverage-v8@4.1.6(@vitest/browser@4.1.6)(vitest@4.1.6)':
     dependencies:
@@ -12399,6 +12481,14 @@ snapshots:
       magic-string: 0.30.21
     optionalDependencies:
       vite: 7.3.3(@types/node@22.19.19)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0)
+
+  '@vitest/mocker@4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))':
+    dependencies:
+      '@vitest/spy': 4.1.6
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0)
 
   '@vitest/pretty-format@2.1.9':
     dependencies:
@@ -17537,6 +17627,22 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.9.0
 
+  vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0):
+    dependencies:
+      esbuild: 0.27.7
+      fdir: 6.5.0(picomatch@4.0.4)
+      picomatch: 4.0.4
+      postcss: 8.5.14
+      rollup: 4.60.3
+      tinyglobby: 0.2.16
+    optionalDependencies:
+      '@types/node': 22.19.19
+      fsevents: 2.3.3
+      jiti: 2.7.0
+      terser: 5.47.1
+      tsx: 4.21.0
+      yaml: 2.9.0
+
   vitefu@1.1.3(vite@7.3.3(@types/node@22.19.19)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0)):
     optionalDependencies:
       vite: 7.3.3(@types/node@22.19.19)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0)
@@ -17568,6 +17674,38 @@ snapshots:
       '@types/node': 22.19.19
       '@vitest/browser-playwright': 4.1.6(playwright@1.60.0)(vite@7.3.3(@types/node@22.19.19)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)
       '@vitest/browser-webdriverio': 4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)(webdriverio@9.27.1)
+      '@vitest/coverage-v8': 4.1.6(@vitest/browser@4.1.6)(vitest@4.1.6)
+      jsdom: 28.1.0(@noble/hashes@1.8.0)
+    transitivePeerDependencies:
+      - msw
+
+  vitest@4.1.6(@opentelemetry/api@1.9.1)(@types/node@22.19.19)(@vitest/browser-playwright@4.1.6)(@vitest/browser-webdriverio@4.1.6)(@vitest/coverage-v8@4.1.6)(jsdom@28.1.0(@noble/hashes@1.8.0))(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0)):
+    dependencies:
+      '@vitest/expect': 4.1.6
+      '@vitest/mocker': 4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+      '@vitest/pretty-format': 4.1.6
+      '@vitest/runner': 4.1.6
+      '@vitest/snapshot': 4.1.6
+      '@vitest/spy': 4.1.6
+      '@vitest/utils': 4.1.6
+      es-module-lexer: 2.1.0
+      expect-type: 1.3.0
+      magic-string: 0.30.21
+      obug: 2.1.1
+      pathe: 2.0.3
+      picomatch: 4.0.4
+      std-env: 4.1.0
+      tinybench: 2.9.0
+      tinyexec: 1.1.2
+      tinyglobby: 0.2.16
+      tinyrainbow: 3.1.0
+      vite: 7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+      '@types/node': 22.19.19
+      '@vitest/browser-playwright': 4.1.6(playwright@1.60.0)(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)
+      '@vitest/browser-webdriverio': 4.1.6(vite@7.3.3(@types/node@22.19.19)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))(vitest@4.1.6)(webdriverio@9.27.1)
       '@vitest/coverage-v8': 4.1.6(@vitest/browser@4.1.6)(vitest@4.1.6)
       jsdom: 28.1.0(@noble/hashes@1.8.0)
     transitivePeerDependencies:
