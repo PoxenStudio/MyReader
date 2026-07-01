@@ -19,6 +19,7 @@ import { tauriHandleClose, tauriHandleOnCloseWindow } from '@/utils/window';
 import { isTauriAppPlatform } from '@/services/environment';
 import { uniqueId } from '@/utils/misc';
 import { getBookHash } from '@/utils/book';
+import { consumeEmbedReturnUrl } from '@/utils/embedReturn';
 import { throttle } from '@/utils/throttle';
 import { eventDispatcher } from '@/utils/event';
 import {
@@ -158,6 +159,12 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
   };
 
   const navigateBackToLibrary = () => {
+    const bookHash = bookKeys[0] ? getBookHash(bookKeys[0]) : undefined;
+    const returnUrl = bookHash ? consumeEmbedReturnUrl(bookHash) : null;
+    if (returnUrl) {
+      window.location.assign(returnUrl);
+      return;
+    }
     navigateToLibrary(router, '', undefined, true);
   };
 

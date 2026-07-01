@@ -9,6 +9,7 @@
     "start": "dotenv -e .env.tauri -- next start",
     "dev-web": "dotenv -e .env.web -- next dev",
     "build-web": "dotenv -e .env.web -- next build",
+    "build-web-standalone": "dotenv -e .env.web -e .env.docker -- next build",
     "start-web": "dotenv -e .env.web -- next start",
     "dev-web:vinext": "dotenv -e .env.web -- vinext dev",
     "build-web:vinext": "dotenv -e .env.web -- vinext build",

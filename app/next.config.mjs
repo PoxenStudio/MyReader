@@ -14,12 +14,21 @@ if (isDev) {
 }
 
 const exportOutput = appPlatform !== 'web' && !isDev;
+// Self-hosted Docker deployments (see document/MyReader_Embedded_WebApp.md)
+// build with `pnpm build-web-standalone`, which sets this via .env.docker.
+// Standalone output traces the actually-imported dependency graph into
+// `.next/standalone/node_modules`, so the container doesn't need the full
+// pnpm workspace (or a node_modules built on a matching OS/arch) copied in —
+// just `.next/standalone`, `.next/static`, and `public/`. Cloudflare's
+// `opennextjs-cloudflare build` never sets this flag, so it's unaffected.
+const standaloneOutput = process.env['NEXT_OUTPUT_STANDALONE'] === 'true';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Ensure Next.js uses SSG instead of SSR
   // https://nextjs.org/docs/pages/building-your-application/deploying/static-exports
-  output: exportOutput ? 'export' : undefined,
+  output: exportOutput ? 'export' : standaloneOutput ? 'standalone' : undefined,
+  ...(standaloneOutput ? { outputFileTracingRoot: path.join(__dirname, '..') } : {}),
   pageExtensions: exportOutput ? ['jsx', 'tsx'] : ['js', 'jsx', 'ts', 'tsx'],
   // Note: This feature is required to use the Next.js Image component in SSG mode.
   // See https://nextjs.org/docs/messages/export-image-api for different workarounds.
