@@ -742,10 +742,10 @@ export const CJK_FONTS_PATTENS = new RegExp(
 
 export const BOOK_IDS_SEPARATOR = '+';
 
-export const DOWNLOAD_MYBOOKS_URL = 'https://readest.com?utm_source=readest_web';
+export const DOWNLOAD_MYBOOKS_URL = 'https://mybooks.top';
 
-export const MYBOOKS_WEB_BASE_URL = 'https://web.readest.com';
-export const MYBOOKS_NODE_BASE_URL = 'https://node.readest.com';
+export const MYBOOKS_WEB_BASE_URL = 'https://web.mybooks.top';
+export const MYBOOKS_NODE_BASE_URL = 'https://node.mybooks.top';
 
 export const SHARE_BASE_URL = `${MYBOOKS_WEB_BASE_URL}/s`;
 export const SHARE_EXPIRATION_DAYS = [1, 3, 7] as const;

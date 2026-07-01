@@ -42,7 +42,6 @@ import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
 import { useAppUrlIngress } from '@/hooks/useAppUrlIngress';
 import { useOpenWithBooks } from '@/hooks/useOpenWithBooks';
 import { useOpenAnnotationLink } from '@/hooks/useOpenAnnotationLink';
-import { useOpenShareLink } from '@/hooks/useOpenShareLink';
 import { useClipUrlIngress } from '@/hooks/useClipUrlIngress';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
 import { SelectedFile, useFileSelector } from '@/hooks/useFileSelector';
@@ -261,7 +260,6 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   useAppUrlIngress();
   useOpenWithBooks();
   useOpenAnnotationLink();
-  useOpenShareLink();
   useClipUrlIngress();
   useTransferQueue(libraryLoaded);
 
