@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { resolveMyBooksInternalOrigin } from '@/utils/mybooksInternalOrigin';
 
 const avatarCache = new Map<string, { contentType: string; data: ArrayBuffer }>();
 
@@ -20,7 +21,8 @@ export async function GET(
     return new Response('Avatar path not provided', { status: 400 });
   }
 
-  const normalizedHost = mybooksHost.endsWith('/') ? mybooksHost.slice(0, -1) : mybooksHost;
+  const resolvedHost = resolveMyBooksInternalOrigin(mybooksHost);
+  const normalizedHost = resolvedHost.endsWith('/') ? resolvedHost.slice(0, -1) : resolvedHost;
   const avatarUrl = `${normalizedHost}/${avatarPath}`;
 
   try {

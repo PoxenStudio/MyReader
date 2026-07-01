@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { resolveMyBooksInternalOrigin } from '@/utils/mybooksInternalOrigin';
 
 /**
  * MyReader 电子书下载代理
@@ -6,11 +7,18 @@ import { NextRequest } from 'next/server';
  */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  const targetUrl = url.searchParams.get('url');
+  const targetUrlParam = url.searchParams.get('url');
 
-  if (!targetUrl) {
+  if (!targetUrlParam) {
     return new Response('Target URL not provided', { status: 400 });
   }
+
+  // targetUrlParam carries the full URL including origin (unlike the other
+  // mybooks/* proxy routes, which take a separate `host` param) — rewrite
+  // just the origin when running in the embedded-reader deployment.
+  const parsedTarget = new URL(targetUrlParam);
+  const resolvedOrigin = resolveMyBooksInternalOrigin(parsedTarget.origin);
+  const targetUrl = targetUrlParam.replace(parsedTarget.origin, resolvedOrigin);
 
   try {
     console.log('[MyReader Download Proxy] fetching:', targetUrl);

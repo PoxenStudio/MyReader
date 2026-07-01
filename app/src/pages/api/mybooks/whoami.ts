@@ -13,8 +13,20 @@ interface WhoamiResponse {
  * cookie to MyBooks' `GET /api/user/whoami` and relays the identity back.
  * Runs on the Next.js server so the forwarded Cookie header never reaches
  * client JS. Only meaningful in the same-origin, single-Docker deployment
- * described in document/MyReader_Embedded_WebApp.md — the target host is
- * derived from the incoming request, not a client-supplied parameter.
+ * described in document/MyReader_Embedded_WebApp.md.
+ *
+ * The target is NOT built from the incoming request's Host header: when the
+ * browser reaches the container through a mapped/published port (e.g.
+ * `docker run -p 8082:80`, so `Host: localhost:8082`), that port only exists
+ * on the Docker host — it means nothing inside the container's own network
+ * namespace, where nginx actually listens on 80/443. Reusing it here caused
+ * `fetch` to hit ECONNREFUSED and this endpoint to 502. `MYBOOKS_INTERNAL_ORIGIN`
+ * (set in mybooks' conf/supervisor/talebook.conf, program:myreader) points
+ * straight at Tornado's loopback address, matching nginx's own `upstream
+ * tornado` — one fewer hop than going back out through nginx, and avoids
+ * ever having to guess nginx's in-container listen port. Falls back to the
+ * request's own origin for local (non-Docker) testing where that env var
+ * isn't set.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
@@ -24,9 +36,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const cookie = req.headers.cookie ?? '';
   const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';
   const host = req.headers.host;
+  const internalOrigin = process.env['MYBOOKS_INTERNAL_ORIGIN'] || `${proto}://${host}`;
 
   try {
-    const upstream = await fetch(`${proto}://${host}/api/user/whoami`, {
+    const upstream = await fetch(`${internalOrigin}/api/user/whoami`, {
       headers: cookie ? { Cookie: cookie } : {},
     });
     if (!upstream.ok) {

@@ -3,6 +3,8 @@
  * 用于解决跨域问题，将前端请求转发到 MyReader 服务器
  */
 
+import { resolveMyBooksInternalOrigin } from '@/utils/mybooksInternalOrigin';
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const pathParts = url.pathname.split('/').slice(5); // /api/mybooks/cover/ 之后的部分
@@ -21,7 +23,8 @@ export async function GET(request: Request) {
 
   try {
     // 构建目标 URL
-    const normalizedHost = mybooksHost.endsWith('/') ? mybooksHost.slice(0, -1) : mybooksHost;
+    const resolvedHost = resolveMyBooksInternalOrigin(mybooksHost);
+    const normalizedHost = resolvedHost.endsWith('/') ? resolvedHost.slice(0, -1) : resolvedHost;
     const coverUrl = coverPath.startsWith('/')
       ? `${normalizedHost}${coverPath}`
       : `${normalizedHost}/get/${coverPath}`;

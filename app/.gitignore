@@ -70,6 +70,9 @@ src-tauri/gen
 
 /dist/
 
+# MyBooks embedded-reader Docker build output (scripts/build-docker-dist.sh)
+/myreader-dist/
+
 .context/
 .claude/settings.local.json
 .claude/skills

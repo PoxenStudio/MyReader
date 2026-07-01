@@ -10,6 +10,7 @@
     "dev-web": "dotenv -e .env.web -- next dev",
     "build-web": "dotenv -e .env.web -- next build",
     "build-web-standalone": "dotenv -e .env.web -e .env.docker -- next build",
+    "build-docker-dist": "bash scripts/build-docker-dist.sh",
     "start-web": "dotenv -e .env.web -- next start",
     "dev-web:vinext": "dotenv -e .env.web -- vinext dev",
     "build-web:vinext": "dotenv -e .env.web -- vinext build",

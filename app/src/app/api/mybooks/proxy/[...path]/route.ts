@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { resolveMyBooksInternalOrigin } from '@/utils/mybooksInternalOrigin';
 
 async function proxyRequest(request: NextRequest, method: string): Promise<Response> {
   const url = new URL(request.url);
@@ -8,7 +9,8 @@ async function proxyRequest(request: NextRequest, method: string): Promise<Respo
     return new Response('host parameter required', { status: 400 });
   }
 
-  const normalizedHost = host.endsWith('/') ? host.slice(0, -1) : host;
+  const resolvedHost = resolveMyBooksInternalOrigin(host);
+  const normalizedHost = resolvedHost.endsWith('/') ? resolvedHost.slice(0, -1) : resolvedHost;
   // /api/mybooks/proxy/<path…>  →  slice off the first 4 segments
   const apiPath = url.pathname.split('/').slice(4).join('/');
 
