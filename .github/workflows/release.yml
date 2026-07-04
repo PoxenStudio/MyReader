@@ -359,7 +359,7 @@ jobs:
       # `security import` it, so this step must be split in two: the Apple
       # codesigning env vars can only be omitted entirely, not emptied, when
       # ENABLE_MACOS_SIGNING is false.
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         if: matrix.config.release != 'android' && env.ENABLE_MACOS_SIGNING != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -377,7 +377,7 @@ jobs:
           # var is set to an empty string, which fails to decode as a key.
           args: ${{ matrix.config.args || '' }} ${{ env.ENABLE_TAURI_SIGNING != 'true' && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
 
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         if: matrix.config.release != 'android' && env.ENABLE_MACOS_SIGNING == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
