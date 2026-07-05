@@ -21,6 +21,7 @@ import {
 } from '@/utils/mybooksHistory';
 import { debounce } from '@/utils/debounce';
 import { RegisterDialog } from '@/components/user/RegisterDialog';
+import { AccessCodeDialog } from '@/components/user/AccessCodeDialog';
 import Dialog from '@/components/Dialog';
 import { useAuthUIStore } from '@/store/authUIStore';
 import {
@@ -116,6 +117,7 @@ const LoginDialog: React.FC = () => {
   const [isCheckingRegister, setIsCheckingRegister] = useState(false);
   const [error, setError] = useState('');
   const [showRegisterDialog, setShowRegisterDialog] = useState(false);
+  const [showAccessCodeDialog, setShowAccessCodeDialog] = useState(false);
   // Whether the configured MyBooks host currently allows registration. Defaults
   // to true so the button isn't hidden while we haven't checked yet (e.g. host
   // field still empty/unvalidated) — it's only hidden once the server explicitly
@@ -225,6 +227,8 @@ const LoginDialog: React.FC = () => {
             'Account not activated. Please check your registration email to complete activation or contact the administrator.',
           ),
         );
+      } else if (result.err === 'not_invited') {
+        setShowAccessCodeDialog(true);
       } else if (result.err === 'ok') {
         const userId = result.data?.user_id?.toString() ?? '1';
         const mockUser = {
@@ -496,6 +500,17 @@ const LoginDialog: React.FC = () => {
           onSuccess={(registeredUsername) => {
             setShowRegisterDialog(false);
             setUsername(registeredUsername);
+          }}
+        />
+      )}
+
+      {showAccessCodeDialog && (
+        <AccessCodeDialog
+          host={host}
+          onClose={() => setShowAccessCodeDialog(false)}
+          onSuccess={() => {
+            setShowAccessCodeDialog(false);
+            handleLogin();
           }}
         />
       )}
