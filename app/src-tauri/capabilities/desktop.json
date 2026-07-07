@@ -3,5 +3,5 @@
   "identifier": "desktop-capability",
   "windows": ["main", "updater", "reader-*"],
   "platforms": ["linux", "macOS", "windows"],
-  "permissions": ["updater:default", "cli:default"]
+  "permissions": ["updater:default", "cli:default", "turso:default"]
 }

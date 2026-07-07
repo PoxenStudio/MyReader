@@ -308,9 +308,12 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sharekit::init())
-        .plugin(tauri_plugin_device_info::init())
-        .plugin(tauri_plugin_turso::init())
-        .plugin(tauri_plugin_native_bridge::init())
+        .plugin(tauri_plugin_device_info::init());
+
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.plugin(tauri_plugin_turso::init());
+
+    let builder = builder.plugin(tauri_plugin_native_bridge::init())
         .plugin(tauri_plugin_native_tts::init())
         .plugin(tauri_plugin_webview_upgrade::init());
 
