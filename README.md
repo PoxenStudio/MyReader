@@ -84,7 +84,7 @@ git checkout app/src-tauri/gen/android
 
 pnpm tauri android dev
 # 或在真机上开发
-pnpm tauri android dev --host
+pnpm tauri android dev --host <dev pc ip>
 ```
 
 ```
