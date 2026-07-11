@@ -279,6 +279,16 @@ jobs:
           cd app/
           rm -rf src-tauri/gen/android
           pnpm tauri android init
+          # gen/android is gitignored (never committed), so `tauri android
+          # init` always regenerates a vanilla app/build.gradle.kts that
+          # doesn't know about tauri-plugin-native-bridge's foss/googleplay
+          # `store` product flavor (see plugins/tauri-plugin-native-bridge/
+          # android/build.gradle.kts). Without a strategy Gradle can't pick
+          # between the two variants and fails with a "cannot choose between
+          # fossReleaseRuntimeElements and googleplayReleaseRuntimeElements"
+          # dependency resolution error. Re-inject the same fix documented
+          # in README.md's local Android setup steps on every fresh init.
+          sed -i '/defaultConfig {/a\        missingDimensionStrategy("store", "foss", "googleplay")' src-tauri/gen/android/app/build.gradle.kts
           pnpm tauri icon ../data/icons/myreader-book.png
           git checkout .
 

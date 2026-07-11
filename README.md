@@ -79,20 +79,19 @@ Android:
 # 初始化 Android 环境（运行一次），需要提前安装Android开发环境，Windows上需要打开发者模式
 rm app/src-tauri/gen/android
 pnpm tauri android init
+# app/src-tauri/gen/android 整个目录被 .gitignore 排除，不会被 git 追踪，
+# 所以每次 init 都会重新生成一份不带下面这行补丁的 build.gradle.kts。
+# tauri-plugin-native-bridge 声明了 foss/googleplay 两个 store 维度的 flavor，
+# 缺这一行 Gradle 会因为无法在两者间选择而构建失败，每次 init 后都要重新执行：
+sed -i '/defaultConfig {/a\        missingDimensionStrategy("store", "foss", "googleplay")' app/src-tauri/gen/android/app/build.gradle.kts
 pnpm tauri icon ../data/icons/myreader-book.png
-git checkout app/src-tauri/gen/android
 
 pnpm tauri android dev
 # 或在真机上开发
 pnpm tauri android dev --host <dev pc ip>
 ```
 
-```
-app/build.gradle.kts
-
-android -> defaultConfig:
-missingDimensionStrategy("store", "foss", "googleplay")
-
+```bash
 # 构建APK
 cd app
 # 打包全架构包(universal)
