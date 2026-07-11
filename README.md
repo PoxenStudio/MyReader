@@ -76,7 +76,7 @@ pnpm preview
 Android:
 
 ```bash
-# 初始化 Android 环境（运行一次），需要提前安装Android开发环境
+# 初始化 Android 环境（运行一次），需要提前安装Android开发环境，Windows上需要打开发者模式
 rm app/src-tauri/gen/android
 pnpm tauri android init
 pnpm tauri icon ../data/icons/myreader-book.png
@@ -85,6 +85,13 @@ git checkout app/src-tauri/gen/android
 pnpm tauri android dev
 # 或在真机上开发
 pnpm tauri android dev --host
+```
+
+```
+app/build.gradle.kts
+
+android -> defaultConfig:
+missingDimensionStrategy("store", "foss", "googleplay")
 ```
 
 iOS:
