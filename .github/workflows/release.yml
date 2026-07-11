@@ -296,12 +296,20 @@ jobs:
           # instead of app-universal-release.apk, breaking the cp below.
           # Re-inject the signingConfigs block that reads keystore.properties
           # (created below) on every fresh init, same as the fix above.
+          # The Properties/FileInputStream classes must be imported at the
+          # top of the file rather than referenced inline as java.util.X -
+          # inline java.* qualification does not resolve inside this Kotlin
+          # script scope and fails with "Unresolved reference: util/io".
+          sed -i '1i\
+          import java.io.FileInputStream\
+          import java.util.Properties
+          ' src-tauri/gen/android/app/build.gradle.kts
           sed -i '/android {/a\
               signingConfigs {\
                   create("release") {\
                       val keystorePropertiesFile = rootProject.file("keystore.properties")\
-                      val keystoreProperties = java.util.Properties()\
-                      keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))\
+                      val keystoreProperties = Properties()\
+                      keystoreProperties.load(FileInputStream(keystorePropertiesFile))\
                       storeFile = file(keystoreProperties["storeFile"] as String)\
                       storePassword = keystoreProperties["password"] as String\
                       keyAlias = keystoreProperties["keyAlias"] as String\
