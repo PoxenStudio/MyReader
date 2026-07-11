@@ -289,6 +289,26 @@ jobs:
           # dependency resolution error. Re-inject the same fix documented
           # in README.md's local Android setup steps on every fresh init.
           sed -i '/defaultConfig {/a\        missingDimensionStrategy("store", "foss", "googleplay")' src-tauri/gen/android/app/build.gradle.kts
+          # `tauri android init` never wires up release signing on its own
+          # (the generated build.gradle.kts has no signingConfigs block), so
+          # without this the release build type falls back to the default
+          # unsigned config and gradle emits app-universal-release-unsigned.apk
+          # instead of app-universal-release.apk, breaking the cp below.
+          # Re-inject the signingConfigs block that reads keystore.properties
+          # (created below) on every fresh init, same as the fix above.
+          sed -i '/android {/a\
+              signingConfigs {\
+                  create("release") {\
+                      val keystorePropertiesFile = rootProject.file("keystore.properties")\
+                      val keystoreProperties = java.util.Properties()\
+                      keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))\
+                      storeFile = file(keystoreProperties["storeFile"] as String)\
+                      storePassword = keystoreProperties["password"] as String\
+                      keyAlias = keystoreProperties["keyAlias"] as String\
+                      keyPassword = keystoreProperties["password"] as String\
+                  }\
+              }' src-tauri/gen/android/app/build.gradle.kts
+          sed -i '/getByName("release") {/a\        signingConfig = signingConfigs.getByName("release")' src-tauri/gen/android/app/build.gradle.kts
           pnpm tauri icon ../data/icons/myreader-book.png
           git checkout .
 
