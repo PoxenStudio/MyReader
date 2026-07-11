@@ -92,6 +92,13 @@ app/build.gradle.kts
 
 android -> defaultConfig:
 missingDimensionStrategy("store", "foss", "googleplay")
+
+# 构建APK
+cd app
+# 打包全架构包(universal)
+pnpm tauri android build
+# 只打包aarch64的包
+pnpm tauri android build -t aarch64
 ```
 
 iOS:

@@ -279,7 +279,7 @@ jobs:
           cd app/
           rm -rf src-tauri/gen/android
           pnpm tauri android init
-          pnpm tauri icon ../../data/icons/myreader-book.png
+          pnpm tauri icon ../data/icons/myreader-book.png
           git checkout .
 
           pushd src-tauri/gen/android
