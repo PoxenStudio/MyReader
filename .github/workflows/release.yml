@@ -307,7 +307,13 @@ jobs:
           # the ANDROID_KEY_* secrets were set correctly. Wire the release
           # build type to a signingConfig sourced from keystore.properties
           # on every fresh init.
-          perl -0777 -pi -e 's/android \{\r?\n/android {\n    signingConfigs {\n        create("release") {\n            val keystorePropertiesFile = rootProject.file("keystore.properties")\n            if (keystorePropertiesFile.exists()) {\n                val keystoreProperties = java.util.Properties()\n                keystoreProperties.load(keystorePropertiesFile.inputStream())\n                keyAlias = keystoreProperties.getProperty("keyAlias")\n                keyPassword = keystoreProperties.getProperty("password")\n                storeFile = file(keystoreProperties.getProperty("storeFile"))\n                storePassword = keystoreProperties.getProperty("password")\n            }\n        }\n    }\n/' app/build.gradle.kts
+          # NOTE: use the bare `Properties()` (already imported at the top of
+          # build.gradle.kts) rather than `java.util.Properties()` here — AGP's
+          # `android {}` extension exposes its own `java { ... }` toolchain DSL
+          # accessor that shadows the top-level `java` package inside this
+          # scope, so the fully-qualified form fails with
+          # "Unresolved reference: util".
+          perl -0777 -pi -e 's/android \{\r?\n/android {\n    signingConfigs {\n        create("release") {\n            val keystorePropertiesFile = rootProject.file("keystore.properties")\n            if (keystorePropertiesFile.exists()) {\n                val keystoreProperties = Properties()\n                keystoreProperties.load(keystorePropertiesFile.inputStream())\n                keyAlias = keystoreProperties.getProperty("keyAlias")\n                keyPassword = keystoreProperties.getProperty("password")\n                storeFile = file(keystoreProperties.getProperty("storeFile"))\n                storePassword = keystoreProperties.getProperty("password")\n            }\n        }\n    }\n/' app/build.gradle.kts
           sed -i '/getByName("release") {/a\            signingConfig = signingConfigs.getByName("release")' app/build.gradle.kts
 
           popd
