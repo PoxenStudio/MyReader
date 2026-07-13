@@ -87,9 +87,11 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   );
   const [userInfo, setUserInfo] = useState<MyBooksUserInfo | null>(null);
   const [showUserSettings, setShowUserSettings] = useState(false);
+  const [showMobileSearch, setShowMobileSearch] = useState(false);
 
   const headerRef = useRef<HTMLDivElement>(null);
-  const { isTrafficLightVisible } = useTrafficLight(headerRef);
+  const topBarRef = useRef<HTMLDivElement>(null);
+  const { isTrafficLightVisible } = useTrafficLight(topBarRef);
   const iconSize18 = useResponsiveSize(18);
   const { safeAreaInsets: insets } = useThemeStore();
 
@@ -201,7 +203,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
     <div
       ref={headerRef}
       className={clsx(
-        'titlebar z-10 flex h-[52px] w-full items-center py-2 pr-4 sm:h-[44px]',
+        'titlebar z-10 flex w-full flex-col py-2 pr-4',
         windowButtonVisible ? 'sm:pr-4' : 'sm:pr-6',
         isTrafficLightVisible ? 'pl-16' : 'pl-0 sm:pl-2',
       )}
@@ -211,7 +213,10 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
           : '0px',
       }}
     >
-      <div className='flex w-full items-center justify-between space-x-6 sm:space-x-12'>
+      <div
+        ref={topBarRef}
+        className='flex h-[52px] w-full items-center justify-between space-x-6 sm:h-[44px] sm:space-x-12'
+      >
         <div className='exclude-title-bar-mousedown relative flex w-full items-center pl-2 sm:pl-4'>
           <button
             onClick={onToggleDrawer}
@@ -221,101 +226,105 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
             <MdOutlineMenu className='w-6 h-6' />
           </button>
 
-          <div className='relative flex h-9 w-full items-center sm:h-7'>
-            <Dropdown
-              label={_('Search Category')}
-              className='exclude-title-bar-mousedown dropdown-bottom cursor-pointer'
-              containerClassName='absolute left-1 top-1 z-10'
-              buttonClassName={clsx(
-                'flex h-7 max-w-[84px] items-center gap-0.5 rounded-full px-2 sm:h-6',
-                'text-base-content/60 hover:bg-base-300/70 text-xs',
-              )}
-              toggleButton={
-                <>
-                  <span className='truncate'>{_(currentCategoryLabel)}</span>
-                  <MdExpandMore role='none' className='h-3.5 w-3.5 shrink-0' />
-                </>
-              }
-            >
-              <SearchCategoryMenu
-                currentCategory={searchCategory}
-                onSelectCategory={handleSelectCategory}
-              />
-            </Dropdown>
-            <span className='absolute ps-24'>
-              <span className='bg-base-content/30 block h-4 w-[0.5px]' />
-            </span>
-            <span className='text-base-content/50 absolute ps-28'>
-              <FaSearch className='h-4 w-4' />
-            </span>
-            <input
-              type='text'
-              value={searchQuery}
-              placeholder={
-                currentBooksCount > 1
-                  ? _('Search in {{count}} Book(s)...', {
-                      count: currentBooksCount,
-                    })
-                  : _('Search Books...')
-              }
-              onChange={handleSearchChange}
-              spellCheck='false'
-              className={clsx(
-                'search-input input h-9 w-full rounded-full pr-[30%] ps-36 sm:h-7',
-                'bg-base-300/45 border-0',
-                'font-sans text-sm font-light',
-                'placeholder:text-base-content/50 truncate',
-                'focus:outline-none focus:ring-0',
-              )}
-            />
-          </div>
-          <div className='text-base-content/50 absolute right-4 flex items-center space-x-2 sm:space-x-4'>
-            {searchQuery && (
-              <button
-                type='button'
-                onClick={() => {
-                  setSearchQuery('');
-                  debouncedUpdateQueryParam('');
-                }}
-                className='text-base-content/40 hover:text-base-content/60 pe-1'
-                aria-label={_('Clear Search')}
-              >
-                <IoMdCloseCircle className='h-4 w-4' />
-              </button>
-            )}
-            <span className='bg-base-content/50 mx-2 h-4 w-[0.5px]'></span>
-            {!isCloudLibrary && (
-              <Dropdown
-                label={_('Import Books')}
-                className={clsx(
-                  'exclude-title-bar-mousedown dropdown-bottom dropdown-center cursor-pointer',
-                )}
-                buttonClassName='p-0 h-6 min-h-6 w-6 flex touch-target items-center justify-center !bg-transparent'
-                toggleButton={<PiPlus role='none' className='m-0.5 h-5 w-5' />}
-              >
-                <ImportMenu
-                  onImportBooksFromFiles={onImportBooksFromFiles}
-                  onImportBooksFromDirectory={onImportBooksFromDirectory}
-                  onImportBookFromUrl={onImportBookFromUrl}
-                  onOpenCatalogManager={onOpenCatalogManager}
+          {!isMobile && (
+            <>
+              <div className='relative flex h-9 w-full items-center sm:h-7'>
+                <Dropdown
+                  label={_('Search Category')}
+                  className='exclude-title-bar-mousedown dropdown-bottom cursor-pointer'
+                  containerClassName='absolute left-1 top-1 z-10'
+                  buttonClassName={clsx(
+                    'flex h-7 max-w-[84px] items-center gap-0.5 rounded-full px-2 sm:h-6',
+                    'text-base-content/60 hover:bg-base-300/70 text-xs',
+                  )}
+                  toggleButton={
+                    <>
+                      <span className='truncate'>{_(currentCategoryLabel)}</span>
+                      <MdExpandMore role='none' className='h-3.5 w-3.5 shrink-0' />
+                    </>
+                  }
+                >
+                  <SearchCategoryMenu
+                    currentCategory={searchCategory}
+                    onSelectCategory={handleSelectCategory}
+                  />
+                </Dropdown>
+                <span className='absolute ps-24'>
+                  <span className='bg-base-content/30 block h-4 w-[0.5px]' />
+                </span>
+                <span className='text-base-content/50 absolute ps-28'>
+                  <FaSearch className='h-4 w-4' />
+                </span>
+                <input
+                  type='text'
+                  value={searchQuery}
+                  placeholder={
+                    currentBooksCount > 1
+                      ? _('Search in {{count}} Book(s)...', {
+                          count: currentBooksCount,
+                        })
+                      : _('Search Books...')
+                  }
+                  onChange={handleSearchChange}
+                  spellCheck='false'
+                  className={clsx(
+                    'search-input input h-9 w-full rounded-full pr-[30%] ps-36 sm:h-7',
+                    'bg-base-300/45 border-0',
+                    'font-sans text-sm font-light',
+                    'placeholder:text-base-content/50 truncate',
+                    'focus:outline-none focus:ring-0',
+                  )}
                 />
-              </Dropdown>
-            )}
-            {isMobile || isCloudLibrary ? null : (
-              <button
-                onClick={onToggleSelectMode}
-                aria-label={_('Select Books')}
-                title={_('Select Books')}
-                className='h-6'
-              >
-                {isSelectMode ? (
-                  <PiSelectionAllFill role='button' className='text-base-content/60 h-6 w-6' />
-                ) : (
-                  <PiSelectionAll role='button' className='text-base-content/60 h-6 w-6' />
+              </div>
+              <div className='text-base-content/50 absolute right-4 flex items-center space-x-2 sm:space-x-4'>
+                {searchQuery && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setSearchQuery('');
+                      debouncedUpdateQueryParam('');
+                    }}
+                    className='text-base-content/40 hover:text-base-content/60 pe-1'
+                    aria-label={_('Clear Search')}
+                  >
+                    <IoMdCloseCircle className='h-4 w-4' />
+                  </button>
                 )}
-              </button>
-            )}
-          </div>
+                <span className='bg-base-content/50 mx-2 h-4 w-[0.5px]'></span>
+                {!isCloudLibrary && (
+                  <Dropdown
+                    label={_('Import Books')}
+                    className={clsx(
+                      'exclude-title-bar-mousedown dropdown-bottom dropdown-center cursor-pointer',
+                    )}
+                    buttonClassName='p-0 h-6 min-h-6 w-6 flex touch-target items-center justify-center !bg-transparent'
+                    toggleButton={<PiPlus role='none' className='m-0.5 h-5 w-5' />}
+                  >
+                    <ImportMenu
+                      onImportBooksFromFiles={onImportBooksFromFiles}
+                      onImportBooksFromDirectory={onImportBooksFromDirectory}
+                      onImportBookFromUrl={onImportBookFromUrl}
+                      onOpenCatalogManager={onOpenCatalogManager}
+                    />
+                  </Dropdown>
+                )}
+                {isMobile || isCloudLibrary ? null : (
+                  <button
+                    onClick={onToggleSelectMode}
+                    aria-label={_('Select Books')}
+                    title={_('Select Books')}
+                    className='h-6'
+                  >
+                    {isSelectMode ? (
+                      <PiSelectionAllFill role='button' className='text-base-content/60 h-6 w-6' />
+                    ) : (
+                      <PiSelectionAll role='button' className='text-base-content/60 h-6 w-6' />
+                    )}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
         {isSelectMode ? (
           <div
@@ -336,6 +345,20 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
           </div>
         ) : (
           <div className='flex h-full items-center gap-x-2 sm:gap-x-4'>
+            {isMobile && (
+              <button
+                onClick={() => setShowMobileSearch((prev) => !prev)}
+                aria-label={_('Search Books')}
+                title={_('Search Books')}
+                aria-pressed={showMobileSearch}
+                className={clsx(
+                  'btn btn-ghost h-8 min-h-8 w-8 p-0',
+                  showMobileSearch && 'bg-base-300/70',
+                )}
+              >
+                <FaSearch role='none' className='text-base-content/60 h-4 w-4' />
+              </button>
+            )}
             {connectionStatus === 'unreachable' && (
               <button
                 onClick={handleCheckMyBooksConnectivity}
@@ -419,6 +442,87 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
           </div>
         )}
       </div>
+      {isMobile && showMobileSearch && (
+        <div className='exclude-title-bar-mousedown relative flex w-full items-center px-2 pb-2 sm:px-4'>
+          <div className='relative flex h-9 w-full items-center'>
+            <Dropdown
+              label={_('Search Category')}
+              className='exclude-title-bar-mousedown dropdown-bottom cursor-pointer'
+              containerClassName='absolute left-1 top-1 z-10'
+              buttonClassName={clsx(
+                'flex h-7 max-w-[84px] items-center gap-0.5 rounded-full px-2',
+                'text-base-content/60 hover:bg-base-300/70 text-xs',
+              )}
+              toggleButton={
+                <>
+                  <span className='truncate'>{_(currentCategoryLabel)}</span>
+                  <MdExpandMore role='none' className='h-3.5 w-3.5 shrink-0' />
+                </>
+              }
+            >
+              <SearchCategoryMenu
+                currentCategory={searchCategory}
+                onSelectCategory={handleSelectCategory}
+              />
+            </Dropdown>
+            <span className='absolute ps-24'>
+              <span className='bg-base-content/30 block h-4 w-[0.5px]' />
+            </span>
+            <input
+              type='text'
+              value={searchQuery}
+              placeholder={
+                currentBooksCount > 1
+                  ? _('Search in {{count}} Book(s)...', {
+                      count: currentBooksCount,
+                    })
+                  : _('Search Books...')
+              }
+              onChange={handleSearchChange}
+              spellCheck='false'
+              autoFocus
+              className={clsx(
+                'search-input input h-9 w-full rounded-full pr-[30%] ps-28',
+                'bg-base-300/45 border-0',
+                'font-sans text-sm font-light',
+                'placeholder:text-base-content/50 truncate',
+                'focus:outline-none focus:ring-0',
+              )}
+            />
+          </div>
+          <div className='text-base-content/50 absolute right-4 flex items-center space-x-2'>
+            {searchQuery && (
+              <button
+                type='button'
+                onClick={() => {
+                  setSearchQuery('');
+                  debouncedUpdateQueryParam('');
+                }}
+                className='text-base-content/40 hover:text-base-content/60 pe-1'
+                aria-label={_('Clear Search')}
+              >
+                <IoMdCloseCircle className='h-4 w-4' />
+              </button>
+            )}
+            <span className='bg-base-content/50 mx-2 h-4 w-[0.5px]'></span>
+            {!isCloudLibrary && (
+              <Dropdown
+                label={_('Import Books')}
+                className='exclude-title-bar-mousedown dropdown-bottom dropdown-center cursor-pointer'
+                buttonClassName='p-0 h-6 min-h-6 w-6 flex touch-target items-center justify-center !bg-transparent'
+                toggleButton={<PiPlus role='none' className='m-0.5 h-5 w-5' />}
+              >
+                <ImportMenu
+                  onImportBooksFromFiles={onImportBooksFromFiles}
+                  onImportBooksFromDirectory={onImportBooksFromDirectory}
+                  onImportBookFromUrl={onImportBookFromUrl}
+                  onOpenCatalogManager={onOpenCatalogManager}
+                />
+              </Dropdown>
+            )}
+          </div>
+        </div>
+      )}
       <UserSettingsDialog isOpen={showUserSettings} onClose={() => setShowUserSettings(false)} />
     </div>
   );
