@@ -1,5 +1,9 @@
 {
   "releases": {
+    "0.2.0": {
+      "date": "2026-07-14",
+      "notes": ["Android版本发布", "支持MyBooks开启私人图书馆模式的登录"]
+    },
     "0.1.0": {
       "date": "2026-06-28",
       "notes": ["Initial release"]

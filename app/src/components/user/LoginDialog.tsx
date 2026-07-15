@@ -50,6 +50,7 @@ interface MyBooksUserInfoResponse {
     avatar?: string;
     is_admin?: boolean;
     is_login?: boolean;
+    is_guest?: boolean;
   };
   sys?: {
     allow?: {

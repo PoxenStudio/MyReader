@@ -62,6 +62,7 @@ export interface MyBooksUserInfo {
   avatar: string;
   is_admin: boolean;
   is_login: boolean;
+  is_guest: boolean;
 }
 
 export interface MyBooksUserDetailInfo extends MyBooksUserInfo {
@@ -229,7 +230,7 @@ export async function checkMyBooksConnectivity(): Promise<{
 }> {
   try {
     const response = await fetchMyBooks('/user/info');
-    return { online: true, needsLogin: !response.user?.is_login };
+    return { online: true, needsLogin: !response.user?.is_login && !response.user?.is_guest };
   } catch (error) {
     // The server responded but reported a logical error (e.g. session
     // expired) — we did reach it, so this isn't "offline".
@@ -452,13 +453,13 @@ export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
     updateSysInfo(response.sys);
     const user = response.user;
     if (typeof window !== 'undefined') {
-      if (user?.is_login) {
+      if (user?.is_login || user?.is_guest) {
         localStorage.setItem(MYBOOKS_USER_INFO_CACHE_KEY, JSON.stringify(user));
       } else {
         localStorage.removeItem(MYBOOKS_USER_INFO_CACHE_KEY);
       }
     }
-    if (!user?.is_login) return null;
+    if (!user?.is_login && !user?.is_guest) return null;
     return user;
   } catch (error) {
     // The server responded and told us the real current state (e.g. an
@@ -566,7 +567,7 @@ export interface MyBooksUserDetailResult {
 export async function getUserDetailInfo(): Promise<MyBooksUserDetailResult | null> {
   const response = await fetchMyBooks('/user/info', { detail: 1 });
   updateSysInfo(response.sys);
-  if (!response.user?.is_login) return null;
+  if (!response.user?.is_login && !response.user?.is_guest) return null;
   return { user: response.user as MyBooksUserDetailInfo, sys: response.sys ?? null };
 }
 

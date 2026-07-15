@@ -47,7 +47,13 @@ const nextConfig = {
   assetPrefix: '',
   reactStrictMode: true,
   serverExternalPackages: ['isows'],
-  allowedDevOrigins: ['192.168.2.120'],
+  // Static entry is a stale LAN IP from a prior network; keep it as a
+  // harmless fallback and additionally allow whatever IP tauri-cli picked
+  // for `--host <ip>` this run (forwarded via TAURI_DEV_HOST, see layout.tsx).
+  allowedDevOrigins: [
+    '192.168.2.120',
+    ...(process.env['TAURI_DEV_HOST'] ? [process.env['TAURI_DEV_HOST']] : []),
+  ],
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,

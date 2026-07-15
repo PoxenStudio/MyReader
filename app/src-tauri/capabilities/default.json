@@ -197,7 +197,6 @@
     "deep-link:default",
     "sharekit:default",
     "device-info:default",
-    "turso:default",
     "native-tts:default",
     "native-bridge:default"
   ]

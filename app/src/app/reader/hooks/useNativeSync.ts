@@ -87,6 +87,17 @@ export const useNativeSync = (bookKey: string) => {
         })),
       });
       dirtyRef.current = false;
+
+      const latest = getConfig(bookKey);
+      if (latest) {
+        const synced: BookConfig = {
+          ...latest,
+          lastSyncedAtConfig: now,
+          lastSyncedAtNotes: now,
+        };
+        setConfig(bookKey, synced);
+        await saveConfig(envConfig, bookKey, synced, settings);
+      }
     } catch (e) {
       if (e instanceof SyncApiError) {
         eventDispatcher.dispatch('toast', {
@@ -97,7 +108,7 @@ export const useNativeSync = (bookKey: string) => {
         console.warn('Native sync push failed', e);
       }
     }
-  }, [isReady, bookKey, getConfig, getBookData, _]);
+  }, [isReady, bookKey, getConfig, getBookData, setConfig, saveConfig, envConfig, settings, _]);
 
   const pullNow = useCallback(async (): Promise<boolean> => {
     if (!isReady) return false;
@@ -108,10 +119,10 @@ export const useNativeSync = (bookKey: string) => {
     try {
       const result = await pullSync(0, { book: book.hash });
       lastPulledAtRef.current = Date.now();
+      const now = Date.now();
 
       const remoteConfig = result.configs?.[0];
       const remoteNotes = result.notes ?? [];
-      if (!remoteConfig && remoteNotes.length === 0) return false;
 
       const localUpdatedAt = config.updatedAt ?? 0;
       const remoteUpdatedAt = remoteConfig?.updatedAt ?? remoteConfig?.updated_at ?? 0;
@@ -124,7 +135,8 @@ export const useNativeSync = (bookKey: string) => {
             xpointer: remoteConfig.xpointer ?? config.xpointer,
             updatedAt: remoteUpdatedAt,
           }
-        : config;
+        : { ...config };
+      mergedConfig.lastSyncedAtConfig = now;
 
       const byId = new Map<string, BookNote>();
       for (const n of config.booknotes ?? []) byId.set(n.id, n);
@@ -135,6 +147,7 @@ export const useNativeSync = (bookKey: string) => {
         if (remoteTs >= localTs) byId.set(remote.id, { ...local, ...remote } as BookNote);
       }
       mergedConfig.booknotes = Array.from(byId.values());
+      mergedConfig.lastSyncedAtNotes = now;
 
       setConfig(bookKey, mergedConfig);
       const latest = getConfig(bookKey);

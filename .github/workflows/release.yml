@@ -126,7 +126,7 @@ jobs:
               "os": "ubuntu-latest",
               "release": "android",
               "rust_target": "aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android",
-              "manual": false
+              "manual": true
             },
             {
               "os": "ubuntu-22.04",
@@ -279,7 +279,17 @@ jobs:
           cd app/
           rm -rf src-tauri/gen/android
           pnpm tauri android init
-          pnpm tauri icon ../../data/icons/myreader-book.png
+          # gen/android is gitignored (never committed), so `tauri android
+          # init` always regenerates a vanilla app/build.gradle.kts that
+          # doesn't know about tauri-plugin-native-bridge's foss/googleplay
+          # `store` product flavor (see plugins/tauri-plugin-native-bridge/
+          # android/build.gradle.kts). Without a strategy Gradle can't pick
+          # between the two variants and fails with a "cannot choose between
+          # fossReleaseRuntimeElements and googleplayReleaseRuntimeElements"
+          # dependency resolution error. Re-inject the same fix documented
+          # in README.md's local Android setup steps on every fresh init.
+          sed -i '/defaultConfig {/a\        missingDimensionStrategy("store", "foss", "googleplay")' src-tauri/gen/android/app/build.gradle.kts
+          pnpm tauri icon ../data/icons/myreader-book.png
           git checkout .
 
           pushd src-tauri/gen/android
@@ -288,15 +298,39 @@ jobs:
           base64 -d <<< "${{ secrets.ANDROID_KEY_BASE64 }}" > $RUNNER_TEMP/keystore.jks
           echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
 
+          # `tauri android init` regenerates app/build.gradle.kts from a
+          # vanilla template with no signingConfigs block at all, so
+          # keystore.properties above was written but never read: every
+          # release build was silently *unsigned*
+          # (app-universal-release-unsigned.apk), which then fails to
+          # install with INSTALL_PARSE_FAILED_NO_CERTIFICATES even though
+          # the ANDROID_KEY_* secrets were set correctly. Wire the release
+          # build type to a signingConfig sourced from keystore.properties
+          # on every fresh init.
+          # NOTE: use the bare `Properties()` (already imported at the top of
+          # build.gradle.kts) rather than `java.util.Properties()` here — AGP's
+          # `android {}` extension exposes its own `java { ... }` toolchain DSL
+          # accessor that shadows the top-level `java` package inside this
+          # scope, so the fully-qualified form fails with
+          # "Unresolved reference: util".
+          perl -0777 -pi -e 's/android \{\r?\n/android {\n    signingConfigs {\n        create("release") {\n            val keystorePropertiesFile = rootProject.file("keystore.properties")\n            if (keystorePropertiesFile.exists()) {\n                val keystoreProperties = Properties()\n                keystoreProperties.load(keystorePropertiesFile.inputStream())\n                keyAlias = keystoreProperties.getProperty("keyAlias")\n                keyPassword = keystoreProperties.getProperty("password")\n                storeFile = file(keystoreProperties.getProperty("storeFile"))\n                storePassword = keystoreProperties.getProperty("password")\n            }\n        }\n    }\n/' app/build.gradle.kts
+          sed -i '/getByName("release") {/a\            signingConfig = signingConfigs.getByName("release")' app/build.gradle.kts
+
           popd
           version=${{ needs.get-release.outputs.release_version }}
           apk_path=src-tauri/gen/android/app/build/outputs/apk/universal/release
           universial_apk=MyReader_${version}_universal.apk
           arm64_apk=MyReader_${version}_arm64.apk
+          # Now that signingConfig is wired above, release builds produce
+          # app-universal-release.apk (signed). Still pick the newest
+          # matching file rather than hardcoding the name, as a safety net
+          # in case signing silently falls through (e.g. a missing secret
+          # leaves keystorePropertiesFile.exists() false) and gradle falls
+          # back to the -unsigned.apk name.
           pnpm tauri android build
-          cp ${apk_path}/app-universal-release.apk $universial_apk
+          cp "$(ls -t ${apk_path}/app-universal-release*.apk | head -n1)" $universial_apk
           pnpm tauri android build -t aarch64
-          cp ${apk_path}/app-universal-release.apk $arm64_apk
+          cp "$(ls -t ${apk_path}/app-universal-release*.apk | head -n1)" $arm64_apk
 
           echo "Uploading $universial_apk to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk --clobber
