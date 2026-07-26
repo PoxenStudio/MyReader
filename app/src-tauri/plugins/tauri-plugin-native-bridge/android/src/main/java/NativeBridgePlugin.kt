@@ -11,6 +11,7 @@ import android.provider.Settings
 import android.provider.DocumentsContract
 import android.view.View
 import android.view.KeyEvent
+import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.WindowInsetsController
@@ -119,13 +120,6 @@ data class PurchaseData(
     val platform: String = "android"
 )
 
-interface KeyDownInterceptor {
-    fun interceptVolumeKeys(enabled: Boolean)
-    fun interceptBackKey(enabled: Boolean)
-    fun interceptPageTurnerKeys(enabled: Boolean)
-    fun setKeyLearnMode(enabled: Boolean)
-}
-
 @TauriPlugin(
   permissions = [
     Permission(strings = [Manifest.permission.MANAGE_EXTERNAL_STORAGE], alias = "manageStorage"),
@@ -137,6 +131,83 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     private var redirectHost = "auth-callback"
     private val billingManager by lazy {
         BillingManager(activity)
+    }
+
+    // ── Hardware key interception ─────────────────────────────────────
+    // Android has no built-in hook to forward hardware key events to a
+    // Tauri plugin (unlike onNewIntent/onResume/etc, which the generated
+    // TauriActivity does forward). The only reliable interception point
+    // is Window.dispatchKeyEvent, which normally requires overriding it
+    // on MainActivity — but MainActivity is generated output (gitignored,
+    // recreated by `tauri android build`) so any edits there don't
+    // survive. Instead we wrap the Activity's existing Window.Callback
+    // from here, inside plugin code that's checked into the repo. This
+    // mirrors how the iOS side keeps its volume-key interception fully
+    // inside the plugin (AVAudioSession KVO) without touching AppDelegate.
+    //
+    // Back-key interception is intentionally NOT handled here: KEYCODE_BACK
+    // only reaches dispatchKeyEvent on 3-button nav, not gesture nav (which
+    // goes through the AndroidX back dispatcher instead), and WryActivity
+    // already owns back-key behavior via its own OnBackPressedCallback.
+    // Wrapping it here too would be unreliable and could double-handle it.
+    private var volumeKeysIntercepted = false
+    private var pageTurnerKeysIntercepted = false
+    private var keyLearnMode = false
+    private var interceptedWebView: WebView? = null
+
+    private fun nativeKeyName(keyCode: Int): String? = when (keyCode) {
+        KeyEvent.KEYCODE_VOLUME_UP -> "VolumeUp"
+        KeyEvent.KEYCODE_VOLUME_DOWN -> "VolumeDown"
+        KeyEvent.KEYCODE_MEDIA_NEXT -> "MediaNext"
+        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> "MediaPrevious"
+        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> "MediaPlayPause"
+        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> "MediaFastForward"
+        KeyEvent.KEYCODE_MEDIA_REWIND -> "MediaRewind"
+        else -> null
+    }
+
+    /** Returns true when the event was consumed and must not reach the system. */
+    private fun handleInterceptedKeyEvent(event: KeyEvent): Boolean {
+        val keyName = nativeKeyName(event.keyCode) ?: return false
+        val isVolumeKey =
+            event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+        val featureEnabled = if (isVolumeKey) volumeKeysIntercepted else pageTurnerKeysIntercepted
+        if (!featureEnabled && !keyLearnMode) return false
+
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            sendNativeKeyDown(keyName, event.keyCode)
+        }
+        // Only swallow the event (blocking the system volume UI / media
+        // session) when the corresponding feature is actually turned on;
+        // while merely capturing for learn mode, let it flow through.
+        return featureEnabled
+    }
+
+    private fun sendNativeKeyDown(keyName: String, keyCode: Int) {
+        val webView = interceptedWebView ?: return
+        activity.runOnUiThread {
+            webView.evaluateJavascript(
+                "window.onNativeKeyDown && window.onNativeKeyDown('$keyName', $keyCode);",
+                null,
+            )
+        }
+    }
+
+    private inner class InterceptingWindowCallback(private val original: Window.Callback) :
+        Window.Callback by original {
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+            if (handleInterceptedKeyEvent(event)) return true
+            return original.dispatchKeyEvent(event)
+        }
+    }
+
+    private fun installKeyInterceptor(webView: WebView) {
+        interceptedWebView = webView
+        val window = activity.window
+        val original = window.callback
+        if (original != null && original !is InterceptingWindowCallback) {
+            window.callback = InterceptingWindowCallback(original)
+        }
     }
 
     companion object {
@@ -151,6 +222,7 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     override fun load(webView: WebView) {
         instance = this
         super.load(webView)
+        installKeyInterceptor(webView)
         handleIntent(activity.intent)
     }
 
@@ -409,15 +481,9 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     @Command
     fun intercept_keys(invoke: Invoke) {
         val args = invoke.parseArgs(InterceptKeysRequestArgs::class.java)
-        if (activity is KeyDownInterceptor) {
-            val interceptor = activity as KeyDownInterceptor
-            args.backKey?.let { interceptor.interceptBackKey(it) }
-            args.volumeKeys?.let { interceptor.interceptVolumeKeys(it) }
-            args.pageTurnerKeys?.let { interceptor.interceptPageTurnerKeys(it) }
-            args.learnMode?.let { interceptor.setKeyLearnMode(it) }
-        } else {
-            Log.e("NativeBridgePlugin", "Activity does not implement KeyDownInterceptor")
-        }
+        args.volumeKeys?.let { volumeKeysIntercepted = it }
+        args.pageTurnerKeys?.let { pageTurnerKeysIntercepted = it }
+        args.learnMode?.let { keyLearnMode = it }
         invoke.resolve()
     }
 

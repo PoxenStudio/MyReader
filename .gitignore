@@ -1,6 +1,10 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 docker/.env
 
+# HarmonyOS research: local clones of upstream feat/open-harmony branches,
+# not submodules of record yet (see ops/harmony/README.md)
+/ops/harmony/vendor/
+
 # dependencies
 /node_modules
 /.pnp
