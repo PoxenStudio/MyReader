@@ -583,11 +583,17 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     });
   const isGridMode = viewMode === 'grid';
   const hasItems = sortedBookshelfItems.length > 0;
+  const showLoadMoreTile = hasItems && isCloudLibrary && libraryBooks.length < cloudBooksTotal;
+  const loadMoreTileIndex = showLoadMoreTile ? sortedBookshelfItems.length : -1;
   // In grid mode the Import-Books "+" tile is rendered as an extra grid cell
   // after all books. We represent it to Virtuoso as an extra index past the
   // last book; list mode doesn't have an import tile. Cloud library doesn't
   // show the import tile.
-  const gridTotalCount = hasItems ? sortedBookshelfItems.length + (source !== 'cloud' ? 1 : 0) : 0;
+  const showImportTile = isGridMode && source !== 'cloud';
+  const gridTotalCount = hasItems
+    ? sortedBookshelfItems.length + (showImportTile ? 1 : 0) + (showLoadMoreTile ? 1 : 0)
+    : 0;
+  const listTotalCount = hasItems ? sortedBookshelfItems.length + (showLoadMoreTile ? 1 : 0) : 0;
 
   const listContext = useMemo<BookshelfListContext>(
     () => ({
@@ -599,7 +605,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
 
   const renderBookshelfItem = useCallback(
     (index: number) => {
-      if (isGridMode && source !== 'cloud' && index === sortedBookshelfItems.length) {
+      if (showImportTile && index === sortedBookshelfItems.length) {
         return (
           <div
             className={clsx('bookshelf-import-item mx-0 my-2 sm:mx-4 sm:my-4')}
@@ -621,6 +627,24 @@ const Bookshelf: React.FC<BookshelfProps> = ({
               <div className='flex items-center justify-center'>
                 <PiPlus className='size-10' color='gray' />
               </div>
+            </button>
+          </div>
+        );
+      }
+      if (showLoadMoreTile && index === loadMoreTileIndex) {
+        return (
+          <div
+            className={clsx(
+              'bookshelf-load-more-item flex items-center justify-center',
+              isGridMode ? 'mx-0 my-2 aspect-[28/41] sm:mx-4 sm:my-4' : 'h-28 w-full',
+            )}
+          >
+            <button
+              aria-label={_('Load More')}
+              className='btn btn-primary btn-sm rounded-full px-4 text-xs text-primary-content'
+              onClick={onLoadMoreCloudBooks}
+            >
+              {_('Load More')} ({libraryBooks.length}/{cloudBooksTotal})
             </button>
           </div>
         );
@@ -675,19 +699,28 @@ const Bookshelf: React.FC<BookshelfProps> = ({
       handleShowDetailsBook,
       handleLibraryNavigation,
       handleUpdateReadingStatus,
+      showImportTile,
+      showLoadMoreTile,
+      loadMoreTileIndex,
+      onLoadMoreCloudBooks,
+      libraryBooks,
+      cloudBooksTotal,
     ],
   );
 
   const computeItemKey = useCallback(
     (index: number) => {
-      if (isGridMode && index === sortedBookshelfItems.length) {
+      if (showImportTile && index === sortedBookshelfItems.length) {
         return 'library-import-tile';
+      }
+      if (showLoadMoreTile && index === loadMoreTileIndex) {
+        return 'library-load-more-tile';
       }
       const item = sortedBookshelfItems[index];
       if (!item) return `library-item-${index}`;
       return `library-item-${'hash' in item ? item.hash : item.id}`;
     },
-    [sortedBookshelfItems, isGridMode],
+    [sortedBookshelfItems, showImportTile, showLoadMoreTile, loadMoreTileIndex],
   );
 
   return (
@@ -713,19 +746,12 @@ const Bookshelf: React.FC<BookshelfProps> = ({
         {hasItems && !isGridMode && (
           <Virtuoso
             overscan={200}
-            totalCount={sortedBookshelfItems.length}
+            totalCount={listTotalCount}
             components={LIST_VIRTUOSO_COMPONENTS}
             computeItemKey={computeItemKey}
             itemContent={renderBookshelfItem}
             scrollerRef={handleScrollerRef}
           />
-        )}
-        {isCloudLibrary && hasItems && libraryBooks.length < cloudBooksTotal && (
-          <div className='flex justify-center py-4'>
-            <button onClick={onLoadMoreCloudBooks} className='btn btn-primary'>
-              {_('Load More')} ({libraryBooks.length}/{cloudBooksTotal})
-            </button>
-          </div>
         )}
       </div>
       {loading && (
