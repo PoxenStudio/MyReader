@@ -407,7 +407,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
                     ? _('Guest — tap to sign in')
                     : userInfo?.nickname || userInfo?.username || _('Account')
                 }
-                className='flex-shrink-0 rounded-full overflow-hidden flex items-center justify-center bg-base-200 h-7 w-7'
+                className='exclude-title-bar-mousedown flex-shrink-0 rounded-full overflow-hidden flex items-center justify-center bg-base-200 h-7 w-7'
               >
                 {!isGuest && avatarProxyUrl ? (
                   <UserAvatar

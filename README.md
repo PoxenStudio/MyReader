@@ -88,7 +88,7 @@ pnpm tauri icon ../data/icons/myreader-book.png
 
 pnpm tauri android dev
 # 或在真机上开发
-pnpm tauri android dev --host <dev pc ip>
+pnpm tauri android dev --host <development pc ip>
 ```
 
 ```bash
