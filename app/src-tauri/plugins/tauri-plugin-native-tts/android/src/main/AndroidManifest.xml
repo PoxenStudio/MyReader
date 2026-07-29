@@ -1,8 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
   <queries>
     <intent>
       <action android:name="android.intent.action.TTS_SERVICE" />
     </intent>
   </queries>
+
+  <application>
+    <!-- Keeps the app process foreground (and exempt from Doze's network/CPU
+         throttling) while reading aloud with the screen locked, by looping a
+         silent track through a real media-playback foreground service — see
+         MediaPlaybackService.onCreate(). Without this declaration (and the
+         matching foregroundServiceType attribute, required since API 34),
+         startForegroundService() fails at runtime and background reading
+         loses network access as soon as the screen locks. -->
+    <service
+      android:name="com.mybooks.native_tts.MediaPlaybackService"
+      android:exported="false"
+      android:foregroundServiceType="mediaPlayback" />
+  </application>
 </manifest>
