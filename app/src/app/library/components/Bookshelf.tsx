@@ -430,6 +430,28 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     setShowGroupingModal(true);
   };
 
+  // Mirrors `uploadBookMenuItem`'s availability check in BookshelfItem: only
+  // local books that haven't been linked to a MyBooks record yet can be
+  // uploaded (cloud-backed books are already there; `bookId !== 0` means
+  // it's already linked).
+  const getUploadableBooks = () => {
+    const hashes = new Set(expandBookshelfSelection(getSelectedBooks(), sortedBookshelfItems));
+    return filteredBooks.filter(
+      (book) =>
+        hashes.has(book.hash) &&
+        !book.deletedAt &&
+        book.storageType !== 'cloud' &&
+        book.bookId === 0,
+    );
+  };
+
+  const uploadSelectedBooks = async () => {
+    const books = getUploadableBooks();
+    if (books.length === 0) return;
+    await Promise.all(books.map((book) => handleBookUpload(book)));
+    setSelectedBooks([]);
+  };
+
   const showStatusSelection = () => {
     setShowSelectModeActions(false);
     setShowStatusAlert(true);
@@ -553,6 +575,12 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   );
 
   const selectedBooks = getSelectedBooks();
+  const canUploadSelectedBooks =
+    selectedBooks.length > 0 &&
+    expandBookshelfSelection(selectedBooks, sortedBookshelfItems).every((hash) => {
+      const book = filteredBooks.find((b) => b.hash === hash);
+      return !!book && !book.deletedAt && book.storageType !== 'cloud' && book.bookId === 0;
+    });
   const isGridMode = viewMode === 'grid';
   const hasItems = sortedBookshelfItems.length > 0;
   // In grid mode the Import-Books "+" tile is rendered as an extra grid cell
@@ -712,6 +740,8 @@ const Bookshelf: React.FC<BookshelfProps> = ({
           onOpen={openSelectedBooks}
           onGroup={groupSelectedBooks}
           onDetails={openBookDetails}
+          onUpload={uploadSelectedBooks}
+          canUpload={canUploadSelectedBooks}
           onStatus={showStatusSelection}
           onDelete={deleteSelectedBooks}
           onCancel={() => handleSetSelectMode(false)}

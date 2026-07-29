@@ -5,6 +5,7 @@ import {
   MdOutlineCancel,
   MdInfoOutline,
   MdCheckCircleOutline,
+  MdOutlineCloudUpload,
 } from 'react-icons/md';
 import { LuFolderPlus } from 'react-icons/lu';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
@@ -17,6 +18,8 @@ interface SelectModeActionsProps {
   onOpen: () => void;
   onGroup: () => void;
   onDetails: () => void;
+  onUpload: () => void;
+  canUpload: boolean;
   onStatus: () => void;
   onDelete: () => void;
   onCancel: () => void;
@@ -28,6 +31,8 @@ const SelectModeActions: React.FC<SelectModeActionsProps> = ({
   onOpen,
   onGroup,
   onDetails,
+  onUpload,
+  canUpload,
   onStatus,
   onDelete,
   onCancel,
@@ -95,6 +100,16 @@ const SelectModeActions: React.FC<SelectModeActionsProps> = ({
         >
           <MdInfoOutline />
           <div>{_('Details')}</div>
+        </button>
+        <button
+          onClick={onUpload}
+          className={clsx(
+            'flex flex-col items-center justify-center gap-1',
+            !canUpload && 'btn-disabled opacity-50',
+          )}
+        >
+          <MdOutlineCloudUpload />
+          <div>{_('Upload')}</div>
         </button>
         <button
           onClick={onDelete}
