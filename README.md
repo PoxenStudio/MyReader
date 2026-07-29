@@ -1,4 +1,4 @@
-# MyReader: My Reader for MyBooks
+# My Reader for My Books
 [![GitHub License](https://img.shields.io/github/license/poxenstudio/myreader)](https://github.com/poxenstudio/myreader/blob/main/LICENSE)
 ![GitHub stars](https://img.shields.io/github/stars/PoxenStudio/myreader.svg?logo=github)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/w/PoxenStudio/myreader?logo=github)
