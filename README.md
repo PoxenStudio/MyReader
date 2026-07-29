@@ -115,6 +115,8 @@ cd app
 pnpm tauri android build
 # 只打包aarch64的包
 pnpm tauri android build -t aarch64
+# 打出签名的apk包
+pnpm build-android-signed
 ```
 
 iOS:

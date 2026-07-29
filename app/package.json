@@ -18,6 +18,7 @@
     "build-tauri": "dotenv -e .env.tauri -- next build",
     "build-browser-ext": "pnpm --filter @poxenstudio/send-to-myreader-extension build",
     "dev-android": "tauri android build -t aarch64 -- --features devtools && adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk",
+    "build-android-signed": "node --experimental-strip-types --no-warnings scripts/build-signed-apk.ts",
     "dev-ios": "tauri ios build -- --features devtools && ideviceinstaller install src-tauri/gen/apple/build/arm64/MyReader.ipa",
     "i18n:extract": "i18next-scanner --config i18next-scanner.config.cjs",
     "i18n:extract:ext": "pnpm --filter @poxenstudio/send-to-myreader-extension i18n:extract",
