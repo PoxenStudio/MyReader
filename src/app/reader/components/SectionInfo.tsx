@@ -6,6 +6,7 @@ import { useThemeStore } from '@/store/themeStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { eventDispatcher } from '@/utils/event';
+import { useBookDataStore } from '@/store/bookDataStore';
 
 interface SectionInfoProps {
   bookKey: string;
@@ -34,7 +35,9 @@ const SectionInfo: React.FC<SectionInfoProps> = ({
   const { appService } = useEnv();
   const { hoveredBookKey, getView, getViewSettings, setHoveredBookKey } = useReaderStore();
   const { systemUIVisible, statusBarHeight } = useThemeStore();
+  const getBookData = useBookDataStore((s) => s.getBookData);
   const viewSettings = getViewSettings(bookKey)!;
+  const bookData = getBookData(bookKey);
   const topInset = Math.max(
     gridInsets.top,
     appService?.isAndroidApp && systemUIVisible ? statusBarHeight / 2 : 0,
@@ -56,20 +59,30 @@ const SectionInfo: React.FC<SectionInfoProps> = ({
     <>
       <div
         className={clsx(
-          'notch-area absolute left-0 right-0 top-0 z-10',
-          isScrolled && !isVertical && 'bg-base-100',
+          // Spans the grid cell and clips down to the top inset strip so the
+          // texture ::before (.notch-masked, see styles/textures.ts) shares
+          // .foliate-viewer::before's paint box — background-size cover/contain
+          // resolves against the element box, so a strip-sized box would
+          // mis-tile at the seam (#4486). clip-path also clips hit-testing,
+          // keeping the click target the inset strip only.
+          'notch-area absolute inset-0 z-10',
+          isScrolled && !isVertical && 'notch-masked bg-base-100',
         )}
         role='none'
         tabIndex={-1}
         onClick={handleNotchClick}
         style={{
-          height: `${topInset}px`,
+          clipPath: `inset(0 0 calc(100% - ${topInset}px) 0)`,
         }}
       />
       <div
         className={clsx(
           'sectioninfo absolute flex items-center overflow-hidden font-sans',
-          isEink ? 'text-sm font-normal' : 'text-neutral-content text-xs font-light',
+          isEink
+            ? 'text-sm font-normal'
+            : bookData?.isFixedLayout
+              ? 'text-white/75 mix-blend-difference text-xs font-light'
+              : 'text-base-content text-xs font-light',
           isVertical ? 'writing-vertical-rl max-h-[85%]' : 'top-0',
         )}
         role='none'

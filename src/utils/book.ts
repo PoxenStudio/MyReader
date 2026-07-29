@@ -1,4 +1,4 @@
-import { BookMetadata, EXTS } from '@/libs/document';
+import { BookMetadata, CalibreCustomColumn, EXTS } from '@/libs/document';
 import {
   Book,
   BOOK_CONFIG_SCHEMA_VERSION,
@@ -158,6 +158,14 @@ export const formatDescription = (description?: string | LanguageMap) => {
     .trim();
 };
 
+export const formatSeries = (series?: string, seriesIndex?: number) => {
+  const name = series?.trim();
+  if (!name) return '';
+  const hasIndex =
+    typeof seriesIndex === 'number' && Number.isFinite(seriesIndex) && seriesIndex > 0;
+  return hasIndex ? `${name} #${seriesIndex}` : name;
+};
+
 export const formatPublisher = (publisher: string | LanguageMap) => {
   return typeof publisher === 'string' ? publisher : formatLanguageMap(publisher);
 };
@@ -182,6 +190,26 @@ export const getPrimaryLanguage = (lang: string | string[] | undefined) => {
   return 'en';
 };
 
+// Immutably apply edited metadata to a book, returning a NEW book object.
+// Callers must not mutate the existing book in place: <BookCover> is memoized
+// and compares fields off the book, so an in-place mutation makes the memo's
+// previous snapshot point to the same object and skips re-rendering the cover.
+export const getBookWithUpdatedMetadata = (book: Book, metadata: BookMetadata): Book => {
+  const updatedBook: Book = {
+    ...book,
+    metadata,
+    title: formatTitle(metadata.title),
+    author: formatAuthors(metadata.author),
+    primaryLanguage: getPrimaryLanguage(metadata.language),
+    updatedAt: Date.now(),
+  };
+  const newCoverImageUrl = metadata.coverImageBlobUrl || metadata.coverImageUrl;
+  if (newCoverImageUrl) {
+    updatedBook.coverImageUrl = newCoverImageUrl;
+  }
+  return updatedBook;
+};
+
 export const formatDate = (date: string | number | Date | null | undefined, isUTC = false) => {
   if (!date) return;
   const userLang = getUserLang();
@@ -194,6 +222,31 @@ export const formatDate = (date: string | number | Date | null | undefined, isUT
     });
   } catch {
     return;
+  }
+};
+
+export const formatCalibreColumnValue = (column: CalibreCustomColumn): string => {
+  const { datatype, value, extra } = column;
+  if (Array.isArray(value)) return value.join(', ');
+  switch (datatype) {
+    case 'rating': {
+      // 0-10 in half stars, like calibre's own rendering
+      const rating = typeof value === 'number' ? value : 0;
+      return '★'.repeat(Math.floor(rating / 2)) + (rating % 2 ? '½' : '');
+    }
+    case 'series':
+      return extra != null ? `${value} [${extra}]` : String(value);
+    case 'datetime':
+      return formatDate(String(value), true) || '';
+    case 'comments':
+      return String(value)
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    case 'bool':
+      return value ? '✓' : '✗';
+    default:
+      return String(value);
   }
 };
 
@@ -227,6 +280,23 @@ export const getCurrentPage = (book: Book, progress: BookProgress) => {
       ? pageinfo.current + 1
       : 0;
 };
+
+/**
+ * A book is "currently reading" iff it has real reading progress and has not
+ * been parked. Importing a book sets timestamps but never `progress` (only
+ * opening it does), so the progress gate drops freshly-added-but-unopened
+ * books; the status gate drops finished, abandoned (on hold) and
+ * manually-marked-unread books. A book actively being read has `readingStatus`
+ * either `undefined` (cleared from 'unread' on first open) or `'reading'`, both
+ * of which pass. Shared by the library's recently-read shelf and the
+ * home-screen reading widget so the two surfaces stay in sync.
+ */
+export const isCurrentlyReadingBook = (book: Book): boolean =>
+  !book.deletedAt &&
+  book.progress != null &&
+  book.readingStatus !== 'finished' &&
+  book.readingStatus !== 'abandoned' &&
+  book.readingStatus !== 'unread';
 
 export const getBookDirFromWritingMode = (writingMode: WritingMode) => {
   switch (writingMode) {

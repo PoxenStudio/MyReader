@@ -4,6 +4,7 @@ import { SchemaType } from '@/services/database/migrate';
 import { getOSPlatform, isValidURL } from '@/utils/misc';
 import { isSafariBrowser } from '@/utils/ua';
 import { RemoteFile } from '@/utils/file';
+import { detectViewTransitionGroup, detectViewTransitionsAPI } from '@/utils/viewTransition';
 import { isPWA } from './environment';
 import { BaseAppService } from './appService';
 import {
@@ -289,6 +290,8 @@ export class WebAppService extends BaseAppService {
   override isMobile = ['android', 'ios'].includes(getOSPlatform());
   override appPlatform = 'web' as AppPlatform;
   override supportsCanvasContext2DFilter = !isSafariBrowser();
+  override supportsViewTransitionsAPI = detectViewTransitionsAPI();
+  override supportsViewTransitionGroup = detectViewTransitionGroup();
   override hasSafeAreaInset = isPWA();
 
   override async init() {
@@ -302,7 +305,7 @@ export class WebAppService extends BaseAppService {
       const settings = await this.loadSettings();
       const lastMigrationVersion = settings.migrationVersion || 0;
 
-      await super.runMigrations(lastMigrationVersion);
+      await super.runMigrations(lastMigrationVersion, settings);
 
       if (lastMigrationVersion < this.CURRENT_MIGRATION_VERSION) {
         await this.saveSettings({
@@ -333,7 +336,7 @@ export class WebAppService extends BaseAppService {
 
   async saveFile(
     filename: string,
-    content: string | ArrayBuffer,
+    content: string | ArrayBuffer | null,
     options?: {
       filePath?: string;
       mimeType?: string;
@@ -344,6 +347,9 @@ export class WebAppService extends BaseAppService {
     },
   ): Promise<boolean> {
     const mimeType = options?.mimeType || 'application/octet-stream';
+    // Web has no filesystem path to read from, so `null` content (only the
+    // native-only "Send" flow passes it) degrades to an empty body.
+    const body = content ?? '';
     if (
       options?.share &&
       typeof navigator !== 'undefined' &&
@@ -351,7 +357,7 @@ export class WebAppService extends BaseAppService {
     ) {
       let shareData: ShareData | null = null;
       try {
-        const file = new File([content], filename, { type: mimeType });
+        const file = new File([body], filename, { type: mimeType });
         const candidate: ShareData = { files: [file], title: filename };
         if (typeof navigator.canShare !== 'function' || navigator.canShare(candidate)) {
           shareData = candidate;
@@ -377,7 +383,7 @@ export class WebAppService extends BaseAppService {
       }
     }
     try {
-      const blob = new Blob([content], { type: mimeType });
+      const blob = new Blob([body], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -391,6 +397,11 @@ export class WebAppService extends BaseAppService {
       console.error('Failed to save file:', error);
       return false;
     }
+  }
+
+  // No system photo gallery on the web; callers fall back to the saveFile flow.
+  async saveImageToGallery(): Promise<boolean> {
+    return false;
   }
 
   async ask(message: string): Promise<boolean> {

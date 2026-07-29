@@ -2,6 +2,10 @@ import type { Book, BookLookupIndex } from '@/types/book';
 import type { AppService, OsPlatform } from '@/types/system';
 import type { SystemSettings } from '@/types/settings';
 import { transferManager } from '@/services/transferManager';
+import { isReadestCloudStorageActive } from '@/services/sync/cloudSyncProvider';
+import { normalizeFilePathForIndex } from '@/services/bookService';
+import { isContentURI, isValidURL } from '@/utils/misc';
+import { isPseStreamFileName } from '@/services/opds/pseStream';
 
 export interface IngestFileDeps {
   appService: AppService;
@@ -102,12 +106,13 @@ function shouldImportInPlace(
   // case-sensitive and stay strict. We do not attempt unicode normalization
   // (NFC/NFD) — APFS handles that at the FS layer and `toLocaleLowerCase`
   // with the wrong locale would introduce its own bugs (e.g. Turkish `İ`).
-  const caseInsensitive =
-    osPlatform === 'macos' || osPlatform === 'ios' || osPlatform === 'windows';
-  const norm = (p: string) => {
-    const n = p.replace(/\\/g, '/').replace(/\/+$/, '');
-    return caseInsensitive ? n.toLowerCase() : n;
-  };
+  //
+  // Defer the actual canonicalization to `normalizeFilePathForIndex` so the
+  // path index (`BookLookupIndex.byFilePath`) and this in-place decision
+  // agree on what counts as the same path — otherwise a re-import could
+  // hit the in-place branch here but miss the fast-path dedup in
+  // importBook (or vice versa).
+  const norm = (p: string) => normalizeFilePathForIndex(p, osPlatform);
   const target = norm(file);
 
   // If the file already lives inside Readest's own managed books directory
@@ -160,6 +165,43 @@ export async function ingestFile(
     appBooksPrefix ?? null,
   );
 
+  // In-place re-import fast path. When the source file lives under one of
+  // the user's registered external library folders and the byFilePath index
+  // already knows about it, skip importBook entirely and return the existing
+  // library entry verbatim. No fs.openFile, no native parser, no partialMD5,
+  // no timestamp / cover / config writes — and crucially no downstream group
+  // / tag / upload logic, so a re-scan can't silently rewrite library sort
+  // order or clobber a manual GroupingModal assignment via a path-derived
+  // group string.
+  //
+  // This is intentionally separate from importBook's byHash / byMetaKey
+  // dedup: a byHash hit means a *different* source path resolves to a known
+  // book (drop a copy from elsewhere, or revive a soft-deleted entry), which
+  // correctly clears `deletedAt` and refreshes timestamps. A byFilePath hit
+  // is the same on-disk file at the same path — there is nothing to refresh,
+  // and refreshing would silently rewrite library sort order on every
+  // re-scan. Soft-deleted books are excluded from `byFilePath` at index
+  // build time so they fall through to byHash and get resurrected.
+  //
+  // Reject URLs, content URIs and PSE streams defensively. The byFilePath
+  // index only carries real on-disk paths, but `inPlace` could in principle
+  // be set on a non-path source by a buggy caller.
+  if (
+    inPlace &&
+    !opts.transient &&
+    opts.lookupIndex &&
+    typeof opts.file === 'string' &&
+    !isPseStreamFileName(opts.file) &&
+    !isValidURL(opts.file) &&
+    !isContentURI(opts.file)
+  ) {
+    const key = normalizeFilePathForIndex(opts.file, appService.osPlatform);
+    const existing = key ? opts.lookupIndex.byFilePath.get(key) : undefined;
+    if (existing) {
+      return existing;
+    }
+  }
+
   const book = await appService.importBook(opts.file, opts.books, {
     lookupIndex: opts.lookupIndex,
     transient: opts.transient,
@@ -196,11 +238,17 @@ export async function ingestFile(
   // they are equivalent to a hash-copy book — only the local storage
   // location differs. uploadBook reads straight from book.filePath in that
   // case; downloads on other devices land in Books/<hash>/ as a normal copy.
+  // Readest Cloud storage is written only when Readest Cloud is one of the
+  // enabled providers (#5062 lets several run at once). When it is unchecked,
+  // this gate is false and the file-sync engine mirrors the import instead
+  // (including Sent books, which reach other devices via each enabled backend
+  // whose syncBooks toggle is on).
   if (
     !opts.transient &&
     isLoggedIn &&
     !book.uploadedAt &&
-    (opts.forceUpload || settings.autoUpload)
+    (opts.forceUpload || settings.autoUpload) &&
+    isReadestCloudStorageActive(settings)
   ) {
     transferManager.queueUpload(book);
   }

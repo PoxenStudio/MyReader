@@ -580,6 +580,24 @@ describe('getColorStyles branches (via getStyles)', () => {
     expect(css).toContain('body.theme-dark');
   });
 
+  it('keeps body.theme-dark transparent in dark mode so the host background texture is not occluded (#4446)', () => {
+    const vs = makeViewSettings({ overrideColor: false, backgroundTextureId: 'leaves' });
+    const theme = makeThemeCode({ isDarkMode: true, bg: '#1a1a1a', fg: '#e0e0e0' });
+    const css = getStyles(vs, theme);
+    expect(css).toMatch(/body\.theme-dark\s*\{\s*background-color: transparent !important;/);
+    expect(css).not.toMatch(/body\.theme-dark\s*\{\s*background-color: #1a1a1a !important/);
+    // #4392 inline light-callout overrides must keep forcing the theme bg
+    expect(css).toContain('background-color: #fff"]');
+    expect(css).toContain('background-color: #1a1a1a !important');
+  });
+
+  it('keeps body.theme-dark transparent even without a texture (docBackground is captured once per section load)', () => {
+    const vs = makeViewSettings({ overrideColor: false, backgroundTextureId: 'none' });
+    const theme = makeThemeCode({ isDarkMode: true, bg: '#1a1a1a', fg: '#e0e0e0' });
+    const css = getStyles(vs, theme);
+    expect(css).toMatch(/body\.theme-dark\s*\{\s*background-color: transparent !important;/);
+  });
+
   it('does not add inline white background overrides in light mode', () => {
     const vs = makeViewSettings({ overrideColor: false });
     const theme = makeThemeCode({ isDarkMode: false });
@@ -636,6 +654,33 @@ describe('getColorStyles branches (via getStyles)', () => {
     // blockquote, table * rule should have background with color-mix
     expect(css).toMatch(
       /blockquote,\s*table\s*\*\s*\{[^}]*background:\s*color-mix\(in srgb,\s*#1a1a1a\s*80%,\s*#000\)/,
+    );
+  });
+
+  it('does not tint table descendants in dark mode when overrideColor is false (#4419)', () => {
+    const vs = makeViewSettings({ overrideColor: false });
+    const theme = makeThemeCode({ isDarkMode: true, bg: '#1a1a1a', fg: '#e0e0e0' });
+    const css = getStyles(vs, theme);
+    // When the user has NOT enabled color override, the `blockquote, table *`
+    // rule must not paint a tinted background on table descendants. Otherwise
+    // plain tables — and the invisible spacer cells some books use for vertical
+    // layout — render with a color different from the page background, and the
+    // spacing between words appears to change in dark mode. Regression from
+    // #4055; the #4028 zebra-row legibility case is now handled by the
+    // light-background rewriters from #4392. See issue #4419.
+    const match = css.match(/blockquote,\s*table\s*\*\s*\{([^}]*)\}/);
+    expect(match).not.toBeNull();
+    expect(match![1]).not.toContain('color-mix');
+  });
+
+  it('still tints blockquotes in dark mode when overrideColor is false', () => {
+    const vs = makeViewSettings({ overrideColor: false });
+    const theme = makeThemeCode({ isDarkMode: true, bg: '#1a1a1a', fg: '#e0e0e0' });
+    const css = getStyles(vs, theme);
+    // The standalone `blockquote` rule keeps its dark-mode tint regardless of
+    // overrideColor — only the shared `table *` part is gated.
+    expect(css).toMatch(
+      /blockquote\s*\{[^}]*background:\s*color-mix\(in srgb,\s*#1a1a1a\s*80%,\s*#000\)/,
     );
   });
 
@@ -696,6 +741,32 @@ describe('getTranslationStyles branches (via getStyles)', () => {
     expect(css).toContain('.translation-target.hidden');
     expect(css).toContain('.translation-target-block');
     expect(css).toContain('.translation-target-toc');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRubyStyles branches (Word Lens gloss <rt> size + color)
+// ---------------------------------------------------------------------------
+describe('getRubyStyles branches (via getStyles)', () => {
+  const theme = makeThemeCode();
+  const rtBlock = (css: string) => css.match(/ruby\.wl-gloss\s*>\s*rt\s*\{([^}]*)\}/)?.[1] ?? '';
+
+  it('defaults the gloss to 0.5em and muted (opacity 0.7, no color override)', () => {
+    const block = rtBlock(getStyles(makeViewSettings(), theme));
+    expect(block).toMatch(/font-size:\s*0\.5em/);
+    expect(block).toMatch(/opacity:\s*0\.7/);
+    expect(block).not.toContain('color:');
+  });
+
+  it('applies a configured gloss font size', () => {
+    const block = rtBlock(getStyles(makeViewSettings({ wordLensGlossFontSize: 0.8 }), theme));
+    expect(block).toMatch(/font-size:\s*0\.8em/);
+  });
+
+  it('applies a configured gloss color at full opacity', () => {
+    const block = rtBlock(getStyles(makeViewSettings({ wordLensGlossColor: '#ff0000' }), theme));
+    expect(block).toMatch(/color:\s*#ff0000/);
+    expect(block).toMatch(/opacity:\s*1\b/);
   });
 });
 
@@ -763,13 +834,26 @@ describe('custom @font-face inlining (via getStyles)', () => {
     expect(css).toContain('blob:http://localhost/my-test-font');
   });
 
-  it('inlines the @font-face rules ahead of the rest of the stylesheet', () => {
+  it('keeps @namespace epub ahead of every @font-face rule (#4438)', () => {
     const vs = makeViewSettings();
     const css = getStyles(vs, theme, [makeCustomFont()]);
-    // Paginator writes this CSS into the iframe before its first paint,
-    // so the custom @font-face must precede the font-family declarations
-    // that reference it (layout styles begin with `@namespace epub`).
-    expect(css.indexOf('@font-face')).toBeLessThan(css.indexOf('@namespace epub'));
+    // A `@namespace` rule is only honored when it precedes all style and
+    // `@font-face` rules; a misplaced one is silently ignored, which drops
+    // the namespaced `aside[epub|type~="footnote"]` selector and reveals the
+    // footnote aside's border as a stray horizontal line (#4438). The custom
+    // `@font-face` rules must therefore come after the namespace declaration.
+    expect(css).toContain('@namespace epub');
+    expect(css).toContain('@font-face');
+    expect(css.indexOf('@namespace epub')).toBeLessThan(css.indexOf('@font-face'));
+  });
+
+  it('still inlines custom @font-face ahead of the font-family declarations', () => {
+    const vs = makeViewSettings();
+    const css = getStyles(vs, theme, [makeCustomFont()]);
+    // Paginator writes this CSS into the iframe before its first paint, so the
+    // custom `@font-face` rules should still precede the `--serif`/`--sans-serif`
+    // font lists that reference them.
+    expect(css.indexOf('@font-face')).toBeLessThan(css.indexOf('--serif:'));
   });
 
   it('emits one @font-face per loaded font', () => {
@@ -794,5 +878,28 @@ describe('custom @font-face inlining (via getStyles)', () => {
     const vs = makeViewSettings();
     const css = getStyles(vs, theme);
     expect(css).not.toContain('font-family: "My Test Font"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Instant-highlight selection suppression
+// ---------------------------------------------------------------------------
+// The instant-highlight quick action owns the touch long-press. Stylesheet
+// `user-select: none` is NOT used for this: on iOS WebKit it breaks
+// `caretRangeFromPoint` (returns null on non-selectable content), killing the
+// instant highlight itself. The system selection is suppressed natively
+// instead (TextSelectionSuppressor in the native-bridge iOS plugin, driven by
+// setTextSelectionSuppressed from FoliateViewer); getStyles must stay free of
+// user-select suppression so caret positioning keeps working.
+describe('instant-highlight selection suppression stays out of getStyles', () => {
+  const theme = makeThemeCode();
+
+  it('never makes the content non-selectable, even with instant highlight on', () => {
+    const vs = makeViewSettings({
+      enableAnnotationQuickActions: true,
+      annotationQuickAction: 'highlight',
+    });
+    const css = getStyles(vs, theme);
+    expect(css).not.toContain('user-select: none !important');
   });
 });

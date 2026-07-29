@@ -19,7 +19,6 @@ interface HighlightColorsEditorProps {
   userHighlightColors: UserHighlightColor[];
   defaultHighlightLabels: Partial<Record<DefaultHighlightColor, string>>;
   highlightOpacity: number;
-  isEink: boolean;
   onCustomHighlightColorsChange: (colors: Record<HighlightColor, string>) => void;
   onUserHighlightColorsChange: (colors: UserHighlightColor[]) => void;
   onDefaultHighlightLabelsChange: (labels: Partial<Record<DefaultHighlightColor, string>>) => void;
@@ -122,7 +121,6 @@ const HighlightColorsEditor: React.FC<HighlightColorsEditorProps> = ({
   userHighlightColors,
   defaultHighlightLabels,
   highlightOpacity,
-  isEink,
   onCustomHighlightColorsChange,
   onUserHighlightColorsChange,
   onDefaultHighlightLabelsChange,
@@ -205,7 +203,6 @@ const HighlightColorsEditor: React.FC<HighlightColorsEditorProps> = ({
               <ColorInput
                 label={_('Edit color')}
                 value={customHighlightColors[color]!}
-                swatchOnly
                 pickerPosition={position}
                 onChange={(value: string) => handleDefaultHexChange(color, value)}
               />
@@ -235,7 +232,6 @@ const HighlightColorsEditor: React.FC<HighlightColorsEditorProps> = ({
           <ColorInput
             label={_('Add custom color')}
             value={newColor}
-            swatchOnly
             showPickerIcon
             pickerPosition='right'
             onChange={setNewColor}
@@ -250,7 +246,6 @@ const HighlightColorsEditor: React.FC<HighlightColorsEditorProps> = ({
                 <ColorInput
                   label={_('Edit color')}
                   value={hex}
-                  swatchOnly
                   pickerPosition={index === 0 ? 'left' : 'center'}
                   onChange={(value: string) => handleUserHexChange(hex, value)}
                 />
@@ -276,7 +271,6 @@ const HighlightColorsEditor: React.FC<HighlightColorsEditorProps> = ({
         label={_('Opacity')}
         value={highlightOpacity}
         onChange={onOpacityChange}
-        disabled={isEink}
         min={0.1}
         max={1}
         step={0.1}

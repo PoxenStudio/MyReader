@@ -236,6 +236,27 @@ describe('sel utilities', () => {
       expect(result.point).toBeDefined();
       expect(result.dir).toBeDefined();
     });
+
+    it('anchors to the on-screen end when the selection start is off-screen (cross-page)', async () => {
+      const { getPosition } = await import('@/utils/sel');
+      // A selection that spans a page boundary: its first line is on the
+      // previous page (off-screen, negative x); its last line is on the current
+      // page (visible). The popup must anchor to the visible (last) end.
+      const mockRange = {
+        getClientRects: () =>
+          [
+            { top: 400, right: -100, bottom: 420, left: -300 }, // previous page (off-screen)
+            { top: 200, right: 300, bottom: 220, left: 100 }, // current page (visible)
+          ] as unknown as DOMRectList,
+        commonAncestorContainer: document.createElement('div'),
+      } as unknown as Range;
+
+      const rect: Rect = { top: 0, right: 1024, bottom: 768, left: 0 };
+      const result = getPosition(mockRange, rect, 10);
+      // 'down' = anchored below the visible last line, not the off-screen start.
+      expect(result.dir).toBe('down');
+      expect(result.point.x).toBeGreaterThan(0);
+    });
   });
 
   describe('isPointerInsideSelection', () => {
@@ -367,6 +388,21 @@ describe('sel utilities', () => {
 
       const text = getTextFromRange(range);
       expect(text).toBe('First nested deep end');
+
+      document.body.removeChild(container);
+    });
+
+    it('should separate selected paragraphs with newlines', async () => {
+      const { getTextFromRange } = await import('@/utils/sel');
+      const container = document.createElement('div');
+      container.innerHTML = '<p>First paragraph</p><p>Second paragraph</p><p>Third paragraph</p>';
+      document.body.appendChild(container);
+
+      const range = document.createRange();
+      range.setStart(container.children[0]!.firstChild!, 6);
+      range.setEnd(container.children[2]!.firstChild!, 5);
+
+      expect(getTextFromRange(range)).toBe('paragraph\nSecond paragraph\nThird');
 
       document.body.removeChild(container);
     });
@@ -508,6 +544,97 @@ describe('sel utilities', () => {
       expect(range.startOffset).toBe(5);
 
       document.body.removeChild(container);
+    });
+  });
+
+  describe('getWordRangeAt', () => {
+    const withTextNode = (text: string) => {
+      const container = document.createElement('div');
+      const node = document.createTextNode(text);
+      container.appendChild(node);
+      document.body.appendChild(container);
+      return { container, node };
+    };
+
+    it('expands a caret in the middle of a word to the whole word', async () => {
+      const { container, node } = withTextNode('Hello world test');
+      const { getWordRangeAt } = await import('@/utils/sel');
+      // offset 8 = the "r" inside "world"
+      const range = getWordRangeAt(node, 8);
+      expect(range?.toString()).toBe('world');
+      document.body.removeChild(container);
+    });
+
+    it('selects the word when the caret sits at the word start boundary', async () => {
+      const { container, node } = withTextNode('Hello world test');
+      const { getWordRangeAt } = await import('@/utils/sel');
+      const range = getWordRangeAt(node, 6); // start of "world"
+      expect(range?.toString()).toBe('world');
+      document.body.removeChild(container);
+    });
+
+    it('selects the word when the caret sits at the word end boundary', async () => {
+      const { container, node } = withTextNode('Hello world test');
+      const { getWordRangeAt } = await import('@/utils/sel');
+      const range = getWordRangeAt(node, 11); // end of "world"
+      expect(range?.toString()).toBe('world');
+      document.body.removeChild(container);
+    });
+
+    it('selects a CJK word at the caret', async () => {
+      const { container, node } = withTextNode('阅读测试内容');
+      const { getWordRangeAt } = await import('@/utils/sel');
+      const range = getWordRangeAt(node, 1);
+      expect(range && range.toString().length > 0).toBe(true);
+      document.body.removeChild(container);
+    });
+
+    it('returns null on whitespace / non-word positions', async () => {
+      const { container, node } = withTextNode('   ');
+      const { getWordRangeAt } = await import('@/utils/sel');
+      expect(getWordRangeAt(node, 1)).toBeNull();
+      document.body.removeChild(container);
+    });
+
+    it('returns null when the node is not a text node', async () => {
+      const container = document.createElement('div');
+      container.innerHTML = '<span>Hello</span>';
+      document.body.appendChild(container);
+      const { getWordRangeAt } = await import('@/utils/sel');
+      expect(getWordRangeAt(container, 0)).toBeNull();
+      document.body.removeChild(container);
+    });
+  });
+
+  describe('getWordRangeFromPoint', () => {
+    it('resolves the word under the point via caretRangeFromPoint', async () => {
+      const container = document.createElement('div');
+      const node = document.createTextNode('Hello world test');
+      container.appendChild(node);
+      document.body.appendChild(container);
+
+      const caretRange = document.createRange();
+      caretRange.setStart(node, 8);
+      caretRange.collapse(true);
+      const doc = Object.assign(document, {
+        caretRangeFromPoint: () => caretRange,
+      }) as Document & { caretRangeFromPoint: (x: number, y: number) => Range | null };
+
+      const { getWordRangeFromPoint } = await import('@/utils/sel');
+      const range = getWordRangeFromPoint(doc, 50, 50);
+      expect(range?.toString()).toBe('world');
+
+      delete (doc as { caretRangeFromPoint?: unknown }).caretRangeFromPoint;
+      document.body.removeChild(container);
+    });
+
+    it('returns null when no caret resolves at the point', async () => {
+      const doc = Object.assign(document, {
+        caretRangeFromPoint: () => null,
+      }) as Document & { caretRangeFromPoint: (x: number, y: number) => Range | null };
+      const { getWordRangeFromPoint } = await import('@/utils/sel');
+      expect(getWordRangeFromPoint(doc, 0, 0)).toBeNull();
+      delete (doc as { caretRangeFromPoint?: unknown }).caretRangeFromPoint;
     });
   });
 });

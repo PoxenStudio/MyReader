@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useEnv } from '@/context/EnvContext';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useReaderStore } from '@/store/readerStore';
+import { useBookProgress } from '@/store/readerProgressStore';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { KOSyncClient, KoSyncProgress } from '@/services/sync/KOSyncClient';
@@ -16,7 +17,14 @@ import {
   getLocalProgressPreview,
   getProgressPercentage,
 } from './kosyncPreview';
-import { getRemoteFraction, getRemoteLocalFraction, isXPointerProgress } from './kosyncProgress';
+import {
+  decideRemoteConflict,
+  getRemoteFraction,
+  isReportedByKOReader,
+  isXPointerProgress,
+  resolveRemoteLocalFraction,
+  type RemoteFractionResolution,
+} from './kosyncProgress';
 import { useWindowActiveChanged } from './useWindowActiveChanged';
 
 type SyncState = 'idle' | 'checking' | 'conflict' | 'synced' | 'error';
@@ -38,8 +46,12 @@ export const useKOSync = (bookKey: string) => {
   const _ = useTranslation();
   const { appService } = useEnv();
   const { settings } = useSettingsStore();
-  const { getProgress, getView } = useReaderStore();
-  const { getBookData, getConfig, setConfig } = useBookDataStore();
+  // Per-field selectors — methods are stable refs, so no subscription churn.
+  const getProgress = useReaderStore((s) => s.getProgress);
+  const getView = useReaderStore((s) => s.getView);
+  const getBookData = useBookDataStore((s) => s.getBookData);
+  const getConfig = useBookDataStore((s) => s.getConfig);
+  const setConfig = useBookDataStore((s) => s.setConfig);
 
   const [kosyncClient, setKOSyncClient] = useState<KOSyncClient | null>(null);
   const [syncState, setSyncState] = useState<SyncState>('idle');
@@ -47,7 +59,9 @@ export const useKOSync = (bookKey: string) => {
   const [errorMessage] = useState<string | null>(null);
   const hasPulledOnce = useRef(false);
 
-  const progress = getProgress(bookKey);
+  // Reactive subscription: drives the auto-push effect and the initial
+  // pull-on-open effect below. Reads from readerProgressStore.
+  const progress = useBookProgress(bookKey);
 
   useEffect(() => {
     if (!settings.kosync.username || !settings.kosync.userkey) {
@@ -131,11 +145,19 @@ export const useKOSync = (bookKey: string) => {
           const content = view.renderer
             .getContents()
             .find((x) => x.index === view.renderer.primaryIndex);
+          // Only feed percentage into the CREngine↔foliate drift anchor when
+          // the report actually comes from KOReader (#5109) — a look-alike
+          // server's percentage isn't comparable to foliate's section table
+          // and re-anchors to the wrong chapter otherwise.
+          const driftAnchorPercentage = isReportedByKOReader(remote)
+            ? remote.percentage
+            : undefined;
           const cfi = await getCFIFromXPointer(
             remote.progress!,
             content?.doc,
             content?.index,
             bookDoc,
+            driftAnchorPercentage,
           );
           view.goTo(cfi);
           navigated = true;
@@ -152,10 +174,9 @@ export const useKOSync = (bookKey: string) => {
         view.goToFraction(remoteFraction);
       }
     }
-    eventDispatcher.dispatch('toast', {
+    eventDispatcher.dispatch('hint', {
+      bookKey,
       message: _('Reading Progress Synced'),
-      type: 'info',
-      timeout: 2000,
     });
   };
 
@@ -212,17 +233,29 @@ export const useKOSync = (bookKey: string) => {
     } else {
       // KOReader's reported percentage comes from its own pagination, so it's
       // not directly comparable to Readest's progress. Resolve the remote
-      // position to a local fraction for an apples-to-apples comparison and
-      // fall back to the reported percentage only when it can't be resolved
-      // locally (non-XPointer progress or a missing section).
+      // position to a local fraction for an apples-to-apples comparison.
+      //
+      // Crucially, a KOReader XPointer that FAILS to resolve locally
+      // ('unresolved') is not the same as "no conflict": its percentage isn't
+      // comparable, so we must not conclude the positions match just because
+      // the numbers happen to line up (the #5065 iOS bug). Only genuinely
+      // non-resolvable formats ('not-xpointer', e.g. Kavita) fall back to the
+      // reported percentage. See decideRemoteConflict for details.
       const view = getView(bookKey);
-      const localFraction = view ? await getRemoteLocalFraction(remote, view, bookDoc) : undefined;
-      remoteComparePercentage = localFraction ?? remotePercentage;
+      const resolution: RemoteFractionResolution = view
+        ? await resolveRemoteLocalFraction(remote, view, bookDoc)
+        : { status: isXPointerProgress(remote.progress) ? 'unresolved' : 'not-xpointer' };
+      const decision = decideRemoteConflict(
+        resolution,
+        localPercentage,
+        remotePercentage,
+        conflictProgressDiffThreshold,
+      );
+      remoteComparePercentage = decision.comparePercentage;
+      showConflictDetails = decision.showConflictDetails;
       remotePreview = _('Approximately {{percentage}}%', {
         percentage: formatProgressPercentage(remoteComparePercentage),
       });
-      showConflictDetails =
-        Math.abs(localPercentage - remoteComparePercentage) > conflictProgressDiffThreshold;
     }
 
     if (showConflictDetails) {

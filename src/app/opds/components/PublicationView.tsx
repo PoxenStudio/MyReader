@@ -13,7 +13,8 @@ import { getImportErrorMessage, ImportError } from '@/services/errors';
 import { eventDispatcher } from '@/utils/event';
 import { navigateToReader } from '@/utils/nav';
 import { CachedImage } from '@/components/CachedImage';
-import { groupByArray } from '../utils/opdsUtils';
+import { groupByArray, getOPDSNavLink, formatContributorName } from '../utils/opdsUtils';
+import { getOPDSDescriptionHtml } from '../utils/opdsContent';
 import Dropdown from '@/components/Dropdown';
 import MenuItem from '@/components/MenuItem';
 
@@ -30,6 +31,7 @@ interface PublicationViewProps {
    */
   existingBook?: Book | null;
   resolveURL: (url: string, base: string) => string;
+  onNavigate: (url: string) => void;
   onDownload: (
     href: string,
     type?: string,
@@ -44,6 +46,7 @@ export function PublicationView({
   baseURL,
   existingBook,
   resolveURL,
+  onNavigate,
   onDownload,
   onStream,
   onGenerateCachedImageUrl,
@@ -91,12 +94,21 @@ export function PublicationView({
 
   const authors = useMemo(() => {
     const author = publication.metadata?.author;
-    if (!author) return undefined;
+    if (!author) return [] as Array<{ name: string; href: string | undefined }>;
 
     const authorList = Array.isArray(author) ? author : [author];
 
-    return authorList.map((a) => (typeof a === 'string' ? a : a?.name)).filter(Boolean);
+    return authorList
+      .map((a) =>
+        typeof a === 'string'
+          ? { name: a, href: undefined as string | undefined }
+          : { name: a?.name, href: getOPDSNavLink(a?.links) },
+      )
+      .filter((a): a is { name: string; href: string | undefined } => Boolean(a.name))
+      .map((a) => ({ ...a, name: formatContributorName(a.name) }));
   }, [publication.metadata?.author]);
+
+  const authorNames = useMemo(() => authors.map((a) => a.name), [authors]);
 
   const acquisitionLinks = useMemo(() => {
     const links: Array<{ rel: string; links: OPDSAcquisitionLink[] }> = [];
@@ -164,6 +176,14 @@ export function PublicationView({
 
   const content = publication.metadata?.[SYMBOL.CONTENT] || publication.metadata?.content;
   const description = publication.metadata?.description;
+  // OPDS 2.0 JSON keeps the summary in the plain `description` string (no typed
+  // <content>), and catalogs like pglaf/Gutenberg fill it with HTML. Fall back
+  // to it so that markup renders as markup instead of literal tags; the helper
+  // sanitizes either source (readest issue #4749).
+  const descriptionHtml = useMemo(
+    () => getOPDSDescriptionHtml(content ?? description),
+    [content, description],
+  );
 
   return (
     <div className='flex w-full flex-col px-6 py-6'>
@@ -189,10 +209,31 @@ export function PublicationView({
             <h1 className='mb-2 text-base font-bold'>
               {publication.metadata?.title || 'Untitled'}
             </h1>
-            {authors && authors.length > 0 && (
-              <p className='text-base-content/70 text-sm'>{authors.join(', ')}</p>
+            {authors.length > 0 && (
+              <p className='text-base-content/70 text-sm'>
+                {authors.map((author, index) => (
+                  <span key={index}>
+                    {index > 0 && ' & '}
+                    {author.href ? (
+                      <button
+                        type='button'
+                        onClick={() => onNavigate(resolveURL(author.href!, baseURL))}
+                        className='hover:underline'
+                      >
+                        {author.name}
+                      </button>
+                    ) : (
+                      author.name
+                    )}
+                  </span>
+                ))}
+              </p>
             )}
           </div>
+
+          {!downloadedBook && acquisitionLinks.length === 0 && streamLinks.length === 0 && (
+            <p className='text-base-content/60 text-sm'>{_('No downloadable format available')}</p>
+          )}
 
           {(acquisitionLinks.length > 0 || streamLinks.length > 0) && (
             <div className='flex flex-wrap items-center gap-2'>
@@ -286,7 +327,7 @@ export function PublicationView({
                           link.href!,
                           count,
                           publication.metadata?.title || '',
-                          authors?.join(', ') || '',
+                          authorNames.join(' & '),
                         )
                       }
                       disabled={downloading || !!downloadedBook}
@@ -325,14 +366,10 @@ export function PublicationView({
 
       <div className='max-w-xl items-start space-y-6'>
         {/* Description */}
-        {(content || description) && (
+        {(descriptionHtml || description) && (
           <div className='prose prose-sm max-w-none'>
-            {content ? (
-              <div
-                dangerouslySetInnerHTML={{
-                  __html: typeof content === 'string' ? content : content.value,
-                }}
-              />
+            {descriptionHtml ? (
+              <div dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
             ) : (
               <p>{description}</p>
             )}
@@ -401,12 +438,29 @@ export function PublicationView({
               {publication.metadata.subject.map((subject, index: number) => {
                 const tag =
                   typeof subject === 'string' ? subject : subject.name || subject.code || _('Tag');
-                return (
-                  <div key={index} className='badge badge-outline max-w-full gap-1'>
+                const href =
+                  typeof subject === 'string' ? undefined : getOPDSNavLink(subject.links);
+                const badgeClass = 'badge badge-outline max-w-full gap-1';
+                const inner = (
+                  <>
                     <IoPricetag className='h-3 min-h-3 w-3 min-w-3' />
                     <div className='truncate' title={tag}>
                       {tag}
                     </div>
+                  </>
+                );
+                return href ? (
+                  <button
+                    key={index}
+                    type='button'
+                    onClick={() => onNavigate(resolveURL(href, baseURL))}
+                    className={clsx(badgeClass, 'hover:bg-base-200 cursor-pointer')}
+                  >
+                    {inner}
+                  </button>
+                ) : (
+                  <div key={index} className={badgeClass}>
+                    {inner}
                   </div>
                 );
               })}

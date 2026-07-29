@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { useEnv } from '@/context/EnvContext';
 import { useSync } from '@/hooks/useSync';
 import { BookConfig, FIXED_LAYOUT_FORMATS } from '@/types/book';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
+import { useBookProgress } from '@/store/readerProgressStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTranslation } from '@/hooks/useTranslation';
+import { mergeProofreadRules } from '@/utils/proofread';
 import { serializeConfig } from '@/utils/serializer';
 import { CFI } from '@/libs/document';
 import { debounce } from '@/utils/debounce';
@@ -22,12 +25,26 @@ const PULL_RETRY_DELAYS_MS = [1500, 4000, 10000];
 
 export const useProgressSync = (bookKey: string) => {
   const _ = useTranslation();
-  const { getConfig, setConfig, getBookData } = useBookDataStore();
-  const { getView, getProgress, setHoveredBookKey } = useReaderStore();
+  // Per-field selectors avoid subscribing this hook's host (FoliateViewer)
+  // to the WHOLE bookDataStore — saveConfig writes booksData on every
+  // throttled save and would otherwise re-render the entire reader subtree.
+  const getConfig = useBookDataStore((s) => s.getConfig);
+  const saveConfig = useBookDataStore((s) => s.saveConfig);
+  const getBookData = useBookDataStore((s) => s.getBookData);
+  const getView = useReaderStore((s) => s.getView);
+  const getViewSettings = useReaderStore((s) => s.getViewSettings);
+  const setViewSettings = useReaderStore((s) => s.setViewSettings);
+  const recreateViewer = useReaderStore((s) => s.recreateViewer);
+  const setHoveredBookKey = useReaderStore((s) => s.setHoveredBookKey);
+  const { envConfig } = useEnv();
   const { settings } = useSettingsStore();
   const { syncedConfigs, syncConfigs } = useSync(bookKey);
   const { user } = useAuth();
-  const progress = getProgress(bookKey);
+  // Reactive subscription on this book's progress so the effects below
+  // (auto-push debounce, initial pull) re-run when the user turns the
+  // page. Reads from readerProgressStore, not readerStore — see
+  // store/readerProgressStore.ts for why this split exists.
+  const progress = useBookProgress(bookKey);
 
   const configPulled = useRef(false);
   const hasPulledConfigOnce = useRef(false);
@@ -130,9 +147,24 @@ export const useProgressSync = (bookKey: string) => {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const handleAutoSync = useCallback(
+    debounce(() => {
+      syncConfig();
+    }, SYNC_PROGRESS_INTERVAL_SEC * 1000),
+    [],
+  );
+
   const handleSyncBookProgress = async (event: CustomEvent) => {
     const { bookKey: syncBookKey } = event.detail;
     if (syncBookKey === bookKey) {
+      // Flush any pending debounced push first so the latest local progress
+      // reaches the cloud before we (re)pull. This covers the book-close case
+      // (issue #4532): the reader can tear down inside the SYNC_PROGRESS_INTERVAL_SEC
+      // auto-sync window, which would otherwise drop the pending push and leave
+      // other devices on the previous cloud-synced position. Must run while the
+      // gate below is still open so syncConfig takes the push branch.
+      handleAutoSync.flush();
       // Manual pull-to-refresh: tear down any prior retry chain so the new
       // attempt starts fresh, rather than being short-circuited by the
       // "retry already pending" guard in pullWithRetry.
@@ -143,7 +175,8 @@ export const useProgressSync = (bookKey: string) => {
     }
   };
 
-  // Push: ad-hoc push when the book is closed
+  // Push: flush the pending push + pull when the book is closed or the user
+  // taps the manual Sync button.
   useEffect(() => {
     eventDispatcher.on('sync-book-progress', handleSyncBookProgress);
     return () => {
@@ -151,14 +184,6 @@ export const useProgressSync = (bookKey: string) => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookKey]);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const handleAutoSync = useCallback(
-    debounce(() => {
-      syncConfig();
-    }, SYNC_PROGRESS_INTERVAL_SEC * 1000),
-    [],
-  );
 
   // Push: auto-push progress when progress changes with a debounce
   useEffect(() => {
@@ -219,14 +244,9 @@ export const useProgressSync = (bookKey: string) => {
           remoteCFILocation = candidateCFI;
         }
       }
-      const filteredSyncedConfig = Object.fromEntries(
-        Object.entries(syncedConfig).filter(([_, value]) => value !== null && value !== undefined),
-      );
-      if (syncedConfig.updatedAt >= config.updatedAt) {
-        setConfig(bookKey, { ...config, ...filteredSyncedConfig });
-      } else {
-        setConfig(bookKey, { ...filteredSyncedConfig, ...config });
-      }
+      // Reading progress applies below. Proofread (find/replace) rules merge
+      // separately just after; other config fields remain device-local.
+      // TODO: general config sync via a more robust profile-based solution.
       if (remoteCFILocation && configCFI) {
         if (CFI.compare(configCFI, remoteCFILocation) < 0) {
           // While previewing a deep-link target, do NOT yank the view to the
@@ -241,6 +261,38 @@ export const useProgressSync = (bookKey: string) => {
               bookKey,
               message: _('Reading Progress Synced'),
             });
+          }
+        }
+      }
+      // Merge book/selection-scope proofread rules from the remote config by id.
+      // Library-scope rules sync via the settings replica, so they're excluded.
+      // Item-level CRDT (see utils/proofread.ts) keeps a concurrent edit on
+      // another device from being lost to whole-config last-writer-wins, and
+      // tombstones stop a deleted rule from being resurrected by a stale peer.
+      const remoteRules = (syncedConfig.viewSettings?.proofreadRules ?? []).filter(
+        (r) => r.scope !== 'library',
+      );
+      const localViewSettings = getViewSettings(bookKey);
+      const localRules = localViewSettings?.proofreadRules ?? [];
+      if (localViewSettings && (remoteRules.length || localRules.length)) {
+        const mergedRules = mergeProofreadRules(localRules, remoteRules);
+        if (JSON.stringify(mergedRules) !== JSON.stringify(localRules)) {
+          const updatedViewSettings = { ...localViewSettings, proofreadRules: mergedRules };
+          setViewSettings(bookKey, updatedViewSettings);
+          if (config) {
+            await saveConfig(
+              envConfig,
+              bookKey,
+              { ...config, viewSettings: updatedViewSettings, updatedAt: Date.now() },
+              settings,
+            );
+          }
+          // Refresh a live view so merged rules take effect immediately; a
+          // not-yet-rendered view picks them up from viewSettings on first
+          // render. Skip while previewing a deep-link target.
+          const isPreview = useReaderStore.getState().getViewState(bookKey)?.previewMode;
+          if (getView(bookKey) && !isPreview) {
+            recreateViewer(envConfig, bookKey);
           }
         }
       }

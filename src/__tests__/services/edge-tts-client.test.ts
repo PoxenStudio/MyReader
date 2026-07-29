@@ -3,8 +3,14 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 // Shared mock control: tests can override createBehavior to change how create() behaves
 let createBehavior: () => Promise<undefined> = () => Promise.resolve(undefined);
 
-// Shared mock control for createAudioUrl() and parsed SSML marks
-let createAudioUrlBehavior = vi.fn<() => Promise<string>>(() => Promise.resolve('blob:mock-url'));
+// Shared mock control for createAudioData() and parsed SSML marks
+type MockAudioData = {
+  data: ArrayBuffer;
+  boundaries: Array<{ offset: number; duration: number; text: string }>;
+};
+let createAudioDataBehavior = vi.fn<() => Promise<MockAudioData>>(() =>
+  Promise.resolve({ data: new ArrayBuffer(8), boundaries: [] }),
+);
 let parsedMarks: Array<{ name: string; text: string; language: string }> = [];
 
 // --- Mocks ---
@@ -20,7 +26,7 @@ vi.mock('@/libs/edgeTTS', () => {
     EdgeSpeechTTS: class MockEdgeSpeechTTS {
       static voices = voices;
       create = vi.fn().mockImplementation(() => createBehavior());
-      createAudioUrl = vi.fn().mockImplementation(() => createAudioUrlBehavior());
+      createAudioData = vi.fn().mockImplementation(() => createAudioDataBehavior());
     },
     EDGE_TTS_PROTOCOL: 'wss',
   };
@@ -32,14 +38,28 @@ vi.mock('@/utils/ssml', () => ({
 
 vi.mock('@/utils/misc', () => ({
   getUserLocale: vi.fn((lang: string) => (lang === 'en' ? 'en-US' : lang)),
+  // Pins the WebAudioPlayer path: iOS Tauri selects the native playout.
+  getOSPlatform: vi.fn(() => 'macos'),
+  stubTranslation: (key: string) => key,
 }));
 
-vi.mock('@/services/tts/TTSUtils', () => ({
-  TTSUtils: {
-    getPreferredVoice: vi.fn(() => null),
-    sortVoicesFunc: (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id),
-  },
+let tauriPlatform = false;
+vi.mock('@/services/environment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/environment')>()),
+  isTauriAppPlatform: () => tauriPlatform,
 }));
+
+vi.mock('@/services/tts/TTSUtils', async (importOriginal) => {
+  const { TTSUtils: ActualTTSUtils } =
+    await importOriginal<typeof import('@/services/tts/TTSUtils')>();
+  return {
+    TTSUtils: {
+      getPreferredVoice: vi.fn(() => null),
+      sortVoicesFunc: ActualTTSUtils.sortVoicesFunc,
+      sortVoicesPreferLocaleFunc: ActualTTSUtils.sortVoicesPreferLocaleFunc,
+    },
+  };
+});
 
 import { EdgeTTSClient } from '@/services/tts/EdgeTTSClient';
 import { TTSController } from '@/services/tts/TTSController';
@@ -56,13 +76,17 @@ describe('EdgeTTSClient', () => {
   let client: EdgeTTSClient;
 
   beforeEach(() => {
+    tauriPlatform = false;
     createBehavior = () => Promise.resolve(undefined);
-    createAudioUrlBehavior = vi.fn<() => Promise<string>>(() => Promise.resolve('blob:mock-url'));
+    createAudioDataBehavior = vi.fn<() => Promise<MockAudioData>>(() =>
+      Promise.resolve({ data: new ArrayBuffer(8), boundaries: [] }),
+    );
     parsedMarks = [];
     client = new EdgeTTSClient();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -125,6 +149,27 @@ describe('EdgeTTSClient', () => {
       expect(callCount).toBe(2);
     });
 
+    test('wss failure does not fall back to https on Tauri even when authenticated', async () => {
+      tauriPlatform = true;
+      const mockController = {
+        isAuthenticated: true,
+        dispatchEvent: vi.fn(),
+      } as unknown as TTSController;
+      const c = new EdgeTTSClient(mockController);
+
+      let callCount = 0;
+      createBehavior = () => {
+        callCount++;
+        return Promise.reject(new Error('offline'));
+      };
+
+      const result = await c.init();
+      expect(result).toBe(false);
+      // Only the wss probe ran: the /api/tts/edge proxy must not be requested
+      // from the Tauri app (its native wss transport is the only Edge path).
+      expect(callCount).toBe(1);
+    });
+
     test('wss failure dispatches tts-need-auth when not authenticated', async () => {
       const dispatchEvent = vi.fn();
       const mockController = {
@@ -158,30 +203,6 @@ describe('EdgeTTSClient', () => {
     });
   });
 
-  describe('setRate', () => {
-    test('stores rate value', async () => {
-      await client.setRate(1.5);
-      // Rate is private, so we verify indirectly - no error thrown
-      await expect(client.setRate(0.5)).resolves.toBeUndefined();
-    });
-
-    test('accepts boundary values', async () => {
-      await expect(client.setRate(0.5)).resolves.toBeUndefined();
-      await expect(client.setRate(2.0)).resolves.toBeUndefined();
-    });
-  });
-
-  describe('setPitch', () => {
-    test('stores pitch value', async () => {
-      await expect(client.setPitch(1.2)).resolves.toBeUndefined();
-    });
-
-    test('accepts boundary values', async () => {
-      await expect(client.setPitch(0.5)).resolves.toBeUndefined();
-      await expect(client.setPitch(1.5)).resolves.toBeUndefined();
-    });
-  });
-
   describe('setVoice', () => {
     test('sets voice when voice id exists in voice list', async () => {
       await client.init();
@@ -195,24 +216,11 @@ describe('EdgeTTSClient', () => {
       await client.setVoice('nonexistent-voice');
       expect(client.getVoiceId()).toBe('en-US-AriaNeural');
     });
-
-    test('voice id remains empty when no voice has been set', () => {
-      expect(client.getVoiceId()).toBe('');
-    });
   });
 
-  describe('setPrimaryLang', () => {
-    test('sets primary language', () => {
-      client.setPrimaryLang('fr');
-      // No public getter for primaryLang, but we verify no error
-      // The effect is observed when speak() uses it
-    });
-
-    test('accepts any language string', () => {
-      client.setPrimaryLang('zh-CN');
-      client.setPrimaryLang('ja');
-      client.setPrimaryLang('en');
-      // No error thrown
+  describe('supportsWordBoundaries', () => {
+    test('returns true (Edge reports word-boundary timings)', () => {
+      expect(client.getCapabilities().wordBoundaries).toBe(true);
     });
   });
 
@@ -305,11 +313,45 @@ describe('EdgeTTSClient', () => {
       expect(voiceIds).toContain('en-GB-SoniaNeural');
     });
 
-    test('returns sorted voices using TTSUtils.sortVoicesFunc', async () => {
+    test('returns sorted voices with user-locale voices first for "en"', async () => {
+      // getUserLocale is mocked to return en-US for 'en'
       const groups = await client.getVoices('en');
       const voiceIds = groups[0]!.voices.map((v) => v.id);
-      const sorted = [...voiceIds].sort();
-      expect(voiceIds).toEqual(sorted);
+      expect(voiceIds).toEqual(['en-US-AnaNeural', 'en-US-AriaNeural', 'en-GB-SoniaNeural']);
+    });
+
+    // #4033: the voice set must not change between parts of a single book that
+    // mix region variants of the same language (e.g. en-US front matter and
+    // en-GB body text in Standard Ebooks)
+    test('returns the same English voice set for any region variant', async () => {
+      const ids = async (lang: string) =>
+        (await client.getVoices(lang))[0]!.voices.map((v) => v.id).sort();
+      const us = await ids('en-US');
+      const gb = await ids('en-GB');
+      const en = await ids('en');
+      expect(gb).toEqual(us);
+      expect(en).toEqual(us);
+      expect(us).toEqual(['en-GB-SoniaNeural', 'en-US-AnaNeural', 'en-US-AriaNeural']);
+    });
+
+    test('lists voices of the requested locale first', async () => {
+      const gb = await client.getVoices('en-GB');
+      expect(gb[0]!.voices[0]!.id).toBe('en-GB-SoniaNeural');
+      const us = await client.getVoices('en-US');
+      expect(us[0]!.voices[0]!.id).toBe('en-US-AnaNeural');
+    });
+
+    test('does not include voices from other languages', async () => {
+      const fr = await client.getVoices('fr-FR');
+      expect(fr[0]!.voices.map((v) => v.id)).toEqual(['fr-FR-DeniseNeural']);
+      const en = await client.getVoices('en-US');
+      expect(en[0]!.voices.map((v) => v.id)).not.toContain('fr-FR-DeniseNeural');
+    });
+
+    test('getVoiceIdFromLang still resolves an exact-locale default voice', async () => {
+      expect(await client.getVoiceIdFromLang('en-GB')).toBe('en-GB-SoniaNeural');
+      // AnaNeural sorts first for en-US but is avoided as default
+      expect(await client.getVoiceIdFromLang('en-US')).toBe('en-US-AriaNeural');
     });
 
     test('marks group as disabled when not initialized', async () => {
@@ -375,14 +417,17 @@ describe('EdgeTTSClient', () => {
       }
     };
 
-    test('retries createAudioUrl up to 3 times when preload fails', async () => {
+    test('retries createAudioData up to 3 times when preload fails', async () => {
       await client.init();
       parsedMarks = [{ name: 'mark-0', text: 'hello', language: 'en' }];
-      createAudioUrlBehavior = vi.fn(() => Promise.reject(new Error('network error')));
+      createAudioDataBehavior = vi.fn(() => Promise.reject(new Error('network error')));
 
-      await consumePreload(client, new AbortController().signal);
+      vi.useFakeTimers();
+      const preload = consumePreload(client, new AbortController().signal);
+      await vi.runAllTimersAsync();
+      await preload;
 
-      expect(createAudioUrlBehavior).toHaveBeenCalledTimes(3);
+      expect(createAudioDataBehavior).toHaveBeenCalledTimes(3);
     });
 
     test('does not retry when the first preload attempt succeeds', async () => {
@@ -391,37 +436,50 @@ describe('EdgeTTSClient', () => {
 
       await consumePreload(client, new AbortController().signal);
 
-      expect(createAudioUrlBehavior).toHaveBeenCalledTimes(1);
+      expect(createAudioDataBehavior).toHaveBeenCalledTimes(1);
     });
 
     test('stops retrying once an attempt succeeds', async () => {
       await client.init();
       parsedMarks = [{ name: 'mark-0', text: 'hello', language: 'en' }];
       let calls = 0;
-      createAudioUrlBehavior = vi.fn(() => {
+      createAudioDataBehavior = vi.fn(() => {
         calls++;
         return calls < 2
           ? Promise.reject(new Error('network error'))
-          : Promise.resolve('blob:mock-url');
+          : Promise.resolve({ data: new ArrayBuffer(8), boundaries: [] });
       });
+
+      vi.useFakeTimers();
+      const preload = consumePreload(client, new AbortController().signal);
+      await vi.runAllTimersAsync();
+      await preload;
+
+      expect(createAudioDataBehavior).toHaveBeenCalledTimes(2);
+    });
+
+    test('does not retry a permanent no-audio failure', async () => {
+      await client.init();
+      parsedMarks = [{ name: 'mark-0', text: 'hello', language: 'en' }];
+      createAudioDataBehavior = vi.fn(() => Promise.reject(new Error('No audio data received.')));
 
       await consumePreload(client, new AbortController().signal);
 
-      expect(createAudioUrlBehavior).toHaveBeenCalledTimes(2);
+      expect(createAudioDataBehavior).toHaveBeenCalledTimes(1);
     });
 
     test('stops retrying once the signal is aborted', async () => {
       await client.init();
       parsedMarks = [{ name: 'mark-0', text: 'hello', language: 'en' }];
       const controller = new AbortController();
-      createAudioUrlBehavior = vi.fn(() => {
+      createAudioDataBehavior = vi.fn(() => {
         controller.abort();
         return Promise.reject(new Error('network error'));
       });
 
       await consumePreload(client, controller.signal);
 
-      expect(createAudioUrlBehavior).toHaveBeenCalledTimes(1);
+      expect(createAudioDataBehavior).toHaveBeenCalledTimes(1);
     });
   });
 

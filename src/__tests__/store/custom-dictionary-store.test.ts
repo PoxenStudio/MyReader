@@ -652,6 +652,7 @@ describe('customDictionaryStore — loadCustomDictionaries reconciliation', () =
       'web:builtin:google',
       'web:builtin:urban',
       'web:builtin:merriam-webster',
+      'web:builtin:goodreads',
     ]);
   });
 
@@ -692,5 +693,76 @@ describe('customDictionaryStore — loadCustomDictionaries reconciliation', () =
     const after = useCustomDictionaryStore.getState().settings;
     expect(after.providerOrder.includes('imp-tombstoned')).toBe(false);
     expect('imp-tombstoned' in after.providerEnabled).toBe(false);
+  });
+});
+
+describe('customDictionaryStore — fontScale (dictionary popup font size, #4443)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useCustomDictionaryStore.setState({
+      dictionaries: [],
+      settings: {
+        providerOrder: ['local-x'],
+        providerEnabled: { 'local-x': true },
+        webSearches: [],
+      },
+    });
+  });
+
+  it('setFontScale updates the in-memory setting', () => {
+    const { setFontScale } = useCustomDictionaryStore.getState();
+    setFontScale(1.3);
+    expect(useCustomDictionaryStore.getState().settings.fontScale).toBe(1.3);
+  });
+
+  it('applyRemoteDictionarySettings overlays a remote fontScale patch', () => {
+    const { applyRemoteDictionarySettings } = useCustomDictionaryStore.getState();
+    applyRemoteDictionarySettings({ fontScale: 1.5 });
+    expect(useCustomDictionaryStore.getState().settings.fontScale).toBe(1.5);
+  });
+
+  it('loadCustomDictionaries defaults fontScale to 1 when the persisted settings omit it', async () => {
+    type SettingsState = ReturnType<typeof useSettingsStore.getState>;
+    useSettingsStore.setState({
+      settings: {
+        customDictionaries: [],
+        dictionarySettings: {
+          providerOrder: ['builtin:wikipedia'],
+          providerEnabled: { 'builtin:wikipedia': true },
+          webSearches: [],
+        },
+      } as unknown as SettingsState['settings'],
+    } as unknown as SettingsState);
+
+    const fakeAppService = { exists: vi.fn().mockResolvedValue(false) };
+    const fakeEnv = {
+      getAppService: () => Promise.resolve(fakeAppService),
+    } as unknown as EnvConfigType;
+
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    expect(useCustomDictionaryStore.getState().settings.fontScale).toBe(1);
+  });
+
+  it('loadCustomDictionaries preserves a persisted fontScale', async () => {
+    type SettingsState = ReturnType<typeof useSettingsStore.getState>;
+    useSettingsStore.setState({
+      settings: {
+        customDictionaries: [],
+        dictionarySettings: {
+          providerOrder: ['builtin:wikipedia'],
+          providerEnabled: { 'builtin:wikipedia': true },
+          webSearches: [],
+          fontScale: 1.15,
+        },
+      } as unknown as SettingsState['settings'],
+    } as unknown as SettingsState);
+
+    const fakeAppService = { exists: vi.fn().mockResolvedValue(false) };
+    const fakeEnv = {
+      getAppService: () => Promise.resolve(fakeAppService),
+    } as unknown as EnvConfigType;
+
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    expect(useCustomDictionaryStore.getState().settings.fontScale).toBe(1.15);
   });
 });
