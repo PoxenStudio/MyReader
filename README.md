@@ -37,12 +37,13 @@ MyReader 会在应用私有数据目录下维护本地书库文件（`MyReader/B
 | Windows | `%APPDATA%\<AppId>\MyReader\Books` | `%LOCALAPPDATA%\<AppId>\logs` |
 | macOS | `~/Library/Application Support/<AppId>/MyReader/Books` | `~/Library/Logs/<AppId>` |
 | Linux | `~/.local/share/<AppId>/MyReader/Books`（或 `$XDG_DATA_HOME/<AppId>/MyReader/Books`） | `~/.local/share/<AppId>/logs`（或 `$XDG_DATA_HOME/<AppId>/logs`） |
-| Android | `/data/user/0/<AppId>/MyReader/Books` | `/data/user/0/<AppId>/logs` |
+| Android | `/data/user/0/<AppId>/MyReader/Books` | `/data/user/0/<AppId>/logs`（私有，权威日志） |
 | iOS | `<App 沙盒目录>/Library/Application Support/<AppId>/MyReader/Books` | `<App 沙盒目录>/Library/Application Support/<AppId>/logs` |
 
 说明：
 - Windows/macOS/Linux 桌面端可在设置中配置"自定义根目录"，配置后书库与日志目录会分别改为 `<自定义目录>/MyReader/Books` 与 `<自定义目录>/Log`。
 - Android、iOS 下书库和日志都位于应用沙盒内的私有存储，属于应用私有数据，普通文件管理器 / Files App 无法直接访问；iOS 的沙盒目录路径会随应用重新安装变化，不是固定路径。
+- Android 下，只要已授予"所有文件访问权限"（设置中"锁屏封面"等功能会触发该授权请求），应用会在每次启动、以及每次切到后台时，把私有日志目录的内容同步一份到 `/storage/emulated/0/MyReader/logs`（与 `Download`、`DCIM` 同级），方便用文件管理器直接查看和取用；未授权该权限时不受影响，日志仍正常写入私有目录。
 
 ## Development
 

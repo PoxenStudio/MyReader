@@ -224,10 +224,53 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         super.load(webView)
         installKeyInterceptor(webView)
         handleIntent(activity.intent)
+        syncLogsToSharedStorage()
+    }
+
+    override fun onPause() {
+        syncLogsToSharedStorage()
     }
 
     override fun onNewIntent(intent: Intent) {
         handleIntent(intent)
+    }
+
+    // ── Log mirroring to shared storage ───────────────────────────────
+    // tauri-plugin-log writes into the app's private sandbox dir
+    // (`<dataDir>/logs`) from the moment the app starts — that target is
+    // fixed in Rust at Builder time, before any permission can be checked,
+    // so it can never be pointed directly at shared storage without
+    // risking a startup failure for users who haven't granted
+    // MANAGE_EXTERNAL_STORAGE (the majority, since it's opt-in elsewhere —
+    // see the "lock screen cover" setting). Instead, whenever that
+    // permission happens to already be granted, mirror the sandbox log
+    // files into a user-accessible `MyReader/logs` folder alongside
+    // Download/DCIM so users can pull them with any file manager. Silently
+    // no-ops when the permission isn't granted — this must never affect
+    // app startup or normal logging.
+    private fun syncLogsToSharedStorage() {
+        try {
+            val hasAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Environment.isExternalStorageManager()
+            } else {
+                ContextCompat.checkSelfPermission(
+                    activity,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+            if (!hasAccess) return
+
+            val sourceFiles = File(activity.dataDir, "logs").listFiles() ?: return
+            val destDir = File(Environment.getExternalStorageDirectory(), "MyReader/logs")
+            if (!destDir.exists() && !destDir.mkdirs()) return
+
+            for (file in sourceFiles) {
+                if (!file.isFile) continue
+                file.copyTo(File(destDir, file.name), overwrite = true)
+            }
+        } catch (e: Exception) {
+            Log.e("NativeBridgePlugin", "Failed to sync logs to shared storage: ${e.message}")
+        }
     }
 
     private fun handleIntent(intent: Intent?) {
