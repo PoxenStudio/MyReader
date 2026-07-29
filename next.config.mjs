@@ -1,0 +1,144 @@
+import withSerwistInit from '@serwist/next';
+import withBundleAnalyzer from '@next/bundle-analyzer';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const isDev = process.env['NODE_ENV'] === 'development';
+const appPlatform = process.env['NEXT_PUBLIC_APP_PLATFORM'];
+
+if (isDev) {
+  const { initOpenNextCloudflareForDev } = await import('@opennextjs/cloudflare');
+  initOpenNextCloudflareForDev();
+}
+
+const exportOutput = appPlatform !== 'web' && !isDev;
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  // Ensure Next.js uses SSG instead of SSR
+  // https://nextjs.org/docs/pages/building-your-application/deploying/static-exports
+  output: exportOutput ? 'export' : undefined,
+  pageExtensions: exportOutput ? ['jsx', 'tsx'] : ['js', 'jsx', 'ts', 'tsx'],
+  // Note: This feature is required to use the Next.js Image component in SSG mode.
+  // See https://nextjs.org/docs/messages/export-image-api for different workarounds.
+  images: {
+    unoptimized: true,
+  },
+  devIndicators: false,
+  experimental: {
+    // Persist Turbopack's compilation cache to `.next/` so CI can restore it
+    // between runs. Dev caching is on by default since Next 16.1; build
+    // caching is opt-in (beta).
+    turbopackFileSystemCacheForDev: true,
+    turbopackFileSystemCacheForBuild: true,
+  },
+  // Configure assetPrefix or else the server won't properly resolve your assets.
+  assetPrefix: '',
+  reactStrictMode: true,
+  serverExternalPackages: ['isows'],
+  allowedDevOrigins: ['192.168.2.120'],
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      nunjucks: 'nunjucks/browser/nunjucks.js',
+      // `js-mdict` is consumed as TS source via tsconfig paths from
+      // `packages/js-mdict/src/`; its sources `import 'fflate'` directly.
+      // Without an alias, webpack walks up from that source location and
+      // can't find fflate (only installed in this app's node_modules).
+      fflate: path.resolve(__dirname, 'node_modules/fflate'),
+      ...(appPlatform !== 'web' ? { '@tursodatabase/database-wasm': false } : {}),
+    };
+    return config;
+  },
+  turbopack: {
+    resolveAlias: {
+      nunjucks: 'nunjucks/browser/nunjucks.js',
+      // Turbopack rejects absolute paths in resolveAlias ("server relative
+      // imports not implemented") — use a project-relative path.
+      fflate: './node_modules/fflate',
+      ...(appPlatform !== 'web' ? { '@tursodatabase/database-wasm': './src/utils/stub.ts' } : {}),
+    },
+  },
+  transpilePackages: [
+    'ai',
+    'ai-sdk-ollama',
+    '@ai-sdk/react',
+    '@assistant-ui/react',
+    '@assistant-ui/react-ai-sdk',
+    '@assistant-ui/react-markdown',
+    'streamdown',
+    ...(isDev
+      ? []
+      : [
+          'i18next-browser-languagedetector',
+          'react-i18next',
+          'i18next',
+          '@tauri-apps',
+          'highlight.js',
+          'foliate-js',
+          'marked',
+        ]),
+  ],
+  async rewrites() {
+    return [
+      {
+        source: '/reader/:ids',
+        destination: '/reader?ids=:ids',
+      },
+      {
+        source: '/o/book/:hash/annotation/:id',
+        destination: '/o?book=:hash&note=:id',
+      },
+      {
+        source: '/s/:token',
+        destination: '/s?token=:token',
+      },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        source: '/.well-known/apple-app-site-association',
+        headers: [
+          {
+            key: 'Content-Type',
+            value: 'application/json',
+          },
+        ],
+      },
+      {
+        source: '/_next/static/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: isDev
+              ? 'public, max-age=0, must-revalidate'
+              : 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+    ];
+  },
+};
+
+const pwaDisabled = isDev || appPlatform !== 'web';
+
+const withPWA = pwaDisabled
+  ? (config) => config
+  : withSerwistInit({
+      swSrc: 'src/sw.ts',
+      swDest: 'public/sw.js',
+      cacheOnNavigation: true,
+      reloadOnOnline: true,
+      disable: false,
+      register: true,
+      scope: '/',
+    });
+
+const withAnalyzer = withBundleAnalyzer({
+  enabled: process.env.ANALYZE === 'true',
+});
+
+export default withPWA(withAnalyzer(nextConfig));

@@ -1,0 +1,1062 @@
+{
+  "releases": {
+    "0.11.2": {
+      "date": "2026-05-31",
+      "notes": [
+        "Send to Readest: Clip web pages and articles into your library via the system share sheet, or by emailing them in",
+        "Dictionary: Look up words with your device's built-in system dictionary on macOS, iOS, and Android, plus faster MDict and StarDict imports",
+        "Library: Import books from a folder with format and size filters, or read them in place from external folders without copying",
+        "Reading: The reading ruler now follows individual lines, you can swipe along the edge to adjust brightness on mobile, and customize hardware-button page turning",
+        "Annotations: Create global highlights that apply to every matching passage in a book",
+        "Text-to-Speech: Added a hotkey to highlight the sentence being read aloud, and made TTS more reliable",
+        "Fonts: Fixed custom fonts disappearing after restarting or reloading the app",
+        "iOS: Fixed the reader not updating when you switch between light and dark mode",
+        "Android: Fixed an issue where highlighting text could trigger unintended page turns",
+        "Fixes: Many improvements across PDFs, EPUBs, Sync, Scrolling, Highlighting"
+      ]
+    },
+    "0.11.1": {
+      "date": "2026-05-11",
+      "notes": [
+        "Dictionaries: You can now import your own StarDict and MDict dictionaries",
+        "Sync: Your custom dictionaries, custom fonts, background textures and OPDS catalogs now sync across devices",
+        "KOReader Sync: Browse your full Readest Library from inside KOReader, with improved sync diagnostics",
+        "OPDS: Stream books over OPDS-PSE and optionally auto-download new titles from feeds",
+        "Sharing: Create share links for books, jump directly to book via deep links in exported annotations",
+        "Library: Added an optional 4-digit PIN lock at app launch to keep your library private",
+        "Library: You can now drag entire folders to import books",
+        "Reading: Added support for inline CJK ruby annotations (warichu/Gezhu), improved footnote detection",
+        "Speed Reading: Reading position now resumes correctly across devices and inside long sections",
+        "Fixes: Many fixes across PDFs, MOBIs, EPUBs, TTS, scrolling, and accessibility"
+      ]
+    },
+    "0.10.6": {
+      "date": "2026-04-13",
+      "notes": [
+        "Library: Much faster browsing for large collections",
+        "Reading: Added an option to keep the book's original paragraph layout",
+        "Reading: Fixed page navigation for Arabic books",
+        "PDF: Fixed TTS reading interruptions at line breaks in PDFs",
+        "PDF: You can now apply your chosen theme colors to PDFs",
+        "Sync: Added HTTP Basic auth support for CWA",
+        "Sync: Improved progress sync with Hardcover.app",
+        "OPDS: You can now edit your registered catalogs, with better handling of download filenames",
+        "Speed Reading: Your reading position now syncs across devices",
+        "Platform: Fixed window buttons on macOS, reduced crashes on iOS"
+      ]
+    },
+    "0.10.4": {
+      "date": "2026-04-06",
+      "notes": [
+        "Annotations: You can now name your highlight colors, and your custom names sync across devices",
+        "Annotations: Fixed highlights that stayed on the page after being deleted from the sidebar",
+        "Speed Reading: Added an option to split long words, a faster countdown",
+        "Text-to-Speech: Fixed double playback when tapping the play button in quick succession",
+        "Accessibility: Dropdown menus now open reliably when activated with the keyboard",
+        "Reading: Background textures now display correctly when you override the theme background color",
+        "Translation: Temporarily disabled the Yandex provider while its service is unavailable"
+      ]
+    },
+    "0.10.2": {
+      "date": "2026-04-05",
+      "notes": [
+        "Reading: Added single section scroll option, keyboard shortcuts help dialog, and reading ruler improvements",
+        "Reading: Fixed Adobe font deobfuscation and applied theme colors to PDFs",
+        "Reading: Fixed paginator freeze, image sizing on resize, and vertical writing mode compatibility",
+        "Annotations: Fixed annotations grouped under wrong chapter and added highlight opacity setting",
+        "Text-to-Speech: Added dedicated TTS settings tab with highlight opacity and keyboard shortcuts for navigation",
+        "Sync: Added Hardcover.app sync integration and improved KOSync progress accuracy",
+        "KOReader Plugin: Added full annotation sync option and fixed sync-related crashes",
+        "OPDS: Added custom catalog headers with web proxy consent and fixed feed display issues",
+        "Speed Reading: Added per-chapter progress bar and speed selector dropdown",
+        "Android: Added D-pad navigation for Android TV remote controller",
+        "Theme: Added atmosphere Easter egg with video overlay and ambient audio"
+      ]
+    },
+    "0.10.1": {
+      "date": "2026-03-22",
+      "notes": [
+        "Reading: Added continuous scroll and spread layout support for EPUBs",
+        "Reading: Added current time and battery display in footer",
+        "Reading: Added TTS, annotation support, pinch-to-zoom, and scroll mode for PDFs",
+        "Library: Added backup/restore to a zip file and batch metadata refresh",
+        "KOReader: Added bookmark and annotation sync between KOReader and Readest devices",
+        "Footnotes: Added back navigation with link history and more responsive popup sizing",
+        "Annotations: Added loupe display when selecting text in instant annotation mode",
+        "Text-to-Speech: Fixed TTS reading position tracking in scrolled mode"
+      ]
+    },
+    "0.9.101": {
+      "date": "2026-02-28",
+      "notes": [
+        "Text-to-Speech: Fixed an issue where TTS could not continue to the next chapter",
+        "Reading: Fixed an issue importing very large TXT files on iOS",
+        "Reading: Fixed the layout of the reading ruler in scrolled mode",
+        "Reading: Smoother page-turn animations for a more fluid experience",
+        "Reading: Added a gallery mode to zoom and browse images within books",
+        "Annotations: Page numbers are now displayed and exported with highlights and notes",
+        "Annotations: Added support for exporting highlights to Readwise",
+        "OPDS: Fixed missing book descriptions in OPDS feeds",
+        "Android: Improved compatibility with older WebView versions on Android"
+      ]
+    },
+    "0.9.100": {
+      "date": "2026-02-13",
+      "notes": [
+        "Text-to-Speech: Automatically moves to the next chapter when the current chapter finishes",
+        "Reading: Fixed the reading ruler on Android",
+        "Reading: Improved RSVP layout and stability",
+        "Reading: Fixed an issue where some EPUB books could not adjust font size",
+        "Annotations: Added a magnifier (loupe) when adjusting text selection",
+        "Annotations: Text selection now snaps to word boundaries for better accuracy",
+        "Annotations: Custom highlight colors now apply correctly in the sidebar",
+        "Dictionary: Added a back button for easier navigation",
+        "Dictionary: Fixed an issue where Dictionary and Wikipedia could not open on Android",
+        "Metadata: Added collapsible sections in Book Details",
+        "Metadata: Added support for parsing series information from Calibre-exported EPUB files",
+        "Eink: Improved component layout and colors in E-ink mode",
+        "Layout: Sidebar toggle button position is now persistent"
+      ]
+    },
+    "0.9.99": {
+      "date": "2026-02-07",
+      "notes": [
+        "Reading: Added a reading ruler (line highlight) to help guide your eyes while reading",
+        "Reading: Added paragraph-by-paragraph reading mode for more focused navigation",
+        "Reading: Added a speed reading mode to support faster reading workflows",
+        "Reading: Added support for gamepad input to turn pages",
+        "Accessibility: Improved TalkBack support in dropdown menus for smoother navigation",
+        "Accessibility: Page navigation buttons are now always visible to screen readers",
+        "Accessibility: Reading progress is now updated correctly when navigating with screen readers",
+        "Annotations: Expanded highlight customization with more color options",
+        "Annotations: Added an option to export annotations as plain text",
+        "Library: Added grouping by author and series for better library organization",
+        "Library: Added support of marking books as finished",
+        "Search: Added fuzzy search to quickly find settings even with partial keywords",
+        "Table of Contents: Added page numbers for nested TOC entries",
+        "Text-to-Speech: Added navigation controls to return to the current reading position",
+        "Linux: Added an in-app updater for AppImage builds",
+        "E-ink: Improved color support for color E-ink devices to display richer highlights"
+      ]
+    },
+    "0.9.98": {
+      "date": "2026-01-21",
+      "notes": [
+        "Bookshelf: Added the ability to export original book files directly from the book details dialog",
+        "Bookshelf: Added a new sorting option to organize books by publish date",
+        "Bookshelf: Improved performance for large library with faster and more stable imports",
+        "OPDS: Improved download reliability by correctly detecting filenames for PDF and CBZ files",
+        "Proofreading: Added support for whole-word replacement to make text corrections more precise",
+        "Notes: Added the ability to export notes using a customizable template",
+        "PDF: Added support for panning within PDF documents for easier navigation",
+        "PDF: Improved performance by pre-rendering the next page for smoother page transitions",
+        "Text-to-Speech: Added support for word replacement to improve pronunciation during playback",
+        "Text-to-Speech: Fixed an issue where playback speed settings were not applied correctly on Linux",
+        "E-ink: Improved reading stability by preventing unwanted scrolling when animations are disabled or on e-ink devices",
+        "Discord: Added Discord Rich Presence to display your current reading status on Desktop platforms",
+        "Android: Fixed an issue that could cause occasional crashes during app startup",
+        "Fonts: Improved web font loading for faster and more stable text rendering"
+      ]
+    },
+    "0.9.97": {
+      "date": "2026-01-10",
+      "notes": [
+        "Annotations: Added annotation bubble icons directly on text with instant note popups",
+        "Annotations: Enabled quick highlighting when selecting text",
+        "Annotations: Added the ability to edit the text range of existing highlights",
+        "Annotations: Added an annotation navigation bar for easier browsing",
+        "OPDS: Fixed an issue where CBZ files could not be downloaded from OPDS catalogs",
+        "OPDS: Improved compatibility with Komga OPDS servers",
+        "OPDS: Added support for OPDS servers using self-signed SSL certificates",
+        "PDF: Fixed an issue where some PDF files failed to open",
+        "E-ink: Optimized colors and layout for improved e-ink device readability",
+        "Search: Added search term history for quicker repeated searches",
+        "Text-to-Speech: Reduced excessive pauses between sentences for smoother playback",
+        "File Transfer: Introduced a background transfer queue for uploading and downloading books",
+        "Proofreading: Added a proofread tool that can replace text directly within books"
+      ]
+    },
+    "0.9.96": {
+      "date": "2025-12-19",
+      "notes": [
+        "TTS: Resolved an issue where Edge TTS was blocked in certain regions",
+        "OPDS: Improved compatibility with older versions of Calibre Web",
+        "OPDS: Added an instant search bar for faster browsing in OPDS catalogs",
+        "OPDS: Added a curated book catalog from Standard Ebooks",
+        "Bookshelf: Added a “Group Books” action to the context menu",
+        "Comics: Fixed layout issues to improve comic book reading",
+        "Layout: Footnote popups now adapt correctly to different screen sizes",
+        "Layout: Fixed an issue where the maximum inline width was not applied to EPUBs",
+        "Sync: Improved file downloading by correctly handling special characters in filenames",
+        "UI: Added an option to temporarily dismiss the reading progress bar",
+        "Settings: Screen brightness adjustments now apply only to the reader view",
+        "iOS: You can now open files directly in Readest from the Files app",
+        "macOS: Added a global menu option to open files with Readest"
+      ]
+    },
+    "0.9.95": {
+      "date": "2025-12-08",
+      "notes": [
+        "OPDS: You can now search, browse, and download ebooks directly from OPDS catalogs",
+        "OPDS: Improved compatibility with Calibre Web for reliable downloads",
+        "OPDS: Fixed an issue where book covers from self-hosted Calibre OPDS servers did not display correctly",
+        "Cloud Storage: You can view and delete files stored in your cloud storage directly from the app",
+        "Bookshelf: Added support for importing books from a folder recursively",
+        "Bookshelf: You can now rename your bookshelf groups",
+        "EPUB: Added support for SVG covers from Standard Ebooks",
+        "Annotations: Keyboard shortcuts no longer copy selected text into the notebook",
+        "Footnotes: Footnote popups now scale properly on small screens",
+        "Touch/Styli: Removed the context menu for smoother interaction on touch and stylus devices",
+        "Layout: Devices with unfoldable screens now automatically switch to a two-column layout",
+        "PDF: Improved zoomed-in navigation and hand-tool behavior for smoother page navigation",
+        "Android: Fixed highlighting of the current sentence when using native Android text-to-speech",
+        "Android: Back button handling now works correctly on Android 15 and above",
+        "Android: You can now open files shared from other apps"
+      ]
+    },
+    "0.9.94": {
+      "date": "2025-12-02",
+      "notes": [
+        "OPDS: You can now browse and download ebooks directly from OPDS catalogs",
+        "PDF: Added a hand-tool mode that makes navigating PDF pages easier",
+        "Covers: You can now choose a folder to save the latest book cover image",
+        "CJK: Added one-tap conversion between Simplified and Traditional Chinese",
+        "Shortcuts: Use Ctrl + mouse wheel to quickly zoom in or out",
+        "Library: Added a new option to adjust cover sizes in grid view",
+        "Windows: Added Ebook thumbnails with book covers in Windows Explorer",
+        "TTS: Fixed an issue where the page would scroll when showing the annotator",
+        "Annotations: Resolved layout shifts when selecting text in paginated mode on Android",
+        "Files: Improved backup handling to prevent file corruption",
+        "Layout: Fixed text clipping caused by negative indents",
+        "E-ink: Improved sidebar and notebook background colors for e-ink devices",
+        "Android: The Back button now works properly in menus, dialogs, and alerts",
+        "iOS: Fixed occasional failures when opening books on older iOS versions (16.4 and below)"
+      ]
+    },
+    "0.9.93": {
+      "date": "2025-11-20",
+      "notes": [
+        "Sync: Improved reliability for new accounts so your books sync correctly from the start",
+        "Library: Fixed an occasional issue where returning to the library could get stuck",
+        "Layout: Improved image display in paginated mode so images won't exceed the available height",
+        "TXT: Improved performance and stability when opening and parsing TXT files",
+        "Fonts: Fixed an issue where monospace fonts were not applied correctly in code blocks"
+      ]
+    },
+    "0.9.92": {
+      "date": "2025-11-18",
+      "notes": [
+        "Bookshelf: Added support for nested groups to organize your books more flexibly",
+        "Sync: Improved reliability by automatically retrying failed book syncs",
+        "Sync: Improved token refresh so login sessions stay active longer on KOReader",
+        "E-Ink: Enhanced readability on the library page for E-Ink devices",
+        "UI: Storage capacity is now displayed with precise values in the user profile",
+        "Reader: You can now import files directly into the currently selected book group",
+        "Account: You can now update the email address linked to your Readest account",
+        "Footnotes: Added compatibility for more footnote formats"
+      ]
+    },
+    "0.9.91": {
+      "date": "2025-10-29",
+      "notes": [
+        "TTS: Fixed an issue where system voices were not working on Android",
+        "TTS: Added options to customize the highlight style during read-aloud",
+        "E-Ink: Disabled all shadows to improve display clarity",
+        "E-Ink: Added an option to save the last book cover on Android",
+        "Android: Fixed a crash that occurred when toggling 'Allow Script'",
+        "Android: Adjusted launcher icon size for better compatibility across devices"
+      ]
+    },
+    "0.9.90": {
+      "date": "2025-10-28",
+      "notes": [
+        "Sync: Faster library syncing and support for in-app one-time purchases of extra cloud storage",
+        "TTS: You can now choose the target language for read-aloud on translated books",
+        "Reader: New keyboard shortcuts make it easier to move between sections",
+        "Reader: Smoother scrolling for a more comfortable reading experience",
+        "Reader: Footnotes in definition lists are now fully supported",
+        "Reader: Improved search accuracy and display of search results",
+        "Reader: Clearer error messages when importing books",
+        "Reader: Improved safety when loading book content",
+        "Settings: You can now choose your own highlight colors",
+        "Settings: Added option to adjust screen brightness automatically",
+        "E-Ink: Better readability and clearer progress display with underlined links",
+        "Android: You can now store app data on an external SD card",
+        "iOS: Restores your last reading page if the app was closed in the background",
+        "Localization: Added Persian (Farsi) language support"
+      ]
+    },
+    "0.9.88": {
+      "date": "2025-10-18",
+      "notes": [
+        "TTS: Fixed issue where the read-aloud indicator disappeared too quickly",
+        "Layout: Overriding book layout no longer affects explicitly set text alignment",
+        "Reader: Added localized number display for reading progress in vertical layout",
+        "Reader: Enhanced swipe responsiveness for smoother page transitions",
+        "Settings: Added an option to disable animations when using E-Ink mode"
+      ]
+    },
+    "0.9.87": {
+      "date": "2025-10-16",
+      "notes": [
+        "Reader: Improved chapter detection with better chapter title recognition",
+        "Reader: Enhanced compatibility for parsing more footnote formats",
+        "Theme: Fixed auto theme switching in new reader windows",
+        "TTS: Improved scrolling accuracy to highlighted text during read-aloud",
+        "TTS: Fixed crash issues on certain Android systems"
+      ]
+    },
+    "0.9.86": {
+      "date": "2025-10-14",
+      "notes": [
+        "Reader: Added support for per-book background image customization",
+        "Reader: Added option to override book language metadata for improved hyphenation accuracy",
+        "Sync: Readest sync in KOReader can now be triggered using gesture controls",
+        "Sync: Fixed a crash in KOReader that occurred when syncing progress without an open book",
+        "Sync: Improved upload performance with concurrent upload support"
+      ]
+    },
+    "0.9.85": {
+      "date": "2025-10-14",
+      "notes": [
+        "TTS: Improved media session control compatibility across more Android systems",
+        "TTS: Made the TTS icon less distracting during read-aloud mode",
+        "Settings: Added an option to adjust screen brightness while reading",
+        "Settings: Added support for custom background images",
+        "PDF: Fixed an issue where scrolling and panning didn’t work correctly when zoomed in",
+        "Android: Added adaptive launcher icon for better system integration",
+        "Reader: Added keyboard shortcuts for toggling bookmarks",
+        "Reader: Annotations are now rendered instantly when opening files"
+      ]
+    },
+    "0.9.82": {
+      "date": "2025-10-01",
+      "notes": [
+        "Sync: More reliable syncing between KOReader and Readest",
+        "MOBI: Fixed an issue where some footnotes in MOBI/AZW files were not parsed correctly",
+        "Storage: Added support for changing data location on Windows, macOS, Linux, and Android",
+        "Windows: Portable EXE version now stores all reading data in the directory of the executable",
+        "Android: Added background TTS support with media session controls",
+        "WebView: Extended compatibility down to version 92",
+        "Settings: Added global settings menu to the library page",
+        "iOS: Fixed an issue where custom theme colors were not handled correctly on older Safari versions",
+        "TTS: Added more languages for Edge TTS"
+      ]
+    },
+    "0.9.81": {
+      "date": "2025-09-19",
+      "notes": [
+        "TTS: Added desktop common media control support when TTS is playing",
+        "PDF: Disabled swipe-up gesture for toggling the action bar when zoomed in",
+        "Fonts: Fixed an issue where embedded fonts in ebooks were occasionally not applied",
+        "Reader: Fixed an issue where newly created highlights sometimes would not appear",
+        "Reader: Enabled scrolling in the menu when the menu is too long"
+      ]
+    },
+    "0.9.80": {
+      "date": "2025-09-19",
+      "notes": [
+        "Accessibility: Added support for popular screen readers on all platforms, making books accessible to readers with visual impairments",
+        "Sync: Progress is now synced across different versions of the same book by aggregated metadata",
+        "Library: Groups are now displayed in list view for easier organization",
+        "Library: Added delete confirmation when removing books from the context menu",
+        "Fonts: Added support for fonts with subfamilies when importing TTF/OTF font files",
+        "Layout: Prevented layout shift in Android when the virtual keyboard appears"
+      ]
+    },
+    "0.9.78": {
+      "date": "2025-09-06",
+      "notes": [
+        "TTS: Added option to keep a persistent TTS bar at the bottom of the screen",
+        "TTS: Added previous/next sentence navigation controls in the TTS bar",
+        "TTS: Added media control support on iOS lock screen and AirPods",
+        "TTS: Fixed an issue where headings could not be highlighted for TTS",
+        "Sync: Fixed occasional sync failures between KOReader and Readest",
+        "Fonts: Grouped font styles into custom font families for easier selection",
+        "Reader: Improved text selection sensitivity when using a stylus",
+        "Reader: Books can now be properly closed using the system back button on Android",
+        "EPUB: Fixed parsing to correctly detect the front cover in some EPUB files",
+        "PDF: Added zoom level, zoom mode, and spread mode settings for PDFs",
+        "Reader: Bookmarks can now be edited directly in the sidebar",
+        "Layout: Prevented layout shift when the virtual keyboard appears on Android",
+        "TXT: Improved chapter detection and added support for nested table of contents in TXT files"
+      ]
+    },
+    "0.9.76": {
+      "date": "2025-08-30",
+      "notes": [
+        "Sync: Moved KOReader sync controls into the reader sidebar with a manual push/pull option",
+        "Sync: Improved tolerance and reliability for KOReader sync operations",
+        "Sync: Added support for more KOReader server implementations",
+        "Fonts: Added support for importing multiple styles within a font family",
+        "Reader: Fixed an issue where footnotes are empty in some EPUB files",
+        "Theme: Applied theme background color for PDFs on macOS",
+        "Reader: Added support for importing AZW3 files on Android",
+        "Reader: Reduced screen flash when launching the app and opening books",
+        "Layout: Fixed an issue where the grouping modal would not appear on Linux"
+      ]
+    },
+    "0.9.75": {
+      "date": "2025-08-22",
+      "notes": [
+        "Fonts: Added support for importing local TTF and ODF fonts",
+        "TTS: Reduced the pause between sentences when using Edge TTS",
+        "TTS: Fixed an issue where voices list could not be opened on older versions of iOS",
+        "TOC: Fixed an issue where nested TOC items would not collapse properly in some books",
+        "Translator: Fixed an issue where translations in the popup did not refresh correctly",
+        "Library: Added option to sort authors with last name first",
+        "Layout: Fixed mismatch in close button position between the reader and library pages",
+        "Layout: Book title now remains centered in the available space",
+        "Layout: Fixed footer bar layout in landscape mode"
+      ]
+    },
+    "0.9.72": {
+      "date": "2025-08-18",
+      "notes": [
+        "Fixed Edge TTS voice playback for EPUBs",
+        "Reduced accidental page flips when toggling toolbars",
+        "Fixed images with background colors not displaying correctly in some books",
+        "Added support for custom KOReader Sync Servers on your local network (LAN)"
+      ]
+    },
+    "0.9.71": {
+      "date": "2025-08-13",
+      "notes": [
+        "Sync: Added two ways to sync reading progress with KOReader devices",
+        "EPUB: Applied monospace font settings",
+        "EPUB: Fixed initial text alignment for some EPUB files",
+        "PDF: Fixed issue opening large PDF files on Android",
+        "TTS: Improved book language detection when language code is invalid",
+        "iOS: Fixed applying system color scheme in auto theme mode",
+        "Config: Added option to choose reading progress display style (percentage or page number)",
+        "Library: Added option to delete only the local copy of a book",
+        "Account: Added 'Reset Password' button in the account page"
+      ]
+    },
+    "0.9.69": {
+      "date": "2025-08-02",
+      "notes": [
+        "Updater: Fixed permission issue when updating in standalone reader window",
+        "Config: Added option to disable double‑click actions",
+        "EPUB: Fixed missing images in some EPUB files",
+        "EPUB: Corrected formatting for book subjects",
+        "TXT: Improved language detection when parsing TXT files",
+        "CSS: Resolved issue where custom font colors could not be applied",
+        "Layout: Corrected cover image width display in 'Fit' mode for list view",
+        "Layout: Fixed unintended scrolling in reader view when highlighting text"
+      ]
+    },
+    "0.9.68": {
+      "date": "2025-07-30",
+      "notes": [
+        "Reader: Files now open in a new window by default on Desktop",
+        "Translation: Skips translating content inside <pre>, <code>, and <math> tags",
+        "Performance: Improved multi-part downloading for large books",
+        "Sync: Resolved issue preventing some PDF files from syncing",
+        "CSS: Resolved issue with fixed font color in some EPUB files",
+        "TXT: Enhanced TXT parsing for better compatibility"
+      ]
+    },
+    "0.9.67": {
+      "date": "2025-07-22",
+      "notes": [
+        "Reader: Fixed file opening issue when filenames contain commas",
+        "Translation: Added Yandex Translator as a new translation provider",
+        "Layout: Hovering over header now reveals macOS traffic light window controls",
+        "Theme: Reader background color is now customizable for EPUB and PDF",
+        "Library: Search now includes book format, group names, and descriptions",
+        "Library: Various improvements to metadata editor and bookshelf management",
+        "Linux: Fixed social login failure on Linux systems"
+      ]
+    },
+    "0.9.66": {
+      "date": "2025-07-21",
+      "notes": [
+        "Layout: Fixed nested table of contents items not expanding in long TOC lists",
+        "Reader: Opening files from the OS now takes highest priority",
+        "TTS: Improved voice filtering for some language codes",
+        "App: Fixed loading issues on older browsers",
+        "App: Fixed wrong MIME types generated on Linux"
+      ]
+    },
+    "0.9.65": {
+      "date": "2025-07-19",
+      "notes": [
+        "Reader: Added support for opening multiple reader windows on desktop",
+        "Layout: Added visible window borders on Linux",
+        "TTS: Improved handling of invalid book language",
+        "TTS: Skipped reading footnote anchor links",
+        "Translation: Fixed an issue where table of contents entries were not translated",
+        "Sync: Edited book metadata is now included in sync across devices",
+        "iOS: Disabled context menu when long-pressing on book covers"
+      ]
+    },
+    "0.9.64": {
+      "date": "2025-07-16",
+      "notes": [
+        "Library: Added support to edit book metadata",
+        "Layout: Fixed bookmark icon placement when the sidebar is pinned",
+        "Reader: Fixed an issue where links to other chapters in EPUB files did not work",
+        "Reader: Lightened the highlight color in dark mode for better contrast",
+        "Reader: Pull-to-refresh gesture is now smoother and more responsive",
+        "Reader: Removed unintended indentation on images",
+        "Search: Improved responsiveness of full-text search for faster results"
+      ]
+    },
+    "0.9.63": {
+      "date": "2025-07-07",
+      "notes": [
+        "Reader: Fixed links not working in some MOBI books",
+        "TTS: Fixed an issue where some text was skipped during reading",
+        "Library: You can now delete only the cloud backup of a book without removing the local copy",
+        "Performance: Fonts in the font list now load only when displayed for faster startup",
+        "Performance: Opening large MOBI books is now significantly faster",
+        "Layout: Fixed overlay scrollbar display in longer TOC items list",
+        "Layout: Improved grid cover image height in crop mode",
+        "Layout: Removed unsupported screen orientation lock option on iPad",
+        "Layout: System context menu no longer appears when selecting text on iPad",
+        "Translation: Added Thai (th-TH) language support"
+      ]
+    },
+    "0.9.62": {
+      "date": "2025-07-02",
+      "notes": [
+        "Subscription: You can now upgrade to Readest Premium and manage your subscription",
+        "Reader: Added an option to toggle Parallel Reading when viewing multiple books",
+        "Translation: Added an option to show or hide the original text in translations",
+        "Layout: TOC on Android now uses an overlay scrollbar for easier navigation",
+        "Layout: Custom CSS can now also be applied to the library page",
+        "Fonts: Added three new CJK fonts to choose from",
+        "Shortcuts: Press ESC to quickly close the search bar"
+      ]
+    },
+    "0.9.61": {
+      "date": "2025-06-26",
+      "notes": [
+        "Layout: Fixed view menu width on smaller screens",
+        "Layout: Added option to crop or fit book covers in library view",
+        "Reader: You can now apply custom CSS to the reading interface (UI)",
+        "Reader: Added an option to show remaining pages in the current chapter",
+        "Settings: Added options to reset settings from the config dialog",
+        "Import: Fixed encoded filenames when importing TXT files on iOS",
+        "Linux: Fixed missing app icon on some Linux distributions",
+        "GitHub: Added donation link to support Readest development"
+      ]
+    },
+    "0.9.60": {
+      "date": "2025-06-22",
+      "notes": [
+        "Layout has been improved for iPad devices",
+        "Screen orientation changes are now smoother on iOS",
+        "Importing books on iOS during the first launch is now more reliable",
+        "Font size no longer changes unexpectedly in scrolled mode on iOS",
+        "Top and bottom safe insets are now ignored when no header or footer is present",
+        "Interactive books now load correctly on the Desktop platform",
+        "Translation is now disabled when the primary language is undefined",
+        "Android: the task list background color has been updated with current theme color"
+      ]
+    },
+    "0.9.59": {
+      "date": "2025-06-19",
+      "notes": [
+        "Layout: Image size now adjusts more accurately by converting screen units to pixels properly",
+        "Layout: Improved header layout on iOS landscape mode — extra spacing has been removed",
+        "Settings: Top and bottom margin settings are now more intuitive and better constrained"
+      ]
+    },
+    "0.9.58": {
+      "date": "2025-06-18",
+      "notes": [
+        "TTS: Translation now works even when TTS is playing in the background",
+        "TTS: Press T on your keyboard to quickly toggle TTS on or off",
+        "TTS: Each open book now has its own independent TTS controller",
+        "Annotations: Annotation tools now function properly while TTS is active",
+        "Settings: Margins for top, bottom, left, and right can now be adjusted individually",
+        "Settings: New option to always show the status bar while reading",
+        "Layout: Reader page now adapts better to device safe areas for a more comfortable layout",
+        "UI: Added creation timestamps to annotations and made various interface improvements",
+        "iPad: Multiple columns are now supported in portrait mode",
+        "iPad: Fixed issue where sidebars couldn't be resized by dragging",
+        "iPad: Added support for split-screen mode"
+      ]
+    },
+    "0.9.57": {
+      "date": "2025-06-14",
+      "notes": ["TTS: Fixed an issue to detect custom TTS engines on some Android devices"]
+    },
+    "0.9.56": {
+      "date": "2025-06-13",
+      "notes": [
+        "Performance: Improved TOC loading for books with very large chapter lists",
+        "TTS: Added support for native Android TTS engines (e.g., MultiTTS)",
+        "TTS: Fixed an issue where the next chapter would not load properly in the background",
+        "Translation: Improved accuracy and clarity of some Arabic translations",
+        "Reading: Added support for code syntax highlighting in books with code snippets"
+      ]
+    },
+    "0.9.55": {
+      "date": "2025-06-07",
+      "notes": [
+        "Sync: Notes deleted on other devices now correctly sync across all platforms",
+        "Layout: Now text justification can be unset in the layout settings",
+        "Translation: Added notification when daily translation quota is exceeded",
+        "Performance: Reduced unnecessary animations on Android to improve efficiency"
+      ]
+    },
+    "0.9.53": {
+      "date": "2025-06-05",
+      "notes": [
+        "Reader: New option to customize book foreground and background colors",
+        "Reader: Fixed an issue where images appeared too small in some EPUBs",
+        "EPUB: Improved cover image detection for certain EPUB files",
+        "TTS: Improved background playback stability on iOS devices",
+        "Translation: Introduced a daily DeepL translation quota to ensure long-term availability"
+      ]
+    },
+    "0.9.52": {
+      "date": "2025-06-03",
+      "notes": [
+        "Library: The search bar now shows the number of books currently displayed",
+        "Book Details: Book descriptions now support rich HTML formatting",
+        "Notebook: Added support for writing notes using Markdown",
+        "Notebook: You can now search within your notes",
+        "Sync: A sync status item has been added to the View menu",
+        "TOC: You can now sort the table of contents by page number",
+        "Reader: Option added to show remaining time in the current chapter"
+      ]
+    },
+    "0.9.51": {
+      "date": "2025-06-01",
+      "notes": [
+        "Translator: Table of contents is now included in translations",
+        "Library Theme: Added light, dark, and system theme options to the library page",
+        "TTS: Now shows the current sentence and chapter in the media session",
+        "TTS: Text-to-speech continues from the last read sentence",
+        "Pagination Fix: Taking notes no longer breaks page turning",
+        "EPUB Scripts: Added a setting to allow JavaScript in EPUB files"
+      ]
+    },
+    "0.9.50": {
+      "date": "2025-05-28",
+      "notes": [
+        "Bilingual TTS: You can now choose voices for each language in bilingual text-to-speech mode",
+        "Settings Layout: Improved header layout in the settings dialog for different screen sizes",
+        "CSS Fixes: Corrected anchor text color and fixed image dimensions within paragraphs"
+      ]
+    },
+    "0.9.49": {
+      "date": "2025-05-27",
+      "notes": [
+        "Select All in Library: You can now select all books at once when in selection mode",
+        "More Translation Options: Added support for Azure and Google Translate services",
+        "Dark Mode Enhancement: New option to invert image colors for better visibility in dark mode",
+        "Bilingual TTS: Enjoy bilingual text-to-speech for books with content in two languages",
+        "Full Book Translation: Translate books in any language into bilingual ebooks",
+        "Privacy Settings: Added a new option to opt-out of telemetry"
+      ]
+    },
+    "0.9.43": {
+      "date": "2025-05-19",
+      "notes": [
+        "Enhanced compatibility with Gutenberg and Feedbooks ebooks for better styling",
+        "Reduced sensitivity of trackpad and mouse during page flips",
+        "Cloud backup status is now visible for each book on mobile and desktop",
+        "New option to control scroll overlap when paginating in scroll mode",
+        "Added Dutch language translations",
+        "Added more font weight options for built-in fonts",
+        "Added previous and next section buttons in the footer bar for easier navigation"
+      ]
+    },
+    "0.9.41": {
+      "date": "2025-05-13",
+      "notes": [
+        "Improved UI and layout on mobile devices",
+        "Avatar images are now cached for offline use",
+        "Book file size is now displayed in the book details view",
+        "Update status is now correctly shown in the About window",
+        "TTS control positioning improved for notebook and RTL modes",
+        "TXT files are segmented by paragraph count if no chapter titles are found",
+        "Android: App now respects system auto-rotation settings",
+        "Linux: Updater is disabled on Linux when not using AppImage",
+        "Linux: Added support for Linux ARMHF builds",
+        "CSS: Resolved layout and color issues caused by hardcoded CSS"
+      ]
+    },
+    "0.9.40": {
+      "date": "2025-05-08",
+      "notes": [
+        "Prevented oversized images from causing layout issues",
+        "Resolved issue with transient navigation bar on Android 9",
+        "Action bar now closes properly when the footbar is dismissed",
+        "Smoother experience when expanding Table of Contents sections",
+        "Reverted unintended style overrides"
+      ]
+    },
+    "0.9.39": {
+      "date": "2025-05-07",
+      "notes": [
+        "Enhanced Navigation: Added location information to the table of contents",
+        "Enhanced Navigation: Larger touch targets for table of contents expansion icons",
+        "Screen Orientation Lock: You can now lock your device's screen orientation when reading",
+        "Quick Access to Recent Books: Option to automatically open your last read book when starting the app",
+        "Better Language Support: Improved handling of CJK characters in search",
+        "Enhanced Text-to-Speech: More accurate language detection for TTS",
+        "Enhanced Text-to-Speech: Text-to-Speech now maintains your position in scroll mode",
+        "Enhanced Annotations: Better handling of annotations with ruby elements in Japanese books",
+        "Smoother Scrolling: We've made continuous scrolling more reliable for a seamless reading experience",
+        "Compact View: Reading view is more compact when header and footer are hidden",
+        "TXT Parsing: More robust handling of TXT book format"
+      ]
+    },
+    "0.9.38": {
+      "date": "2025-04-29",
+      "notes": [
+        "Page Turning with Volume Keys: You can now turn pages using your device’s volume buttons",
+        "Expanded English Voices: More English voices are available across all en locales",
+        "Theme Editor: Added a primary color picker for easier customization",
+        "System Fonts: Retrieve system fonts on iOS and Android, with improved font weight and style detection",
+        "Popup Footnotes: Popup footnotes now inherit the book's font for consistent appearance",
+        "Better Text Selection: Preserves text selection anchors when spanning paginated content",
+        "Android Compatibility: Navigation bar auto-hides correctly on Android 10 and below",
+        "Popup Dialogs: Back key now properly dismisses popup dialogs on Android"
+      ]
+    },
+    "0.9.37": {
+      "date": "2025-04-25",
+      "notes": [
+        "Full-Screen Toggle: You can now press F11 to quickly toggle full-screen mode",
+        "List View: A new list layout is available for your bookshelf",
+        "Book Details: Book descriptions from metadata are now shown in the details view",
+        "Enhanced Android behavior: better navigation bar handling and status bar dismissal when resuming",
+        "TTS now defaults to the book’s metadata language when needed",
+        "Synced custom themes reliably across sessions"
+      ]
+    },
+    "0.9.36": {
+      "date": "2025-04-20",
+      "notes": [
+        "📥 New download and upload buttons in the book detail dialog for easier file management",
+        "📂 You can now open files directly in Readest from your file manager on Android and iOS",
+        "🛠️ Fixed an issue where files with quotation marks in the filename could not be opened",
+        "📖 Improved the immersive reading experience on the reader page for Android and iOS",
+        "🌐 Added GuanKiapTsingKhai-T to the list of available CJK fonts"
+      ]
+    },
+    "0.9.35": {
+      "date": "2025-04-15",
+      "notes": [
+        "🛠️ Fixed an issue where books without cover images can not be synced across devices",
+        "📱 Added in-app update support for Android",
+        "📚 You can now sort books by title or author in your library"
+      ]
+    },
+    "0.9.33": {
+      "date": "2025-04-13",
+      "notes": [
+        "New: Redesigned update dialog with a progress bar during downloads for a smoother update experience.",
+        "New: You can now set header and footer visibility separately for paginated and scroll modes.",
+        "Fixed layout issues in the bottom configuration panel when using RTL (right-to-left) languages.",
+        "Fixed TXT file import issues on Android by improving support for content provider file paths.",
+        "Fixed transformed punctuations when highlighting text with vertical layout.",
+        "Improved login flow on macOS by handling OAuth with the native ASWebAuthenticationSession."
+      ]
+    },
+    "0.9.32": {
+      "date": "2025-04-09",
+      "notes": [
+        "No more resetting of font size and color when you apply custom book styles",
+        "The underline and squiggly highlight decorations have been adjusted to sit neatly between text lines",
+        "With more font options available, the font menu is no longer forced in-line",
+        "LXGW WenKai TC is now part of our CJK font list"
+      ]
+    },
+    "0.9.31": {
+      "date": "2025-04-08",
+      "notes": [
+        "iOS: Text-to-Speech (TTS) now works in the background",
+        "Android: Import files from native file manager",
+        "Desktop: Add option to keep window on top",
+        "Vertical layout for highlighting tools",
+        "Added options to auto-stop TTS after timeout",
+        "Added book search functionality in bookshelf",
+        "Improved font support for CJK users"
+      ]
+    },
+    "0.9.30": {
+      "date": "2025-04-05",
+      "notes": [
+        "Added fixed storage quota when running the app in self-hosted mode",
+        "Link colors will only change when you override fonts",
+        "Added cache for native files for better performance"
+      ]
+    },
+    "0.9.29": {
+      "date": "2025-04-02",
+      "notes": [
+        "Improved Login on Android without needing to rely on external Chrome browser",
+        "Local large book files now load more efficiently on Android",
+        "Balanced the load of online service between different types of users to keep things running smoothly for everyone"
+      ]
+    },
+    "0.9.28": {
+      "date": "2025-03-30",
+      "notes": [
+        "Improved vertical reading mode with better support for Chinese punctuations",
+        "Fixed TXT file importing issue on desktop apps — TXT books now load reliably and display as expected",
+        "Improved annotation experience — highlighting tools are now properly dismissed when adding notes to avoid UI conflicts"
+      ]
+    },
+    "0.9.27": {
+      "date": "2025-03-29",
+      "notes": [
+        "Added option to swap click-to-flip area and reset password",
+        "Added global shortcuts for full-text search",
+        "Added support for both R2 and S3 storage in cloud sync",
+        "Improved TTS with fewer unintended pauses, faster startup, and support for preferred voices",
+        "Various fixes for rendering styles and UI layout"
+      ]
+    },
+    "0.9.26": {
+      "date": "2025-03-27",
+      "notes": [
+        "Support open book from file manager without importing",
+        "Add LXGW WenKai font in Serif fonts list",
+        "Various fixes on layout and styles on Windows and Android"
+      ]
+    },
+    "0.9.25": {
+      "date": "2025-03-24",
+      "notes": [
+        "Support exporting annotations in markdown format",
+        "Support importing TXT files",
+        "Support setting reader language in the UI",
+        "Add bottom action bar on mobile platforms",
+        "Various fixes on layout settings and styles"
+      ]
+    },
+    "0.9.23": {
+      "date": "2025-03-19",
+      "notes": [
+        "Add options to show/hide header and footer",
+        "Add responsive window size for popup footnotes",
+        "Fix theme color not applied on Safari browsers",
+        "Fix progress not updated to 100% when finished reading"
+      ]
+    },
+    "0.9.22": {
+      "date": "2025-03-16",
+      "notes": [
+        "Add theme color editor for more customization",
+        "Add border frame for vertical layout",
+        "Fix layout glitches on macOS in scroll mode",
+        "Various fixes and enhancements on translator, footnote, and scrollbar"
+      ]
+    },
+    "0.9.21": {
+      "date": "2025-03-10",
+      "notes": [
+        "Fix column height in vertical layout on mobile",
+        "Fix drag handle height not constant on mobile",
+        "Add fullscreen option on desktop",
+        "Add drag and drop to import books on desktop",
+        "Various fixes and enhancements on updater, footerbar and note"
+      ]
+    },
+    "0.9.20": {
+      "date": "2025-03-10",
+      "notes": [
+        "Fix column height in vertical layout on mobile",
+        "Fix drag handle height not constant on mobile",
+        "Add fullscreen option on desktop",
+        "Add drag and drop to import books on desktop",
+        "Various fixes and enhancements on updater, footerbar and note"
+      ]
+    },
+    "0.9.19": {
+      "date": "2025-03-07",
+      "notes": [
+        "Support custom CSS for Reader UI",
+        "Initial support of RTL layout for Arabic and Hebrew books",
+        "Various fixes and enhancements on layout and sync"
+      ]
+    },
+    "0.9.18": {
+      "date": "2025-02-26",
+      "notes": [
+        "Add user profile page and option to delete account in the cloud",
+        "Fix TTS failed to start with invalid book language",
+        "Enhancements on iOS with modals and annotation tools",
+        "UX enhancements with modern highlights colors"
+      ]
+    },
+    "0.9.17": {
+      "date": "2025-02-24",
+      "notes": [
+        "Add Arabic localization",
+        "Add Dockerfile to selfhost",
+        "Add safari-auth plugin for iOS OAuth",
+        "UX enhancements for mobile platforms with haptics feedback and pull-down dismissal"
+      ]
+    },
+    "0.9.15": {
+      "date": "2025-02-21",
+      "notes": [
+        "Fix hardcoded font color from calibre",
+        "Fix scroll to current TOC item when toggling sidebar",
+        "Various fixes and enhancements on iOS platform"
+      ]
+    },
+    "0.9.13": {
+      "date": "2025-02-19",
+      "notes": [
+        "Add option to keep screen awake when reading",
+        "Add shortcuts to notetaking UI",
+        "UX enhancements of grid view in mobile platforms"
+      ]
+    },
+    "0.9.11": {
+      "date": "2025-02-14",
+      "notes": [
+        "Organize the library with customizable groups/folders",
+        "Alpha release for Android and iOS platforms",
+        "Various fixes and enhancements on Android and iOS platforms"
+      ]
+    },
+    "0.9.10": {
+      "date": "2025-02-08",
+      "notes": [
+        "Add options to adjust paragraph margin, word spacing, letter spacing, text indent and font weight",
+        "Alpha release for Android and iOS platforms"
+      ]
+    },
+    "0.9.9": {
+      "date": "2025-02-06",
+      "notes": [
+        "Load system fonts list at runtime on desktop",
+        "Incrementally load new books in synchronization",
+        "Change voice language dynamically by detecting text language",
+        "Various fixes and enhancements on sync, fonts and highlighting"
+      ]
+    },
+    "0.9.8": {
+      "date": "2025-02-01",
+      "notes": [
+        "Support cloud sync for book files",
+        "Use larger font size on mobile devices for better reading experience",
+        "Various fixes and enhancements on sync, rendering and settings"
+      ]
+    },
+    "0.9.7": {
+      "date": "2025-01-23",
+      "notes": [
+        "Support PWA for the web version",
+        "Swipe up to toggle header/footer",
+        "Various fixes and enhancements on updater, header bar and tts"
+      ]
+    },
+    "0.9.6": {
+      "date": "2025-01-18",
+      "notes": ["Various enhancements for mobile platforms", "Fix DeepL translation API"]
+    },
+    "0.9.5": {
+      "date": "2025-01-15",
+      "notes": [
+        "Various TTS related UX enhancements",
+        "Add more system fonts as custom fonts",
+        "Show reading progress in bookshelf"
+      ]
+    },
+    "0.9.3": {
+      "date": "2025-01-11",
+      "notes": [
+        "Hotfix occasionally current speak not stopped when changing voice or rate",
+        "Inherit tts rate when changing tts engine"
+      ]
+    },
+    "0.9.2": {
+      "date": "2025-01-10",
+      "notes": [
+        "Support Text-to-Speech with Edge TTS and Web Speech API.",
+        "Various fixes and enhancements."
+      ]
+    },
+    "0.9.1": {
+      "date": "2025-01-06",
+      "notes": [
+        "Restore window position and size when reopening app.",
+        "Swap font when downloading online fonts.",
+        "Fix layout issues on Windows and Linux."
+      ]
+    },
+    "0.9.0": {
+      "date": "2025-01-04",
+      "notes": [
+        "Better Custom CSS editor and OAuth process.",
+        "Add vertical/horizontal switch for CJK books.",
+        "Fix dropdown close overlay not working on Windows/Linux."
+      ]
+    },
+    "0.8.9": {
+      "date": "2025-01-02",
+      "notes": [
+        "Context menu on bookshelf for quick actions.",
+        "Add more system fonts as custom fonts.",
+        "Fix google and github login for native apps."
+      ]
+    },
+    "0.8.8": {
+      "date": "2024-12-29",
+      "notes": [
+        "Use readest binary name for better CLI interface.",
+        "Some CSS tweaks to better support dark mode and embedded fonts."
+      ]
+    },
+    "0.8.7": {
+      "date": "2024-12-27",
+      "notes": [
+        "Support i18n/l10n with popular languages.",
+        "Support information modal for book details.",
+        "Various fixes and enhancements."
+      ]
+    },
+    "0.8.6": {
+      "date": "2024-12-25",
+      "notes": [
+        "Support back navigation in login page.",
+        "Support context menu on book cover for desktop version.",
+        "Resolve the issue with restoring footnotes and bookmarks after deletion."
+      ]
+    },
+    "0.8.5": {
+      "date": "2024-12-24",
+      "notes": [
+        "Support progress and notes sync across devices.",
+        "Support for Non-ASCII characters in custom CSS.",
+        "Support to disable click-to-flip."
+      ]
+    },
+    "0.8.3": {
+      "date": "2024-12-12",
+      "notes": [
+        "Support popover footnotes.",
+        "Support left / right popover on vertical writing documents.",
+        "Support loading additional fonts."
+      ]
+    },
+    "0.8.2": {
+      "date": "2024-12-06",
+      "notes": [
+        "Support file associations for one-click open with Readest.",
+        "Support APP auto updater.",
+        "Support online web version."
+      ]
+    },
+    "0.7.9": {
+      "date": "2024-12-01",
+      "notes": [
+        "Initial release with full functionality for ePub rendering.",
+        "Support multi-book reading with Parallel Read."
+      ]
+    }
+  }
+}
