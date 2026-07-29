@@ -8,7 +8,7 @@ vi.mock('@/utils/md5', () => ({
   md5Fingerprint: (value: string) => `md5_${value}`,
 }));
 
-import { useBookDataStore } from '@/store/bookDataStore';
+import { useBookDataStore, flushPendingLibrarySave } from '@/store/bookDataStore';
 import type { BookData } from '@/store/bookDataStore';
 import type { BookConfig, BookNote, Book } from '@/types/book';
 import { useLibraryStore } from '@/store/libraryStore';
@@ -73,18 +73,18 @@ describe('bookDataStore', () => {
       const data = makeBookData('abc123');
       useBookDataStore.setState({ booksData: { abc123: data } });
 
-      const result = useBookDataStore.getState().getBookData('abc123-view0');
+      const result = useBookDataStore.getState().getBookData('abc123-abc1234');
       expect(result).not.toBeNull();
       expect(result!.id).toBe('abc123');
     });
 
-    test('handles key with multiple hyphens by using first segment', () => {
-      const data = makeBookData('hash42');
-      useBookDataStore.setState({ booksData: { hash42: data } });
+    test('a hash that itself contains a hyphen survives intact (only the trailing 7-char uniqueId strips)', () => {
+      const data = makeBookData('hash42-extra');
+      useBookDataStore.setState({ booksData: { 'hash42-extra': data } });
 
-      const result = useBookDataStore.getState().getBookData('hash42-view0-extra');
+      const result = useBookDataStore.getState().getBookData('hash42-extra-abc1234');
       expect(result).not.toBeNull();
-      expect(result!.id).toBe('hash42');
+      expect(result!.id).toBe('hash42-extra');
     });
   });
 
@@ -101,7 +101,7 @@ describe('bookDataStore', () => {
       const data = makeBookData('book1');
       useBookDataStore.setState({ booksData: { book1: data } });
 
-      useBookDataStore.getState().clearBookData('book1-view0');
+      useBookDataStore.getState().clearBookData('book1-abc1234');
       expect(useBookDataStore.getState().getBookData('book1')).toBeNull();
     });
 
@@ -146,7 +146,7 @@ describe('bookDataStore', () => {
       const data = makeBookData('book1', { location: 'loc1' });
       useBookDataStore.setState({ booksData: { book1: data } });
 
-      const config = useBookDataStore.getState().getConfig('book1-view0');
+      const config = useBookDataStore.getState().getConfig('book1-abc1234');
       expect(config).not.toBeNull();
       expect(config!.location).toBe('loc1');
     });
@@ -195,7 +195,7 @@ describe('bookDataStore', () => {
       const data = makeBookData('book1', { location: 'old-loc' });
       useBookDataStore.setState({ booksData: { book1: data } });
 
-      useBookDataStore.getState().setConfig('book1-view0', { location: 'new-loc' });
+      useBookDataStore.getState().setConfig('book1-abc1234', { location: 'new-loc' });
 
       const config = useBookDataStore.getState().getConfig('book1');
       expect(config!.location).toBe('new-loc');
@@ -263,7 +263,7 @@ describe('bookDataStore', () => {
       useBookDataStore.setState({ booksData: { book1: data } });
 
       const notes = [makeBookNote({ id: 'n1' })];
-      useBookDataStore.getState().updateBooknotes('book1-view0', notes);
+      useBookDataStore.getState().updateBooknotes('book1-abc1234', notes);
 
       const config = useBookDataStore.getState().getConfig('book1');
       expect(config!.booknotes).toHaveLength(1);
@@ -379,7 +379,15 @@ describe('bookDataStore', () => {
 
       const stored = useLibraryStore.getState().getBookByHash('h1');
       expect(stored?.progress).toEqual([42, 100]);
+      // Per-book config still writes eagerly — it's small and the source
+      // of truth for reconstructing the shelf on next launch.
       expect(saveBookConfig).toHaveBeenCalledOnce();
+      // Library JSON write is throttled (see scheduleLibrarySave in
+      // bookDataStore) so a burst of saveConfig calls during reading
+      // doesn't fire IPC on every page turn. Force-flush here to
+      // observe the write actually happens.
+      expect(saveLibraryBooks).not.toHaveBeenCalled();
+      await flushPendingLibrarySave();
       expect(saveLibraryBooks).toHaveBeenCalledOnce();
     });
 

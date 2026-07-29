@@ -138,7 +138,7 @@ describe('AuthContext guest login', () => {
     expect(localStorage.getItem('mybooks_host')).toBe('https://mybooks.example.com');
   });
 
-  test('logout clears guest state', () => {
+  test('logout clears guest state', async () => {
     let current: ReturnType<typeof useAuth> | null = null;
     render(
       <AuthProvider>
@@ -151,8 +151,8 @@ describe('AuthContext guest login', () => {
     });
     expect(current!.status).toBe('guest');
 
-    act(() => {
-      current!.logout();
+    await act(async () => {
+      await current!.logout();
     });
 
     expect(current!.isGuest).toBe(false);

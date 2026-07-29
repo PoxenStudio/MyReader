@@ -2,14 +2,16 @@ import type { Book } from '@/types/book';
 import type { FileSystem } from '@/types/system';
 import { EXTS } from '@/libs/document';
 import { getDir, getLocalBookFilename } from '@/utils/book';
-import { isValidURL } from '@/utils/misc';
+import { isContentURI, isValidURL } from '@/utils/misc';
 import { isPseStreamFileName } from './opds/pseStream';
+import { isFeedBookUrl } from '@/services/rss/feedBookUrl';
 
 export type BookContentSource =
   | { kind: 'managed'; path: string; base: 'Books'; legacy?: boolean }
   | { kind: 'external'; path: string; base: 'None' }
   | { kind: 'url'; path: string; base: 'None' }
   | { kind: 'stream'; path: string; base: 'None'; scheme: 'pse' }
+  | { kind: 'feed'; path: string; base: 'None' }
   | { kind: 'missing' };
 
 export type BookFileContentSource = Extract<
@@ -49,11 +51,26 @@ export async function resolveBookContentSource(
     return { kind: 'managed', path: managedPath, base: 'Books' };
   }
 
-  if (book.filePath && (await fs.exists(book.filePath, 'None'))) {
-    return { kind: 'external', path: book.filePath, base: 'None' };
+  if (book.filePath) {
+    // Android "Open with Readest" hands us a content:// URI as the
+    // book.filePath (e.g. content://media/external/file/1322). Tauri's
+    // fs.exists() doesn't understand content URIs and returns false,
+    // which would route us to `missing` here even though the URI is
+    // perfectly readable through appService.openFile (which copies the
+    // content to Cache on demand). Skip the existence probe for URIs
+    // we know openFile knows how to resolve.
+    if (isContentURI(book.filePath)) {
+      return { kind: 'external', path: book.filePath, base: 'None' };
+    }
+    if (await fs.exists(book.filePath, 'None')) {
+      return { kind: 'external', path: book.filePath, base: 'None' };
+    }
   }
 
   if (book.url) {
+    if (isFeedBookUrl(book.url)) {
+      return { kind: 'feed', path: book.url, base: 'None' };
+    }
     if (isPseStreamFileName(book.url)) {
       return { kind: 'stream', path: book.url, base: 'None', scheme: 'pse' };
     }

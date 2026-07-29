@@ -17,7 +17,12 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
 import { useLibraryStore } from '@/store/libraryStore';
-import { TransferItem, TransferStatus, useTransferStore } from '@/store/transferStore';
+import {
+  TransferItem,
+  TransferStatus,
+  isFailedLikeTransfer,
+  useTransferStore,
+} from '@/store/transferStore';
 import { ENABLE_UPLOAD_ALL_IN_TRANSFER_QUEUE } from '@/services/mybooks/constants';
 
 const formatBytes = (bytes: number): string => {
@@ -110,7 +115,10 @@ const TransferItemRow: React.FC<{
             <span className='text-error'>{transfer.error || _('Failed')}</span>
           )}
           {transfer.status === 'completed' && (completedLabel[transfer.type] || _('Completed'))}
-          {transfer.status === 'cancelled' && _('Cancelled')}
+          {transfer.status === 'cancelled' &&
+            (transfer.cancelReason === 'policy'
+              ? `${_('Cancelled')} · ${_('Cloud provider switched')}`
+              : _('Cancelled'))}
           {' · '}
           {formatDateTime(transfer.completedAt || transfer.startedAt || transfer.createdAt)}
         </div>
@@ -126,7 +134,7 @@ const TransferItemRow: React.FC<{
       </div>
 
       <div className='flex items-center gap-1'>
-        {(transfer.status === 'failed' || transfer.status === 'cancelled') && (
+        {isFailedLikeTransfer(transfer) && (
           <button
             onClick={() => onRetry(transfer.id)}
             className='btn btn-ghost btn-sm btn-circle'
@@ -167,6 +175,7 @@ const TransferQueuePanel: React.FC = () => {
     resumeQueue,
     clearCompleted,
     clearFailed,
+    clearPending,
     queueUpload,
     queueDownload,
   } = useTransferQueue();
@@ -197,7 +206,7 @@ const TransferQueuePanel: React.FC = () => {
         case 'completed':
           return t.status === 'completed';
         case 'failed':
-          return t.status === 'failed' || t.status === 'cancelled';
+          return isFailedLikeTransfer(t) || t.status === 'cancelled';
         default:
           return true;
       }
@@ -334,6 +343,12 @@ const TransferQueuePanel: React.FC = () => {
             <button onClick={retryAllFailed} className='btn btn-ghost btn-sm gap-1'>
               <MdRefresh size={iconSize - 2} />
               {_('Retry All')}
+            </button>
+          )}
+          {stats.pending > 0 && (
+            <button onClick={clearPending} className='btn btn-ghost btn-sm gap-1'>
+              <MdDeleteSweep size={iconSize - 2} />
+              {_('Clear Pending')}
             </button>
           )}
           {stats.completed > 0 && (

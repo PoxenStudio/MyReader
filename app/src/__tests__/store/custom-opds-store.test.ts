@@ -1,19 +1,9 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { useCustomOPDSStore } from '@/store/customOPDSStore';
+import { useCustomOPDSStore, computeOpdsCatalogContentId } from '@/store/customOPDSStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { computeOpdsCatalogContentId } from '@/services/sync/adapters/opdsCatalog';
 import type { OPDSCatalog } from '@/types/opds';
 import type { SystemSettings } from '@/types/settings';
 import type { EnvConfigType } from '@/services/environment';
-
-// Replica-publish helpers fan out to the network — stub them so tests
-// stay hermetic. We assert they fire for upserts/deletes via spies.
-vi.mock('@/services/sync/replicaPublish', () => ({
-  publishReplicaUpsert: vi.fn(),
-  publishReplicaDelete: vi.fn(),
-}));
-
-import { publishReplicaUpsert, publishReplicaDelete } from '@/services/sync/replicaPublish';
 
 const makeEnvConfig = (): EnvConfigType =>
   ({
@@ -48,17 +38,6 @@ describe('customOPDSStore', () => {
       expect(cat.addedAt).toBeGreaterThan(0);
     });
 
-    test('publishes the upsert via replicaPublish', () => {
-      useCustomOPDSStore.getState().addCatalog({
-        id: 'local-1',
-        name: 'My Library',
-        url: 'https://example.com/opds',
-      });
-      expect(publishReplicaUpsert).toHaveBeenCalledTimes(1);
-      const [kind] = (publishReplicaUpsert as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
-      expect(kind).toBe('opds_catalog');
-    });
-
     test('re-adding a soft-deleted entry mints a reincarnation token', () => {
       const first = useCustomOPDSStore.getState().addCatalog({
         id: 'l1',
@@ -66,7 +45,6 @@ describe('customOPDSStore', () => {
         url: 'https://example.com/opds',
       });
       useCustomOPDSStore.getState().removeCatalog(first.id);
-      vi.clearAllMocks();
       const revived = useCustomOPDSStore.getState().addCatalog({
         id: 'l2',
         name: 'L1 again',
@@ -74,23 +52,54 @@ describe('customOPDSStore', () => {
       });
       expect(revived.deletedAt).toBeUndefined();
       expect(revived.reincarnation).toBeTruthy();
-      expect(publishReplicaUpsert).toHaveBeenCalledTimes(1);
+    });
+
+    test('re-adding after a restart (local tombstone stripped) still revives the server row', async () => {
+      // Reporter scenario (#5180): the catalog carries a server-side
+      // tombstone (from a prior delete on this or another device). After
+      // an app restart the local tombstone is gone — saveCustomOPDSCatalogs
+      // strips deletedAt entries from persisted settings — so addCatalog
+      // sees no in-memory entry and, before this fix, never minted a
+      // reincarnation token. Under CRDT remove-wins the re-added catalog
+      // then loses to the tombstone and vanishes on the next pull. The
+      // re-add must reincarnate even though no local tombstone survives.
+      const env = makeEnvConfig();
+      const first = useCustomOPDSStore.getState().addCatalog({
+        id: 'l1',
+        name: 'L1',
+        url: 'https://example.com/opds',
+      });
+      useCustomOPDSStore.getState().removeCatalog(first.id);
+      await useCustomOPDSStore.getState().saveCustomOPDSCatalogs(env);
+      // The tombstone did not survive persistence...
+      expect(useSettingsStore.getState().settings.opdsCatalogs).toHaveLength(0);
+
+      // ...so a restart hydrates an empty store.
+      useCustomOPDSStore.setState({ catalogs: [], loading: false });
+      await useCustomOPDSStore.getState().loadCustomOPDSCatalogs(env);
+      expect(useCustomOPDSStore.getState().catalogs).toHaveLength(0);
+
+      const revived = useCustomOPDSStore.getState().addCatalog({
+        id: 'l2',
+        name: 'L1 again',
+        url: 'https://example.com/opds',
+      });
+      expect(revived.deletedAt).toBeUndefined();
+      expect(revived.reincarnation).toBeTruthy();
     });
   });
 
   describe('updateCatalog', () => {
-    test('publishes the upsert for non-URL patches', () => {
+    test('updates fields for non-URL patches', () => {
       const cat = useCustomOPDSStore.getState().addCatalog({
         id: 'local-1',
         name: 'Old',
         url: 'https://example.com/opds',
       });
       const oldContentId = cat.contentId;
-      vi.clearAllMocks();
       const updated = useCustomOPDSStore.getState().updateCatalog(cat.id, { name: 'New' });
       expect(updated!.name).toBe('New');
       expect(updated!.contentId).toBe(oldContentId);
-      expect(publishReplicaUpsert).toHaveBeenCalledTimes(1);
     });
 
     test('changing the URL recomputes contentId', () => {
@@ -113,26 +122,22 @@ describe('customOPDSStore', () => {
         url: 'https://example.com/opds',
       });
       useCustomOPDSStore.getState().removeCatalog(cat.id);
-      vi.clearAllMocks();
       const out = useCustomOPDSStore.getState().updateCatalog(cat.id, { name: 'X' });
       expect(out).toBeUndefined();
-      expect(publishReplicaUpsert).not.toHaveBeenCalled();
     });
   });
 
   describe('removeCatalog', () => {
-    test('soft-deletes and publishes the tombstone', () => {
+    test('soft-deletes the catalog', () => {
       const cat = useCustomOPDSStore.getState().addCatalog({
         id: 'l1',
         name: 'L1',
         url: 'https://example.com/opds',
       });
-      vi.clearAllMocks();
       const removed = useCustomOPDSStore.getState().removeCatalog(cat.id);
       expect(removed).toBe(true);
       const stored = useCustomOPDSStore.getState().getCatalog(cat.id);
       expect(stored?.deletedAt).toBeGreaterThan(0);
-      expect(publishReplicaDelete).toHaveBeenCalledWith('opds_catalog', cat.contentId);
     });
 
     test('returns false when id is unknown', () => {
@@ -152,7 +157,6 @@ describe('customOPDSStore', () => {
       useCustomOPDSStore.getState().applyRemoteCatalog(cat);
       const stored = useCustomOPDSStore.getState().findByContentId('remote-cid');
       expect(stored?.name).toBe('Remote');
-      expect(publishReplicaUpsert).not.toHaveBeenCalled();
     });
 
     test('preserves local username/password when overlaying a remote update', () => {
@@ -163,7 +167,6 @@ describe('customOPDSStore', () => {
         username: 'alice',
         password: 'hunter2',
       });
-      vi.clearAllMocks();
       useCustomOPDSStore.getState().applyRemoteCatalog({
         id: local.contentId!,
         contentId: local.contentId,
@@ -175,22 +178,19 @@ describe('customOPDSStore', () => {
       expect(merged?.name).toBe('Renamed remotely');
       expect(merged?.username).toBe('alice');
       expect(merged?.password).toBe('hunter2');
-      expect(publishReplicaUpsert).not.toHaveBeenCalled();
     });
   });
 
   describe('softDeleteByContentId', () => {
-    test('marks the matching entry as deleted without re-publishing', () => {
+    test('marks the matching entry as deleted', () => {
       const cat = useCustomOPDSStore.getState().addCatalog({
         id: 'l1',
         name: 'L1',
         url: 'https://example.com/opds',
       });
-      vi.clearAllMocks();
       useCustomOPDSStore.getState().softDeleteByContentId(cat.contentId!);
       const stored = useCustomOPDSStore.getState().findByContentId(cat.contentId!);
       expect(stored?.deletedAt).toBeGreaterThan(0);
-      expect(publishReplicaDelete).not.toHaveBeenCalled();
     });
   });
 
@@ -215,7 +215,7 @@ describe('customOPDSStore', () => {
   });
 
   describe('loadCustomOPDSCatalogs', () => {
-    test('backfills contentId on legacy entries and republishes them', async () => {
+    test('backfills contentId on legacy entries', async () => {
       const legacy: OPDSCatalog = {
         id: 'legacy-1',
         name: 'Legacy',
@@ -227,7 +227,6 @@ describe('customOPDSStore', () => {
       await useCustomOPDSStore.getState().loadCustomOPDSCatalogs(makeEnvConfig());
       const inMemory = useCustomOPDSStore.getState().getCatalog('legacy-1')!;
       expect(inMemory.contentId).toBe(computeOpdsCatalogContentId('https://legacy.example/opds'));
-      expect(publishReplicaUpsert).toHaveBeenCalledTimes(1);
     });
 
     test('preserves the existing array order via descending addedAt timestamps', async () => {
@@ -262,7 +261,6 @@ describe('customOPDSStore', () => {
         }),
       } as unknown as ReturnType<typeof useSettingsStore.getState>);
       await useCustomOPDSStore.getState().loadCustomOPDSCatalogs(makeEnvConfig());
-      expect(publishReplicaUpsert).not.toHaveBeenCalled();
       expect(useCustomOPDSStore.getState().catalogs).toHaveLength(1);
     });
   });

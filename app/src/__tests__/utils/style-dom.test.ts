@@ -26,11 +26,6 @@ import {
   getStyles,
   applyImageStyle,
   keepTextAlignment,
-  applyTableStyle,
-  applyTableTouchScroll,
-  shouldTableScrollConsumeTouch,
-  shouldTableScrollConsumeWheel,
-  TABLE_SCROLL_CLASS,
 } from '@/utils/style';
 import {
   DEFAULT_BOOK_FONT,
@@ -422,6 +417,33 @@ describe('getStyles', () => {
     expect(css).toContain('background-color: #ffffff !important');
     expect(css).toContain('color: #171717 !important');
   });
+
+  it('scopes the inline-image baseline default to its own class so author values win #4866', () => {
+    const vs = makeViewSettings();
+    const themeCode: ThemeCode = {
+      bg: '#ffffff',
+      fg: '#171717',
+      primary: '#0066cc',
+      palette: {
+        'base-100': '#ffffff',
+        'base-200': '#f2f2f2',
+        'base-300': '#e0e0e0',
+        'base-content': '#171717',
+        neutral: '#cccccc',
+        'neutral-content': '#444444',
+        primary: '#0066cc',
+        secondary: '#3399ff',
+        accent: '#0055aa',
+      },
+      isDarkMode: false,
+    };
+    const css = getStyles(vs, themeCode);
+    // Baseline is opt-in via a dedicated class, not forced on every inline image.
+    expect(css).toMatch(/img\.has-text-siblings-baseline\s*\{[^}]*vertical-align:\s*baseline/);
+    // The size-clamp rule must not carry vertical-align anymore.
+    const clampRule = css.match(/\n\s*img\.has-text-siblings\s*\{[^}]*\}/)![0];
+    expect(clampRule).not.toContain('vertical-align');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -484,6 +506,23 @@ describe('applyImageStyle', () => {
     const img = document.querySelector('img')!;
     expect(img.classList.contains('has-text-siblings')).toBe(false);
   });
+
+  it('applies the baseline default when the image has no author vertical-align', () => {
+    document.body.innerHTML = '<p>Some text <img src="test.png" /> more text</p>';
+    applyImageStyle(document);
+    const img = document.querySelector('img')!;
+    expect(img.classList.contains('has-text-siblings')).toBe(true);
+    expect(img.classList.contains('has-text-siblings-baseline')).toBe(true);
+  });
+
+  it('respects an author-set vertical-align (no baseline default) #4866', () => {
+    document.body.innerHTML =
+      '<p>Some text <img src="test.png" style="vertical-align: -0.15em" /> more text</p>';
+    applyImageStyle(document);
+    const img = document.querySelector('img')!;
+    expect(img.classList.contains('has-text-siblings')).toBe(true);
+    expect(img.classList.contains('has-text-siblings-baseline')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -542,157 +581,5 @@ describe('keepTextAlignment', () => {
     expect(document.querySelector('p')!.classList.contains('aligned-center')).toBe(true);
     expect(document.querySelector('div')!.classList.contains('aligned-right')).toBe(true);
     expect(document.querySelector('blockquote')!.classList.contains('aligned-justify')).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// applyTableStyle
-// ---------------------------------------------------------------------------
-describe('applyTableStyle', () => {
-  beforeEach(() => {
-    document.body.innerHTML = '';
-  });
-
-  it('wraps a table in a horizontal scroll container', () => {
-    document.body.innerHTML = `
-      <div>
-        <table>
-          <tr>
-            <td width="100">Cell 1</td>
-            <td width="200">Cell 2</td>
-          </tr>
-        </table>
-      </div>
-    `;
-    applyTableStyle(document);
-    const table = document.querySelector('table')!;
-    const wrapper = table.parentElement;
-    expect(wrapper?.classList.contains(TABLE_SCROLL_CLASS)).toBe(true);
-    expect(table.style.transform).toBe('');
-  });
-
-  it('wraps multiple tables independently', () => {
-    document.body.innerHTML = `
-      <div>
-        <table id="t1"><tr><td>A</td></tr></table>
-        <table id="t2"><tr><td>B</td></tr></table>
-      </div>
-    `;
-    applyTableStyle(document);
-    const wrappers = document.querySelectorAll(`.${TABLE_SCROLL_CLASS}`);
-    expect(wrappers).toHaveLength(2);
-  });
-
-  it('does not double-wrap when applyTableStyle runs twice', () => {
-    document.body.innerHTML = `
-      <div>
-        <table><tr><td>Cell</td></tr></table>
-      </div>
-    `;
-    applyTableStyle(document);
-    applyTableStyle(document);
-    expect(document.querySelectorAll(`.${TABLE_SCROLL_CLASS}`)).toHaveLength(1);
-  });
-
-  it('does not crash on a table whose parent is body', () => {
-    document.body.innerHTML = `
-      <table>
-        <tr><td width="100">A</td></tr>
-      </table>
-    `;
-    applyTableStyle(document);
-    const table = document.querySelector('table')!;
-    expect(table.parentElement?.classList.contains(TABLE_SCROLL_CLASS)).toBe(true);
-  });
-});
-
-describe('shouldTableScrollConsumeTouch', () => {
-  it('returns false when the table is not wider than its container', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 100, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 100, configurable: true });
-    expect(shouldTableScrollConsumeTouch(wrapper, -40, 0)).toBe(false);
-  });
-
-  it('consumes a horizontal swipe when more content is available to the right', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 400, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 200, configurable: true });
-    Object.defineProperty(wrapper, 'scrollLeft', { value: 0, configurable: true });
-    expect(shouldTableScrollConsumeTouch(wrapper, -40, 0)).toBe(true);
-  });
-
-  it('does not consume when at the right edge and swiping left', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 400, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 200, configurable: true });
-    Object.defineProperty(wrapper, 'scrollLeft', { value: 200, configurable: true });
-    expect(shouldTableScrollConsumeTouch(wrapper, -40, 0)).toBe(false);
-  });
-
-  it('ignores mostly vertical movement', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 400, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 200, configurable: true });
-    Object.defineProperty(wrapper, 'scrollLeft', { value: 0, configurable: true });
-    expect(shouldTableScrollConsumeTouch(wrapper, -5, -40)).toBe(false);
-  });
-});
-
-describe('shouldTableScrollConsumeWheel', () => {
-  it('returns false when the table is not wider than its container', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 100, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 100, configurable: true });
-    expect(shouldTableScrollConsumeWheel(wrapper, 40, 0)).toBe(false);
-  });
-
-  it('consumes a horizontal wheel when more content is available to the right', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 400, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 200, configurable: true });
-    Object.defineProperty(wrapper, 'scrollLeft', { value: 0, configurable: true });
-    expect(shouldTableScrollConsumeWheel(wrapper, 40, 0)).toBe(true);
-  });
-
-  it('still consumes at the right edge so it never chains to a page turn', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 400, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 200, configurable: true });
-    // scrolled fully to the right edge
-    Object.defineProperty(wrapper, 'scrollLeft', { value: 200, configurable: true });
-    expect(shouldTableScrollConsumeWheel(wrapper, 40, 0)).toBe(true);
-  });
-
-  it('still consumes at the left edge so it never chains to a page turn', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 400, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 200, configurable: true });
-    Object.defineProperty(wrapper, 'scrollLeft', { value: 0, configurable: true });
-    expect(shouldTableScrollConsumeWheel(wrapper, -40, 0)).toBe(true);
-  });
-
-  it('ignores mostly vertical wheel movement', () => {
-    const wrapper = document.createElement('div');
-    Object.defineProperty(wrapper, 'scrollWidth', { value: 400, configurable: true });
-    Object.defineProperty(wrapper, 'clientWidth', { value: 200, configurable: true });
-    Object.defineProperty(wrapper, 'scrollLeft', { value: 0, configurable: true });
-    expect(shouldTableScrollConsumeWheel(wrapper, 5, 40)).toBe(false);
-  });
-});
-
-describe('applyTableTouchScroll', () => {
-  it('attaches capture-phase touch and wheel listeners once per document', () => {
-    document.documentElement.removeAttribute('data-readest-table-touch-scroll');
-    const addSpy = vi.spyOn(document, 'addEventListener');
-    applyTableTouchScroll(document);
-    applyTableTouchScroll(document);
-    const touchMoves = addSpy.mock.calls.filter(([type]) => type === 'touchmove');
-    expect(touchMoves).toHaveLength(1);
-    expect(touchMoves[0]?.[2]).toEqual({ capture: true, passive: false });
-    const wheels = addSpy.mock.calls.filter(([type]) => type === 'wheel');
-    expect(wheels).toHaveLength(1);
-    expect(wheels[0]?.[2]).toEqual({ capture: true, passive: true });
-    addSpy.mockRestore();
   });
 });

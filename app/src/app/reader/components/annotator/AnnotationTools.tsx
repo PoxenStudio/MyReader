@@ -1,10 +1,11 @@
 import { IconType } from 'react-icons';
 import { FiSearch } from 'react-icons/fi';
 import { FiCopy } from 'react-icons/fi';
+import { FiShare } from 'react-icons/fi';
 import { PiHighlighterFill } from 'react-icons/pi';
+import { LuBookA } from 'react-icons/lu';
 import { BsPencilSquare } from 'react-icons/bs';
 import { BsTranslate } from 'react-icons/bs';
-import { TbHexagonLetterD } from 'react-icons/tb';
 import { FaHeadphones } from 'react-icons/fa6';
 import { IoIosBuild } from 'react-icons/io';
 import { AnnotationToolType } from '@/types/annotator';
@@ -66,7 +67,7 @@ export const annotationToolButtons = createAnnotationToolButtons([
     type: 'dictionary',
     label: _('Dictionary'),
     tooltip: _('Look up text in dictionary after selection'),
-    Icon: TbHexagonLetterD,
+    Icon: LuBookA,
     quickAction: true,
   },
   {
@@ -88,6 +89,13 @@ export const annotationToolButtons = createAnnotationToolButtons([
     label: _('Proofread'),
     tooltip: _('Proofread text after selection'),
     Icon: IoIosBuild,
+  },
+  {
+    type: 'share',
+    label: _('Share'),
+    tooltip: _('Share text after selection'),
+    Icon: FiShare,
+    quickAction: true,
   },
 ]);
 

@@ -5,12 +5,13 @@ import * as CFI from 'foliate-js/epubcfi.js';
 import { Overlayer } from 'foliate-js/overlayer.js';
 import { useEnv } from '@/context/EnvContext';
 import { BookNote, BooknoteGroup, HighlightColor, HighlightStyle } from '@/types/book';
-import { NOTE_PREFIX } from '@/types/view';
+import { FoliateView, NOTE_PREFIX } from '@/types/view';
 import { NativeTouchEventType } from '@/types/system';
 import { getLocale, getOSPlatform, makeSafeFilename, uniqueId } from '@/utils/misc';
 import { getBookHash } from '@/utils/book';
 import { useThemeStore } from '@/store/themeStore';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { getBookProgress, useBookProgress } from '@/store/readerProgressStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useNotebookStore } from '@/store/notebookStore';
@@ -22,6 +23,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { useDeviceControlStore } from '@/store/deviceStore';
 import { useFoliateEvents } from '../../hooks/useFoliateEvents';
+import { useRendererInputListeners } from '../../hooks/useRendererInputListeners';
 import { useReadwiseSync } from '../../hooks/useReadwiseSync';
 import { useHardcoverSync } from '../../hooks/useHardcoverSync';
 import { useTextSelector } from '../../hooks/useTextSelector';
@@ -37,21 +39,30 @@ import { eventDispatcher } from '@/utils/event';
 import { findTocItemBS } from '@/services/nav';
 import { throttle } from '@/utils/throttle';
 import {
-  cancelDeferredAction,
+  beginGesture,
   createDeferredActionState,
   flushDeferredAction,
+  isLongPressHold,
   runOrDeferAction,
 } from '../../utils/deferredAction';
+import { Insets } from '@/types/misc';
 import { runSimpleCC } from '@/utils/simplecc';
 import { getWordCount } from '@/utils/word';
-import { getIndexFromCfi, isCfiInLocation } from '@/utils/cfi';
+import { getIndexFromCfi } from '@/utils/cfi';
+import { writeTextToClipboard } from '@/utils/clipboard';
+import { canShareText, shareSelectedText } from '@/utils/share';
+import { getToolbarToolTypes } from '@/utils/annotationToolbar';
+import { AnnotationToolType } from '@/types/annotator';
 import { TransformContext } from '@/services/transformers/types';
 import { transformContent } from '@/services/transformService';
 import {
   buildTTSSentenceHighlight,
+  decideAnnotationDraw,
   getHighlightColorHex,
+  mergeRestyledAnnotation,
   removeBookNoteOverlays,
 } from '../../utils/annotatorUtil';
+import { buildAnnotationIndex, selectLocationAnnotations } from '../../utils/annotationIndex';
 import {
   expandAllRenderedSections,
   expandGlobalAnnotation,
@@ -61,6 +72,7 @@ import {
 } from '../../utils/globalAnnotations';
 import { annotationToolButtons } from './AnnotationTools';
 import AnnotationRangeEditor from './AnnotationRangeEditor';
+import SelectionRangeEditor from './SelectionRangeEditor';
 import AnnotationPopup from './AnnotationPopup';
 import DictionaryPopup from './DictionaryPopup';
 import DictionarySheet from './DictionarySheet';
@@ -79,15 +91,26 @@ import {
   mergeImportedBookNotes,
 } from '@/services/annotation/providers/mrexpt';
 
-const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
+const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
+  bookKey,
+  contentInsets,
+}) => {
   const _ = useTranslation();
   const { envConfig, appService } = useEnv();
   const { settings, setSettingsDialogBookKey, setSettingsDialogOpen, setActiveSettingsItemId } =
     useSettingsStore();
   const { isDarkMode } = useThemeStore();
-  const { getConfig, saveConfig, getBookData, updateBooknotes } = useBookDataStore();
-  const { getProgress, getView, getViewsById, getViewSettings } = useReaderStore();
-  const { setNotebookVisible, setNotebookNewAnnotation } = useNotebookStore();
+  // Per-field selectors — see store/readerProgressStore.ts header for the
+  // "destructure-subscribes-the-whole-store" rationale.
+  const getConfig = useBookDataStore((s) => s.getConfig);
+  const saveConfig = useBookDataStore((s) => s.saveConfig);
+  const getBookData = useBookDataStore((s) => s.getBookData);
+  const updateBooknotes = useBookDataStore((s) => s.updateBooknotes);
+  const getView = useReaderStore((s) => s.getView);
+  const getViewsById = useReaderStore((s) => s.getViewsById);
+  const getViewSettings = useReaderStore((s) => s.getViewSettings);
+  const { setNotebookVisible, setNotebookNewAnnotation, setNotebookNewHighlightId } =
+    useNotebookStore();
   const { clearBooknotesNav } = useSidebarStore();
   const { listenToNativeTouchEvents } = useDeviceControlStore();
   const { loadCustomDictionaries } = useCustomDictionaryStore();
@@ -104,7 +127,11 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
 
   const osPlatform = getOSPlatform();
   const config = getConfig(bookKey)!;
-  const progress = getProgress(bookKey)!;
+  // Reactive: subscribe to THIS book's progress via the dedicated
+  // progress store. This is the only piece of data we need to react to
+  // per page turn — the `useEffect(..., [progress])` below uses it to
+  // re-apply local-page annotations after each relocate.
+  const progress = useBookProgress(bookKey)!;
   const bookData = getBookData(bookKey)!;
   const view = getView(bookKey);
   const viewSettings = getViewSettings(bookKey)!;
@@ -135,7 +162,6 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
   // would otherwise tear down the dialog state immediately.
   const [clearAnnotationsCount, setClearAnnotationsCount] = useState(0);
   const [exportData, setExportData] = useState<{
-    booknotes: BookNote[];
     booknoteGroups: { [href: string]: BooknoteGroup };
   } | null>(null);
 
@@ -150,6 +176,14 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
   // (Android long-press selects text via selectionchange before touchend). The
   // pending action runs on touchend so popups don't open under an active touch.
   const deferredQuickActionRef = useRef(createDeferredActionState());
+  // Timestamp of the latest touch pointerdown (0 for mouse). Used to require a
+  // long-press hold before the instant quick action fires, so a tap-to-deselect
+  // can't re-open the dictionary off a racy lingering selectionchange (iOS).
+  const pointerDownTimeRef = useRef(0);
+  // Set when a Word Lens gloss tap synthesizes a selection so the
+  // selection-change effect opens the dictionary popup instead of the
+  // annotation toolbar. Cleared as soon as it's consumed.
+  const pendingWordLensDictRef = useRef(false);
 
   const showingPopup =
     showAnnotPopup || showDictionaryPopup || showDeepLPopup || showProofreadPopup;
@@ -167,7 +201,20 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
   const transPopupHeight = Math.min(265, maxHeight);
   const proofreadPopupWidth = Math.min(440, maxWidth);
   const proofreadPopupHeight = Math.min(200, maxHeight);
-  const annotPopupWidth = Math.min(useResponsiveSize(300), maxWidth);
+  const canShare = canShareText(appService);
+  // The toolbar is now customizable, so size the selection popup to the number
+  // of visible tools (responsive) up to a max — otherwise a 2-tool toolbar
+  // renders a sparse, full-width bar. Annotated selections keep the max width
+  // since they show the wider highlight options / notes instead of the buttons.
+  const annotPopupMaxWidth = Math.min(useResponsiveSize(300), maxWidth);
+  const annotPopupToolSize = useResponsiveSize(44);
+  const visibleToolCount = getToolbarToolTypes(
+    viewSettings.annotationToolbarItems,
+    canShare,
+  ).length;
+  const annotPopupWidth = selection?.annotated
+    ? annotPopupMaxWidth
+    : Math.min(Math.max(visibleToolCount, 1) * annotPopupToolSize, annotPopupMaxWidth);
   const annotPopupHeight = useResponsiveSize(44);
   const androidSelectionHandlerHeight = 0;
 
@@ -270,14 +317,21 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
     handleTouchEnd,
     handlePointerDown,
     handlePointerMove,
+    handleNativeTouchMove,
     handlePointerCancel,
     handlePointerUp,
+    handleDoubleClick,
     handleSelectionchange,
     handleShowPopup,
     handleUpToPopup,
     handleContextmenu,
+    applyProgrammaticSelection,
+    noteAutoTurnPoint,
+    cancelAutoTurn,
+    onAutoTurn,
   } = useTextSelector(
     bookKey,
+    contentInsets,
     setSelection,
     setEditingAnnotation,
     setExternalDragPoint,
@@ -305,36 +359,41 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
       handleTouchMove(ev);
     };
 
-    const handleNativeTouch = (event: CustomEvent) => {
-      const ev = event.detail as NativeTouchEventType;
-      if (ev.type === 'touchstart') {
-        androidTouchEndRef.current = false;
-        cancelDeferredAction(deferredQuickActionRef.current);
-        handleTouchStart();
-      } else if (ev.type === 'touchend') {
-        androidTouchEndRef.current = true;
-        handleTouchEnd();
-        handlePointerUp(doc, index);
-        flushDeferredAction(deferredQuickActionRef.current);
-      }
-    };
-
-    if (appService?.isAndroidApp) {
-      listenToNativeTouchEvents();
-      eventDispatcher.on('native-touch', handleNativeTouch);
-    }
-
     // Attach generic selection listeners for all formats, including PDF.
     // For PDF we only guarantee Copy & Translate; highlight/annotate may be limited by CFI support.
-    view?.renderer?.addEventListener('scroll', handleScroll);
-    // Reposition popups on scroll to keep them in view
-    view?.renderer?.addEventListener('scroll', () => {
-      repositionPopups();
-    });
+    //
+    // The renderer `scroll` listener and the Android `native-touch` bridge are
+    // NOT attached here: onLoad fires for every (pre)loaded section, but those
+    // listeners live on the renderer / global dispatcher, which outlive sections.
+    // Attaching them per load leaked one set per chapter and degraded paragraph
+    // mode over a long session. They are registered once per view via
+    // useRendererInputListeners below. Popup repositioning on scroll is already
+    // handled by the dedicated effect further down.
     const opts = { passive: false };
     detail.doc?.addEventListener('touchstart', handleTouchStart, opts);
     detail.doc?.addEventListener('touchmove', handleTouchmove, opts);
-    detail.doc?.addEventListener('touchend', handleTouchEnd);
+    // Bound to the section so a selectionchange deferred during the drag can
+    // be processed (and the popup shown once) when the gesture ends.
+    detail.doc?.addEventListener('touchend', handleTouchEnd.bind(null, doc, index));
+    // Re-arm the instant quick action at the start of each gesture. Android does
+    // this via the native-touch touchstart above; iOS/desktop have no such path,
+    // and a single iOS long-press emits multiple selectionchange events for the
+    // same word — without re-arming, the system-dictionary sheet stacked twice
+    // (the action fired once per event instead of once per gesture).
+    if (!appService?.isAndroidApp) {
+      detail.doc?.addEventListener(
+        'pointerdown',
+        (ev: Event) => {
+          beginGesture(deferredQuickActionRef.current);
+          // Remember when the gesture started so the instant quick action can
+          // require a long-press hold (touch only — mouse selections fire on
+          // pointerup and shouldn't be time-gated).
+          pointerDownTimeRef.current =
+            (ev as PointerEvent).pointerType === 'mouse' ? 0 : Date.now();
+        },
+        opts,
+      );
+    }
     detail.doc?.addEventListener('pointerdown', handlePointerDown.bind(null, doc, index), opts);
     detail.doc?.addEventListener('pointermove', handlePointerMove.bind(null, doc, index), opts);
     detail.doc?.addEventListener('pointercancel', handlePointerCancel.bind(null, doc, index));
@@ -424,21 +483,27 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
     const detail = (event as CustomEvent).detail;
     const { draw, annotation, doc, range } = detail;
     const { style, color } = annotation as BookNote;
+    const value = (annotation as BookNote & { value?: string }).value;
     const hexColor = getHighlightColorHex(settings, color);
     const einkBgColor = isDarkMode ? '#000000' : '#ffffff';
     const einkFgColor = isDarkMode ? '#ffffff' : '#000000';
-    if (annotation.note) {
+    // Choose what to draw from the overlay's `value` (cfi vs NOTE_PREFIX+cfi),
+    // not from `annotation.note`: a unified record (style + note) is added as
+    // two overlays and must draw a highlight for the cfi overlay AND a bubble
+    // for the note overlay. Keying off `note` drew only the bubble (#4511).
+    const kind = decideAnnotationDraw(value, style);
+    if (kind === 'bubble') {
       const { defaultView } = doc;
       const node = range.startContainer;
       const el = node.nodeType === 1 ? node : node.parentElement;
       const { writingMode } = defaultView.getComputedStyle(el);
       draw(Overlayer.bubble, { writingMode });
-    } else if (style === 'highlight') {
+    } else if (kind === 'highlight') {
       draw(Overlayer.highlight, {
         color: isBwEink ? einkBgColor : hexColor,
         vertical: viewSettings.vertical,
       });
-    } else if (['underline', 'squiggly'].includes(style as string)) {
+    } else if (kind === 'underline' || kind === 'squiggly') {
       const { defaultView } = doc;
       const node = range.startContainer;
       const el = node.nodeType === 1 ? node : node.parentElement;
@@ -451,7 +516,7 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
       const padding = viewSettings.vertical
         ? (lineHeightValue - fontSizeValue) / 2 - strokeWidth + verticalCompensation
         : (lineHeightValue - fontSizeValue) / 2 - strokeWidth + horizontalCompensation;
-      draw(Overlayer[style as keyof typeof Overlayer], {
+      draw(Overlayer[kind], {
         writingMode,
         color: isBwEink ? einkFgColor : hexColor,
         padding,
@@ -513,6 +578,109 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
 
   useFoliateEvents(view, { onLoad, onCreateOverlay, onDrawAnnotation, onShowAnnotation });
 
+  // Android native-touch handler (the per-gesture engagement signal bridged from
+  // MainActivity.kt). Registered once per view by useRendererInputListeners; it
+  // resolves the CURRENT primary section's doc/index at fire time rather than
+  // capturing them at load time, because foliate also fires `load` for preloaded
+  // neighbour sections, whose doc/index would be off-screen.
+  const handleNativeTouch = (ev: NativeTouchEventType) => {
+    const contents = view?.renderer?.getContents?.() ?? [];
+    const content = contents.find((c) => c.index === view?.renderer?.primaryIndex) ?? contents[0];
+    const doc = content?.doc;
+    const index = content?.index;
+    if (!doc || index === undefined) return;
+    if (ev.type === 'touchstart') {
+      androidTouchEndRef.current = false;
+      beginGesture(deferredQuickActionRef.current);
+      handleTouchStart();
+    } else if (ev.type === 'touchmove') {
+      handleNativeTouchMove(ev.x, ev.y, doc);
+    } else if (ev.type === 'touchend') {
+      androidTouchEndRef.current = true;
+      handleTouchEnd();
+      handlePointerUp(doc, index);
+      flushDeferredAction(deferredQuickActionRef.current);
+    }
+  };
+
+  // Register the renderer `scroll` listener and (on Android) the `native-touch`
+  // bridge once per view, with cleanup — see the hook for why attaching these in
+  // onLoad leaked listeners and degraded paragraph mode over a long session.
+  useRendererInputListeners(view, {
+    onRendererScroll: handleScroll,
+    onNativeTouch: handleNativeTouch,
+    enableNativeTouch: !!appService?.isAndroidApp,
+    listenToNativeTouchEvents,
+  });
+
+  // A double-click / touch double-tap on a word selects that word and raises the
+  // quick action (if one is configured) or the annotation toolbar — like a
+  // long-press selection. The iframe posts `iframe-double-click` (gated by the
+  // user's double-click setting) with coordinates in the originating section's
+  // viewport; resolve the visible section's doc/index the way the native-touch
+  // bridge does, then select the word under the point.
+  useEffect(() => {
+    const handleDoubleClickMessage = (msg: MessageEvent) => {
+      const data = msg.data;
+      if (!data || data.bookKey !== bookKey || data.type !== 'iframe-double-click') return;
+      const renderer = view?.renderer;
+      const contents = renderer?.getContents?.() ?? [];
+      const content = contents.find((c) => c.index === renderer?.primaryIndex) ?? contents[0];
+      const doc = content?.doc;
+      const index = content?.index;
+      if (!doc || index === undefined) return;
+      // A double-click is a deliberate act-on-word gesture, so let the quick
+      // action fire without the touch long-press hold gate (matching a mouse
+      // selection, which sets this to 0 on pointerdown).
+      pointerDownTimeRef.current = 0;
+      void handleDoubleClick(doc, index, data.clientX, data.clientY);
+    };
+    window.addEventListener('message', handleDoubleClickMessage);
+    return () => window.removeEventListener('message', handleDoubleClickMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookKey, view]);
+
+  // Word Lens: open the dictionary popup for a tapped glossed word. The tap is
+  // detected in the iframe click handler (iframeEventHandlers.ts), which sends
+  // the gloss <ruby> element here. We synthesize a selection over the base word
+  // (excluding the <rt> hint) so the existing dictionary popup positions itself.
+  useEffect(() => {
+    const handleWordLensDictionary = (event: CustomEvent) => {
+      const { element, word } = event.detail as { element: Element | null; word: string };
+      if (event.detail?.bookKey !== bookKey || !element || !word) return;
+      // Read the view fresh: this handler is registered once (deps [bookKey]) and
+      // the closed-over `view` may still be null from when the effect first ran.
+      const view = getView(bookKey);
+      const doc = element.ownerDocument;
+      const content = view?.renderer?.getContents().find((c) => c.doc === doc);
+      if (!content || content.index == null) return;
+      const index = content.index;
+      const rt = element.querySelector('rt');
+      const range = doc.createRange();
+      try {
+        range.selectNodeContents(element);
+        if (rt) range.setEndBefore(rt);
+      } catch {
+        return;
+      }
+      const text = range.toString().trim() || word;
+      pendingWordLensDictRef.current = true;
+      setSelection({
+        key: bookKey,
+        text,
+        range,
+        index,
+        cfi: view?.getCFI(index, range),
+        page: index + 1,
+      });
+    };
+    eventDispatcher.on('wordlens-dictionary', handleWordLensDictionary);
+    return () => {
+      eventDispatcher.off('wordlens-dictionary', handleWordLensDictionary);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookKey]);
+
   useEffect(() => {
     handleShowPopup(showingPopup);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -549,31 +717,159 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
   }, []);
 
   useEffect(() => {
-    const updateBooknotesPage = async () => {
-      const config = getConfig(bookKey);
-      const view = getView(bookKey);
-      if (!config || !view) return;
-      const { booknotes: annotations = [] } = config;
-      annotations.sort((a, b) => {
-        return CFI.compare(a.cfi, b.cfi);
-      });
-      for (const annotation of annotations) {
-        if (annotation.deletedAt || annotation.page || !annotation.cfi) continue;
-        const progress = await view.getCFIProgress(annotation.cfi);
-        if (progress) {
-          annotation.page = progress.location.current + 1;
+    // Lazily back-fill `page` on every annotation that doesn't have one
+    // yet. Each call to view.getCFIProgress(cfi) synchronously
+    // decompresses the matching section's XHTML out of the EPUB zip and
+    // walks its text nodes (foliate-js progress.js #getCache), costing
+    // ~100-300ms per cold section on a release Android build. For users
+    // with many annotations spread across many chapters that's seconds
+    // of zip-IPC + main-thread work and the back-fill must NOT steal
+    // the open-book hot window. The `page` field only feeds the
+    // secondary "p NN ·" label in the sidebar BooknoteItem — strictly a
+    // nice-to-have.
+    //
+    // First attempt used requestIdleCallback. On Android Tauri the
+    // WebView's rIC fires aggressively while the main thread is still
+    // doing layout/style work for the freshly-opened book, so each tick
+    // ended up running a 100-300ms getCFIProgress in what was
+    // effectively the hot window — Bottom-Up profile showed 1.5s+ of
+    // sendIpcMessage -> readData -> loadDocument -> getCFIProgress under
+    // "Fire Idle Callback" still inside the open-book TBT window.
+    //
+    // Strategy now:
+    //  - Hard gate on the FIRST 'stabilized' renderer event (i.e. wait
+    //    until the open-book paint is fully settled).
+    //  - Then a 5s grace timer so the user's first page-turns and the
+    //    paginator's adjacent-section preload can finish.
+    //  - Then process annotations one-at-a-time with a 250ms gap
+    //    between each. Each getCFIProgress shows up as its own short
+    //    task with input-handling slots in between, instead of a chain
+    //    of back-to-back idle callbacks.
+    //  - Batch the saveConfig write at the end (one IPC instead of N).
+    //  - Skip entirely if there are no annotations missing a page.
+    const config = getConfig(bookKey);
+    const allAnnotations = config?.booknotes ?? [];
+    const pending = allAnnotations.filter((a) => !a.deletedAt && a.cfi && !a.page);
+    if (pending.length === 0) return;
+    pending.sort((a, b) => CFI.compare(a.cfi, b.cfi));
+
+    const GRACE_MS = 5000;
+    const TICK_GAP_MS = 250;
+
+    let cancelled = false;
+    let scheduledHandle: ReturnType<typeof setTimeout> | null = null;
+    let pendingStabilizedView: FoliateView | null = null;
+    let pendingStabilizedHandler: (() => void) | null = null;
+
+    const detachStabilized = () => {
+      if (pendingStabilizedView && pendingStabilizedHandler) {
+        try {
+          pendingStabilizedView.renderer?.removeEventListener(
+            'stabilized',
+            pendingStabilizedHandler,
+          );
+        } catch {
+          // ignore — renderer may be torn down already.
         }
       }
-      const updatedConfig = updateBooknotes(bookKey, annotations);
-      if (updatedConfig) {
-        saveConfig(envConfig, bookKey, updatedConfig, settings);
+      pendingStabilizedView = null;
+      pendingStabilizedHandler = null;
+    };
+
+    let touched = false;
+    let i = 0;
+    const tick = async () => {
+      if (cancelled) return;
+      scheduledHandle = null;
+      const view = getView(bookKey);
+      if (!view) {
+        // View not ready yet — back off and try again.
+        scheduledHandle = setTimeout(tick, TICK_GAP_MS);
+        return;
+      }
+      const annotation = pending[i++];
+      if (annotation && !annotation.page) {
+        try {
+          const progress = await view.getCFIProgress(annotation.cfi);
+          if (!cancelled && progress) {
+            annotation.page = progress.location.current + 1;
+            touched = true;
+          }
+        } catch (err) {
+          console.warn('Failed to back-fill annotation page', err);
+        }
+      }
+      if (cancelled) return;
+      if (i < pending.length) {
+        scheduledHandle = setTimeout(tick, TICK_GAP_MS);
+      } else if (touched) {
+        const updatedConfig = updateBooknotes(bookKey, allAnnotations);
+        if (updatedConfig) {
+          saveConfig(envConfig, bookKey, updatedConfig, settings);
+        }
       }
     };
-    setTimeout(updateBooknotesPage, 3000);
+
+    const startGrace = () => {
+      if (cancelled) return;
+      scheduledHandle = setTimeout(tick, GRACE_MS);
+    };
+
+    // Wait for the renderer to fire its first 'stabilized' event before
+    // arming the grace timer. If the renderer is missing (e.g. fixed-
+    // layout PDF teardown path) or never stabilizes within 10s, fall
+    // back to a plain time-based start so the page back-fill still
+    // eventually runs.
+    const view = getView(bookKey);
+    const renderer = view?.renderer;
+    const FALLBACK_START_MS = 10000;
+    if (renderer && typeof renderer.addEventListener === 'function') {
+      const onStabilized = () => {
+        if (cancelled) return;
+        detachStabilized();
+        startGrace();
+      };
+      pendingStabilizedView = view!;
+      pendingStabilizedHandler = onStabilized;
+      renderer.addEventListener('stabilized', onStabilized, {
+        once: true,
+      } as AddEventListenerOptions);
+      // Safety net: if 'stabilized' never arrives (corner cases like
+      // an empty renderer) start the grace timer anyway after 10s.
+      scheduledHandle = setTimeout(() => {
+        if (cancelled) return;
+        detachStabilized();
+        startGrace();
+      }, FALLBACK_START_MS);
+    } else {
+      scheduledHandle = setTimeout(tick, GRACE_MS);
+    }
+
+    return () => {
+      cancelled = true;
+      detachStabilized();
+      if (scheduledHandle != null) {
+        clearTimeout(scheduledHandle);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A real touch selection only appears after the OS long-press (~500ms); a
+  // quick tap that re-reports a lingering selection fires far sooner.
+  const quickActionMinHoldMs = 300;
+
   const handleQuickAction = () => {
+    // iOS/desktop immediate path: only fire from a long-press hold. Without this
+    // a tap-to-deselect after dismissing the system dictionary occasionally
+    // re-opened it off a racy lingering selectionchange. Android defers to
+    // touchend (a deliberate lift) and is left as-is.
+    if (
+      !appService?.isAndroidApp &&
+      !isLongPressHold(pointerDownTimeRef.current, Date.now(), quickActionMinHoldMs)
+    ) {
+      return;
+    }
     const action = viewSettings.annotationQuickAction;
     const runAction = () => {
       switch (action) {
@@ -597,6 +893,9 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
         case 'tts':
           handleSpeakText(true);
           break;
+        case 'share':
+          handleShare();
+          break;
       }
     };
     // On Android, a long-press fires selectionchange (and this handler) while
@@ -612,6 +911,11 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
   useEffect(() => {
     setHighlightOptionsVisible(!!(selection && selection.annotated));
     if (selection && selection.text.trim().length > 0) {
+      // Read-and-reset the Word Lens dictionary flag up front so it can never
+      // stick to a later selection if an early return below fires (e.g. a gloss
+      // tap whose synthesized range yields an off-frame/zero position).
+      const wantWordLensDict = pendingWordLensDictRef.current;
+      pendingWordLensDictRef.current = false;
       const gridFrame = document.querySelector(`#gridcell-${bookKey}`);
       if (!gridFrame) return;
       const rect = gridFrame.getBoundingClientRect();
@@ -656,7 +960,12 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
       setTrianglePosition(triangPos);
 
       const { enableAnnotationQuickActions, annotationQuickAction } = viewSettings;
-      if (enableAnnotationQuickActions && annotationQuickAction && isTextSelected.current) {
+      if (wantWordLensDict) {
+        // Route through handleDictionary so a Word Lens gloss tap honours the
+        // dictionary settings (system dictionary vs the in-app popup) — same
+        // as the selection-toolbar and instant-quick-action dictionary paths.
+        handleDictionary();
+      } else if (enableAnnotationQuickActions && annotationQuickAction && isTextSelected.current) {
         handleQuickAction();
       } else {
         handleShowAnnotPopup();
@@ -665,25 +974,33 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, bookKey]);
 
+  // Index live annotations by the CFI spine prefix (the chapter id) so
+  // each page turn only scans the bucket for the current chapter rather
+  // than the whole booknotes array. With heavy users (>1k highlights) a
+  // naive `booknotes.filter(...)` per page turn was the dominant
+  // contributor to `c` (epubcfi parse) in the Bottom-Up profile —
+  // ~1.4 s self time over a 28 s session. The bucketed read replaces
+  // O(N) walks with O(K) where K is the number of annotations in the
+  // currently-visible chapter (typically a handful).
+  //
+  // `globals` (book-wide highlights) are split into their own pre-filtered
+  // array so we don't re-walk N items each turn just to find the same few
+  // global ones. The index is recomputed only when `booknotes` itself
+  // changes (add/remove/edit) — not on every page turn.
+  const annotationIndex = useMemo(
+    () => buildAnnotationIndex(config.booknotes ?? []),
+    [config.booknotes],
+  );
+
   useEffect(() => {
     if (!progress) return;
     const { location } = progress;
-    const { booknotes = [] } = config;
-    const annotations = booknotes.filter(
-      (item) =>
-        !item.deletedAt &&
-        item.type === 'annotation' &&
-        item.style &&
-        isCfiInLocation(item.cfi, location),
-    );
-    const notes = booknotes.filter(
-      (item) =>
-        !item.deletedAt &&
-        item.type === 'annotation' &&
-        item.note &&
-        item.note.trim().length > 0 &&
-        isCfiInLocation(item.cfi, location),
-    );
+    // Single pass over the *current chapter's* candidates: classify each
+    // one into the in-page annotations / notes lists. Using the bucket
+    // keeps this fast even when the user has thousands of highlights
+    // elsewhere in the book.
+    const { annotations, notes } = selectLocationAnnotations(annotationIndex, location);
+
     try {
       Promise.all(annotations.map((annotation) => view?.addAnnotation(annotation)));
       Promise.all(
@@ -693,18 +1010,20 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
       // book-wide, so we don't filter by `location` here: every note
       // with `global=true` gets expanded across every section that
       // happens to be rendered right now. Sections rendered later are
-      // covered by `onCreateOverlay`.
-      const globalAnnotations = booknotes.filter(
-        (item) => !item.deletedAt && item.type === 'annotation' && item.style && item.global,
-      );
-      for (const annotation of globalAnnotations) {
+      // covered by `onCreateOverlay`. Using the pre-built `globals`
+      // array avoids re-walking booknotes per page turn.
+      for (const annotation of annotationIndex.globals) {
+        // Same stale-index guard as selectLocationAnnotations: a global deleted
+        // in place after the memoized index was built must not be re-fanned out
+        // across sections, which would orphan its overlays (#4773).
+        if (annotation.deletedAt) continue;
         if (view) expandAllRenderedSections(view, annotation);
       }
     } catch (e) {
       console.warn(e);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progress]);
+  }, [progress, annotationIndex]);
 
   useEffect(() => {
     if (!config.booknotes || !selection?.cfi || !showAnnotationNotes) return;
@@ -727,9 +1046,10 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
 
   const handleCopy = (dismissPopup = true) => {
     if (!selection || !selection.text) return;
+    const textToCopy = selection.text;
     setTimeout(() => {
       // Delay to ensure it won't be overridden by system clipboard actions
-      navigator.clipboard?.writeText(selection.text);
+      void writeTextToClipboard(textToCopy);
     }, 100);
     if (dismissPopup) {
       handleDismissPopupAndSelection();
@@ -776,12 +1096,25 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
     }
   };
 
-  const handleHighlight = (update = false, highlightStyle?: HighlightStyle) => {
-    if (!selection || !selection.text) return;
+  const handleShare = () => {
+    if (!selection?.text) return;
+    const position = trianglePosition
+      ? {
+          x: trianglePosition.point.x,
+          y: trianglePosition.point.y,
+          preferredEdge: 'bottom' as const,
+        }
+      : undefined;
+    void shareSelectedText(selection.text, position, appService);
+    handleDismissPopupAndSelection();
+  };
+
+  const handleHighlight = (update = false, highlightStyle?: HighlightStyle): BookNote | null => {
+    if (!selection || !selection.text) return null;
     setHighlightOptionsVisible(true);
     const { booknotes: annotations = [] } = config;
     const cfi = view?.getCFI(selection.index, selection.range);
-    if (!cfi) return;
+    if (!cfi) return null;
     const style = highlightStyle || settings.globalReadSettings.highlightStyle;
     const color = settings.globalReadSettings.highlightStyles[style];
     setSelectedStyle(style);
@@ -806,6 +1139,9 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
         !annotation.deletedAt,
     );
     const views = getViewsById(getBookHash(bookKey));
+    // Only a brand-new highlight is a placeholder the cancel flow may remove;
+    // restyling/toggling an existing one must never tear down the user's record.
+    let created: BookNote | null = null;
     if (existingIndex !== -1) {
       const existing = annotations[existingIndex]!;
       // Tear down both the original anchor and any global fan-outs that
@@ -816,15 +1152,17 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
         views.forEach((view) => removeGlobalAnnotationOverlays(view, existing));
       }
       if (update) {
-        annotation.id = existing.id;
-        // Carry the existing `global` flag forward — toggling color/style
-        // shouldn't silently demote a global highlight back to single-range.
-        if (existing.global) annotation.global = true;
-        annotations[existingIndex] = annotation;
-        views.forEach((view) => view?.addAnnotation(annotation));
-        if (annotation.global) {
+        // Preserve the note/text/createdAt and the `global` flag of the existing
+        // record so a restyle (color/style change) of a unified annotation
+        // doesn't wipe its note or silently demote a global highlight. The note
+        // bubble overlay (NOTE_PREFIX) isn't torn down above, so it persists; we
+        // only redraw the highlight overlay (value = cfi).
+        const merged = mergeRestyledAnnotation(existing, annotation);
+        annotations[existingIndex] = merged;
+        views.forEach((view) => view?.addAnnotation(merged));
+        if (merged.global) {
           views.forEach((view) => {
-            if (view) expandAllRenderedSections(view, annotation);
+            if (view) expandAllRenderedSections(view, merged);
           });
         }
       } else {
@@ -835,12 +1173,14 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
       annotations.push(annotation);
       views.forEach((view) => view?.addAnnotation(annotation));
       setSelection({ ...selection, cfi, annotated: true });
+      created = annotation;
     }
 
     const updatedConfig = updateBooknotes(bookKey, annotations);
     if (updatedConfig) {
       saveConfig(envConfig, bookKey, updatedConfig, settings);
     }
+    return created;
   };
 
   const handleCreateTTSHighlight = (event: CustomEvent) => {
@@ -850,7 +1190,7 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
     const style = settings.globalReadSettings.highlightStyle;
     const color = settings.globalReadSettings.highlightStyles[style];
     const { booknotes: annotations = [] } = getConfig(bookKey)!;
-    const page = getProgress(bookKey)?.page;
+    const page = getBookProgress(bookKey)?.page;
     const annotation = buildTTSSentenceHighlight(
       annotations,
       { cfi: detail.cfi, text: detail.text, style, color, page },
@@ -907,9 +1247,13 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
     if (!selection || !selection.text) return;
     const { sectionHref: href } = progress;
     selection.href = href;
-    handleHighlight(true);
+    const created = handleHighlight(true);
     setNotebookVisible(true);
     setNotebookNewAnnotation(selection);
+    // Remember the eagerly-created highlight so the notebook can remove it if the
+    // note is never saved. A restyle of an existing highlight returns null — that
+    // record predates this flow and must survive a cancel (#4791).
+    setNotebookNewHighlightId(created?.id ?? null);
     handleDismissPopup();
   };
 
@@ -965,13 +1309,23 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
     eventDispatcher.dispatch('tts-speak', {
       bookKey,
       oneTime,
-      range: selection.range,
+      // Clone so clearing the live selection below can't disturb the range
+      // TTS uses to choose where to start.
+      range: selection.range.cloneRange(),
       index: selection.index,
     });
+    // The word was only selected to pick where to start reading; drop the
+    // selection so its highlight isn't left behind once TTS begins.
+    view?.deselect();
   };
 
   const handleProofread = () => {
-    if (!selection || !selection.text) return;
+    // With no active selection the shortcut (Ctrl/Cmd+P) has nothing to turn
+    // into a rule, so reuse it to open the replacement-rules manager instead.
+    if (!selection || !selection.text) {
+      setProofreadRulesVisibility(true);
+      return;
+    }
     setShowAnnotPopup(false);
     setShowProofreadPopup(true);
 
@@ -1192,7 +1546,7 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
       });
     });
 
-    setExportData({ booknotes, booknoteGroups });
+    setExportData({ booknoteGroups });
     setShowExportDialog(true);
   };
 
@@ -1206,7 +1560,7 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
 
     setTimeout(() => {
       // Delay to ensure it won't be overridden by system clipboard actions
-      navigator.clipboard?.writeText(content);
+      void writeTextToClipboard(content);
     }, 100);
 
     const ext = isPlainText ? 'txt' : 'md';
@@ -1298,7 +1652,10 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
     !!selection?.text &&
     selection.text.trim().length > 0;
   const globalToggleActive = !!currentAnnotation?.global;
-  const toolButtons = annotationToolButtons.map(({ type, label, Icon }) => {
+  const buildToolButton = (type: AnnotationToolType) => {
+    const def = annotationToolButtons.find((button) => button.type === type);
+    if (!def) return null;
+    const { label, Icon } = def;
     switch (type) {
       case 'copy':
         return { tooltipText: _(label), Icon, onClick: handleCopy };
@@ -1309,27 +1666,15 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
           onClick: handleHighlight,
         };
       case 'annotate':
-        return {
-          tooltipText: _(label),
-          Icon,
-          onClick: handleAnnotate,
-        };
+        return { tooltipText: _(label), Icon, onClick: handleAnnotate };
       case 'search':
-        return {
-          tooltipText: _(label),
-          Icon,
-          onClick: handleSearch,
-        };
+        return { tooltipText: _(label), Icon, onClick: handleSearch };
       case 'dictionary':
         return { tooltipText: _(label), Icon, onClick: handleDictionary };
       case 'translate':
         return { tooltipText: _(label), Icon, onClick: handleTranslation };
       case 'tts':
-        return {
-          tooltipText: _(label),
-          Icon,
-          onClick: handleSpeakText,
-        };
+        return { tooltipText: _(label), Icon, onClick: handleSpeakText };
       case 'proofread':
         return {
           tooltipText: _(label),
@@ -1337,10 +1682,16 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
           onClick: handleProofread,
           disabled: bookData.book?.format !== 'EPUB',
         };
+      case 'share':
+        return { tooltipText: _(label), Icon, onClick: handleShare };
       default:
-        return { tooltipText: '', Icon, onClick: () => {} };
+        return null;
     }
-  });
+  };
+
+  const toolButtons = getToolbarToolTypes(viewSettings.annotationToolbarItems, canShare)
+    .map(buildToolButton)
+    .filter((button): button is NonNullable<typeof button> => button !== null);
 
   return (
     <div ref={containerRef} role='toolbar' tabIndex={-1}>
@@ -1393,27 +1744,33 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
           onDismiss={handleDismissPopupAndSelection}
         />
       )}
-      {showAnnotPopup && trianglePosition && annotPopupPosition && (
-        <AnnotationPopup
-          bookKey={bookKey}
-          dir={viewSettings.rtl ? 'rtl' : 'ltr'}
-          isVertical={viewSettings.vertical}
-          buttons={toolButtons}
-          notes={annotationNotes}
-          position={annotPopupPosition}
-          trianglePosition={trianglePosition}
-          highlightOptionsVisible={highlightOptionsVisible}
-          selectedStyle={selectedStyle}
-          selectedColor={selectedColor}
-          popupWidth={annotPopupWidth}
-          popupHeight={annotPopupHeight}
-          globalToggleAvailable={globalToggleAvailable}
-          globalToggleActive={globalToggleActive}
-          onToggleGlobal={handleToggleGlobal}
-          onHighlight={handleHighlight}
-          onDismiss={handleDismissPopupAndSelection}
-        />
-      )}
+      {showAnnotPopup &&
+        trianglePosition &&
+        annotPopupPosition &&
+        // With an empty toolbar, suppress the popup on a plain selection rather
+        // than showing an empty bar. Still allow it for editing an existing
+        // highlight (options) or viewing its notes.
+        (toolButtons.length > 0 || highlightOptionsVisible || annotationNotes.length > 0) && (
+          <AnnotationPopup
+            bookKey={bookKey}
+            dir={viewSettings.rtl ? 'rtl' : 'ltr'}
+            isVertical={viewSettings.vertical}
+            buttons={toolButtons}
+            notes={annotationNotes}
+            position={annotPopupPosition}
+            trianglePosition={trianglePosition}
+            highlightOptionsVisible={highlightOptionsVisible}
+            selectedStyle={selectedStyle}
+            selectedColor={selectedColor}
+            popupWidth={annotPopupWidth}
+            popupHeight={annotPopupHeight}
+            globalToggleAvailable={globalToggleAvailable}
+            globalToggleActive={globalToggleActive}
+            onToggleGlobal={handleToggleGlobal}
+            onHighlight={handleHighlight}
+            onDismiss={handleDismissPopupAndSelection}
+          />
+        )}
       {showProofreadPopup && trianglePosition && proofreadPopupPosition && selection && (
         <ProofreadPopup
           bookKey={bookKey}
@@ -1429,6 +1786,19 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
           }}
         />
       )}
+      {!editingAnnotation && selection?.handlesSuppressed && selection.range && (
+        <SelectionRangeEditor
+          bookKey={bookKey}
+          isVertical={viewSettings.vertical}
+          selection={selection}
+          handleColor={selectedColor}
+          onRangeChange={applyProgrammaticSelection}
+          onStartDrag={handleStartEditAnnotation}
+          noteAutoTurnPoint={noteAutoTurnPoint}
+          cancelAutoTurn={cancelAutoTurn}
+          onAutoTurn={onAutoTurn}
+        />
+      )}
       {editingAnnotation && editingAnnotation.color && selection && (
         <AnnotationRangeEditor
           bookKey={bookKey}
@@ -1440,6 +1810,9 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
           getAnnotationText={getAnnotationText}
           setSelection={setSelection}
           onStartEdit={handleStartEditAnnotation}
+          noteAutoTurnPoint={noteAutoTurnPoint}
+          cancelAutoTurn={cancelAutoTurn}
+          onAutoTurn={onAutoTurn}
         />
       )}
       {showExportDialog && exportData && bookData.book && (
@@ -1449,7 +1822,6 @@ const Annotator: React.FC<{ bookKey: string }> = ({ bookKey }) => {
           bookHash={bookData.book.hash}
           bookTitle={bookData.book.title}
           bookAuthor={bookData.book.author || ''}
-          booknotes={exportData.booknotes}
           booknoteGroups={exportData.booknoteGroups}
           onCancel={handleCancelExport}
           onExport={handleConfirmExport}

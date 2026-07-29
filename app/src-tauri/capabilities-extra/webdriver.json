@@ -5,7 +5,7 @@
     "urls": ["http://127.0.0.1:*", "http://localhost:*"]
   },
   "local": false,
-  "windows": ["main"],
+  "windows": ["main", "reader-*"],
   "permissions": [
     "core:default",
     "fs:default",
@@ -19,7 +19,9 @@
         { "path": "**/.readest-test-sandbox-tauri" },
         { "path": "**/.readest-test-sandbox-tauri/**" },
         { "path": "**/MyReader" },
-        { "path": "**/MyReader/**" }
+        { "path": "**/MyReader/**" },
+        { "path": "**/__tests__" },
+        { "path": "**/__tests__/**" }
       ]
     },
     "os:default",

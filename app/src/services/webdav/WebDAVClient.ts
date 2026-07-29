@@ -30,6 +30,8 @@ export interface WebDAVEntry {
   size?: number;
   /** Server-provided modification timestamp, if any. */
   lastModified?: string;
+  /** Server-provided creation timestamp, if any. */
+  created?: string;
 }
 
 export interface WebDAVConfig {
@@ -63,6 +65,7 @@ const PROPFIND_BODY = `<?xml version="1.0" encoding="utf-8" ?>
     <D:resourcetype/>
     <D:getcontentlength/>
     <D:getlastmodified/>
+    <D:creationdate/>
   </D:prop>
 </D:propfind>`;
 
@@ -341,12 +344,14 @@ export const listDirectory = async (
     const name = segments[segments.length - 1] ?? trimmedPath;
     const sizeStr = extractTagText(block, 'getcontentlength');
     const lastModified = extractTagText(block, 'getlastmodified');
+    const created = extractTagText(block, 'creationdate');
     entries.push({
       name,
       path: trimmedPath,
       isDirectory: isDir,
       size: sizeStr && !isDir ? Number(sizeStr) : undefined,
       lastModified,
+      created,
     });
   }
 

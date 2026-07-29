@@ -6,7 +6,7 @@ describe('buildAnnotationUrl', () => {
 
   it('builds the custom-scheme app URL when linkType is "app"', () => {
     const url = buildAnnotationUrl(link, 'app');
-    expect(url.startsWith('mybooks://book/abc/annotation/n1')).toBe(true);
+    expect(url.startsWith('myreader://book/abc/annotation/n1')).toBe(true);
   });
 
   it('builds the HTTPS web URL when linkType is "web"', () => {
@@ -23,6 +23,6 @@ describe('buildAnnotationUrl', () => {
 
   it('omits the cfi query when no cfi is provided', () => {
     const url = buildAnnotationUrl({ bookHash: 'abc', noteId: 'n1' }, 'app');
-    expect(url).toBe('mybooks://book/abc/annotation/n1');
+    expect(url).toBe('myreader://book/abc/annotation/n1');
   });
 });

@@ -146,7 +146,7 @@ export function useClipUrlIngress() {
       // Only act on http(s). file://, content://, blob: and data: belong
       // to other consumers (or aren't shareable URLs).
       if (!/^https?:\/\//i.test(url)) return;
-      // Annotation deep links can come over https (web.readest.com).
+      // Annotation deep links can come over https (web.mybooks.top).
       // Skip them — useOpenAnnotationLink owns that path.
       if (parseAnnotationDeepLink(url)) return;
       void clipAndImport(url);

@@ -18,7 +18,7 @@ import { useLibraryStore } from '@/store/libraryStore';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { LibraryCoverFitType, LibraryViewModeType } from '@/types/settings';
 import { navigateToLogin } from '@/utils/nav';
-import { formatAuthors, formatDescription } from '@/utils/book';
+import { formatAuthors, formatDescription, formatSeries } from '@/utils/book';
 import { isCloudBook } from '@/utils/bookConverter';
 import ReadingProgress from './ReadingProgress';
 import BookCover from '@/components/BookCover';
@@ -36,6 +36,7 @@ interface BookItemProps {
   showBookDetailsModal: (book: Book) => void;
   showCloudIcon?: boolean;
   showAllFormatsBadge?: boolean;
+  showTimeRemaining: boolean;
 }
 
 const BookItem: React.FC<BookItemProps> = ({
@@ -50,6 +51,7 @@ const BookItem: React.FC<BookItemProps> = ({
   showBookDetailsModal,
   showCloudIcon = false,
   showAllFormatsBadge = false,
+  showTimeRemaining,
 }) => {
   const _ = useTranslation();
   const router = useRouter();
@@ -81,13 +83,15 @@ const BookItem: React.FC<BookItemProps> = ({
       }
     : undefined;
 
+  const seriesText = formatSeries(book.metadata?.series, book.metadata?.seriesIndex);
+
   return (
     <div
       role='none'
       className={clsx(
         'book-item flex',
         mode === 'grid' && 'h-full flex-col justify-end',
-        mode === 'list' && 'h-28 flex-row gap-4 overflow-hidden',
+        mode === 'list' && 'min-h-28 flex-row gap-4 overflow-hidden',
         mode === 'list' ? 'library-list-item' : 'library-grid-item',
         appService?.hasContextMenu ? 'cursor-pointer' : '',
       )}
@@ -148,15 +152,15 @@ const BookItem: React.FC<BookItemProps> = ({
         className={clsx(
           'flex w-full flex-col p-0',
           mode === 'grid' && 'pt-2',
-          mode === 'list' && 'gap-2 py-0',
+          mode === 'list' && 'gap-1 py-0',
         )}
       >
-        <div className={clsx('min-w-0 flex-1', mode === 'list' && 'flex flex-col gap-2')}>
+        <div className={clsx('min-w-0 flex-1', mode === 'list' && 'flex flex-col gap-1')}>
           <h4
             className={clsx(
               'overflow-hidden text-ellipsis font-semibold',
               mode === 'grid' && 'block whitespace-nowrap text-[0.6em] text-xs',
-              mode === 'list' && 'line-clamp-2 text-base',
+              mode === 'list' && 'line-clamp-1 text-base',
             )}
           >
             {book.title}
@@ -167,6 +171,9 @@ const BookItem: React.FC<BookItemProps> = ({
             </p>
           )}
         </div>
+        {mode === 'list' && seriesText && (
+          <p className='text-neutral-content line-clamp-1 text-sm'>{seriesText}</p>
+        )}
         {mode === 'list' && (
           <h4 className='text-neutral-content line-clamp-1 text-sm'>
             {formatDescription(book.metadata?.description)}
@@ -182,8 +189,10 @@ const BookItem: React.FC<BookItemProps> = ({
             minHeight: `${iconSize15}px`,
           }}
         >
-          {(book.progress || book.readingStatus) && <ReadingProgress book={book} />}
-          <div className='flex items-center justify-center gap-x-2'>
+          {(book.progress || book.readingStatus) && (
+            <ReadingProgress book={book} showTimeRemaining={showTimeRemaining} />
+          )}
+          <div className='flex shrink-0 items-center justify-center gap-x-2'>
             {!appService?.isMobile && (
               <button
                 aria-label={_('Show Book Details')}

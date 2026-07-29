@@ -276,7 +276,74 @@ export interface EdgeTTSPayload {
   pitch: number;
 }
 
-const hashPayload = (payload: EdgeTTSPayload): string => {
+// A word boundary reported by the Edge TTS service via `audio.metadata`
+// frames. Offsets and durations are in 100-nanosecond ticks relative to the
+// start of the audio stream; `text` is the verbatim span of the input text.
+export interface TTSWordBoundary {
+  offset: number;
+  duration: number;
+  text: string;
+}
+
+interface AudioMetadataEntry {
+  Type?: string;
+  Data?: {
+    Offset?: number;
+    Duration?: number;
+    text?: { Text?: string };
+  };
+}
+
+export const parseAudioMetadataBody = (body: string): TTSWordBoundary[] => {
+  try {
+    const parsed = JSON.parse(body) as { Metadata?: AudioMetadataEntry[] };
+    const boundaries: TTSWordBoundary[] = [];
+    for (const entry of parsed.Metadata ?? []) {
+      if (entry.Type !== 'WordBoundary') continue;
+      const offset = entry.Data?.Offset;
+      const text = entry.Data?.text?.Text;
+      if (typeof offset !== 'number' || typeof text !== 'string' || !text) continue;
+      boundaries.push({ offset, duration: entry.Data?.Duration ?? 0, text });
+    }
+    return boundaries;
+  } catch {
+    return [];
+  }
+};
+
+export interface EdgeSpeechAudio {
+  response: Response;
+  boundaries: TTSWordBoundary[];
+}
+
+// Response header used to carry word boundaries through the authenticated
+// HTTPS proxy route (`/api/tts/edge`), which streams only the audio body.
+export const WORD_BOUNDARIES_HEADER = 'X-TTS-Word-Boundaries';
+
+// HTTP header values must be ASCII, but boundary `text` can be any script
+// (em-dashes, CJK, accents). Percent-encode the JSON so the header stays
+// ASCII-safe across Node, browsers, and Cloudflare Workers.
+export const serializeWordBoundaries = (boundaries: TTSWordBoundary[]): string =>
+  encodeURIComponent(JSON.stringify(boundaries));
+
+export const parseWordBoundariesHeader = (value: string | null): TTSWordBoundary[] => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (b: unknown): b is TTSWordBoundary =>
+        !!b &&
+        typeof (b as TTSWordBoundary).offset === 'number' &&
+        typeof (b as TTSWordBoundary).duration === 'number' &&
+        typeof (b as TTSWordBoundary).text === 'string',
+    );
+  } catch {
+    return [];
+  }
+};
+
+export const hashTTSPayload = (payload: EdgeTTSPayload): string => {
   const base = JSON.stringify(payload);
   return md5(base);
 };
@@ -286,11 +353,15 @@ export type EDGE_TTS_PROTOCOL = 'wss' | 'https';
 export class EdgeSpeechTTS {
   static voices = genVoiceList(EDGE_TTS_VOICES);
   private static audioCache = new LRUCache<string, Blob>(200);
-  private static audioUrlCache = new LRUCache<string, string>(200, (_, url) => {
-    if (url.startsWith('blob:')) {
-      URL.revokeObjectURL(url);
-    }
-  });
+  private static boundariesCache = new LRUCache<string, TTSWordBoundary[]>(200);
+  // In-flight fetches keyed by payload hash. The LRU dedupes storage, not
+  // requests: the playback scheduler and the preload paths race for the same
+  // sentences at every paragraph start, and without this map each racer opens
+  // its own WSS connection for the same audio.
+  private static inflight = new Map<
+    string,
+    Promise<{ blob: Blob; boundaries: TTSWordBoundary[] }>
+  >();
   private protocol: EDGE_TTS_PROTOCOL = 'wss';
 
   constructor(protocol?: EDGE_TTS_PROTOCOL) {
@@ -322,7 +393,7 @@ export class EdgeSpeechTTS {
     return response;
   }
 
-  async #fetchEdgeSpeechWs({ lang, text, voice, rate }: EdgeTTSPayload): Promise<Response> {
+  async #fetchEdgeSpeechWs({ lang, text, voice, rate }: EdgeTTSPayload): Promise<EdgeSpeechAudio> {
     const connectId = randomMd5();
     const params = new URLSearchParams({
       ConnectionId: connectId,
@@ -408,17 +479,19 @@ export class EdgeSpeechTTS {
           const TauriWebSocket = (await import('@tauri-apps/plugin-websocket')).default;
           const ws = await TauriWebSocket.connect(url, { headers: baseHeaders });
           let audioData = new ArrayBuffer(0);
+          const boundaries: TTSWordBoundary[] = [];
           const messageUnlisten = await ws.addListener((msg) => {
             if (msg.type === 'Text') {
-              const { headers } = getHeadersAndData(msg.data as string);
-              if (headers['Path'] === 'turn.end') {
+              const { headers, body } = getHeadersAndData(msg.data as string);
+              if (headers['Path'] === 'audio.metadata') {
+                boundaries.push(...parseAudioMetadataBody(body.trim()));
+              } else if (headers['Path'] === 'turn.end') {
                 ws.disconnect();
                 messageUnlisten();
                 if (!audioData.byteLength) {
                   return reject(new Error('No audio data received.'));
                 }
-                const res = new Response(audioData);
-                resolve(res);
+                resolve({ response: new Response(audioData), boundaries });
               }
             } else if (msg.type === 'Binary') {
               let buffer: ArrayBufferLike;
@@ -445,7 +518,10 @@ export class EdgeSpeechTTS {
         }
       });
     } else if (isCloudflareWorkers()) {
-      return new Promise<Response>((resolve, reject) => {
+      // The Workers path backs the HTTPS proxy route. It captures both the
+      // audio body and the word boundaries (audio.metadata frames) so the
+      // route can forward boundaries via the WORD_BOUNDARIES_HEADER.
+      return new Promise<EdgeSpeechAudio>((resolve, reject) => {
         (async () => {
           try {
             // Cloudflare Workers cannot use the `ws` npm package because it
@@ -469,6 +545,7 @@ export class EdgeSpeechTTS {
 
             const ws = upgradeResponse.webSocket;
             let audioData = new ArrayBuffer(0);
+            const boundaries: TTSWordBoundary[] = [];
             let settled = false;
             // Cloudflare Workers deliver binary WebSocket frames as `Blob`,
             // whose conversion to bytes (`blob.arrayBuffer()`) is async.
@@ -504,7 +581,7 @@ export class EdgeSpeechTTS {
               if (!audioData.byteLength) {
                 reject(new Error('No audio data received.'));
               } else {
-                resolve(new Response(audioData));
+                resolve({ response: new Response(audioData), boundaries });
               }
             };
 
@@ -512,7 +589,11 @@ export class EdgeSpeechTTS {
               if (settled) return;
               const data = event.data;
               if (typeof data === 'string') {
-                const { headers } = getHeadersAndData(data);
+                const { headers, body } = getHeadersAndData(data);
+                if (headers['Path'] === 'audio.metadata') {
+                  boundaries.push(...parseAudioMetadataBody(body.trim()));
+                  return;
+                }
                 if (headers['Path'] === 'turn.end') {
                   // Wait for any in-flight Blob decodes to complete before
                   // deciding whether audio was received.
@@ -582,12 +663,18 @@ export class EdgeSpeechTTS {
       });
     } else {
       return new Promise((resolve, reject) => {
-        const ws = new WebSocket(url, {
-          headers: baseHeaders,
-        });
+        // In browsers isomorphic-ws is the native WebSocket, whose second
+        // argument is a subprotocol list — passing an options object throws
+        // SyntaxError. Custom headers are only supported (and only needed)
+        // in Node, where `ws` accepts (url, options).
+        const ws =
+          typeof window === 'undefined'
+            ? new WebSocket(url, { headers: baseHeaders })
+            : new WebSocket(url);
         ws.binaryType = 'arraybuffer';
 
         let audioData = new ArrayBuffer(0);
+        const boundaries: TTSWordBoundary[] = [];
 
         ws.addEventListener('open', () => {
           ws.send(config);
@@ -596,14 +683,15 @@ export class EdgeSpeechTTS {
 
         ws.addEventListener('message', (event: WebSocket.MessageEvent) => {
           if (typeof event.data === 'string') {
-            const { headers } = getHeadersAndData(event.data);
-            if (headers['Path'] === 'turn.end') {
+            const { headers, body } = getHeadersAndData(event.data);
+            if (headers['Path'] === 'audio.metadata') {
+              boundaries.push(...parseAudioMetadataBody(body.trim()));
+            } else if (headers['Path'] === 'turn.end') {
               ws.close();
               if (!audioData.byteLength) {
                 return reject(new Error('No audio data received.'));
               }
-              const res = new Response(audioData);
-              resolve(res);
+              resolve({ response: new Response(audioData), boundaries });
             }
           } else if (event.data instanceof ArrayBuffer) {
             const dataView = new DataView(event.data);
@@ -631,29 +719,66 @@ export class EdgeSpeechTTS {
     }
   }
 
-  async create(payload: EdgeTTSPayload): Promise<Response> {
+  async #fetchEdgeSpeech(payload: EdgeTTSPayload): Promise<EdgeSpeechAudio> {
     if (this.protocol === 'https') {
-      return this.#fetchEdgeSpeechHttp(payload);
+      // The HTTPS proxy streams the audio body and carries word boundaries in
+      // the WORD_BOUNDARIES_HEADER response header (see /api/tts/edge route).
+      const response = await this.#fetchEdgeSpeechHttp(payload);
+      return {
+        response,
+        boundaries: parseWordBoundariesHeader(response.headers.get(WORD_BOUNDARIES_HEADER)),
+      };
     } else {
       return this.#fetchEdgeSpeechWs(payload);
     }
   }
 
-  async createAudioUrl(payload: EdgeTTSPayload): Promise<string> {
-    const cacheKey = hashPayload(payload);
-    if (EdgeSpeechTTS.audioUrlCache.has(cacheKey)) {
-      return EdgeSpeechTTS.audioUrlCache.get(cacheKey)!;
+  async create(payload: EdgeTTSPayload): Promise<Response> {
+    return (await this.#fetchEdgeSpeech(payload)).response;
+  }
+
+  // Server-side helper for the /api/tts/edge route: returns the audio Response
+  // together with the captured word boundaries so the route can forward them.
+  async createWithBoundaries(payload: EdgeTTSPayload): Promise<EdgeSpeechAudio> {
+    return this.#fetchEdgeSpeech(payload);
+  }
+
+  // Fetch (or reuse) the audio blob + boundaries for a payload, deduplicating
+  // both stored results (LRU) and in-flight requests (inflight map).
+  async #fetchAndCache(
+    payload: EdgeTTSPayload,
+  ): Promise<{ blob: Blob; boundaries: TTSWordBoundary[] }> {
+    const cacheKey = hashTTSPayload(payload);
+    const cachedBlob = EdgeSpeechTTS.audioCache.get(cacheKey);
+    if (cachedBlob) {
+      return { blob: cachedBlob, boundaries: EdgeSpeechTTS.boundariesCache.get(cacheKey) ?? [] };
     }
-    try {
-      const res = await this.create(payload);
-      const arrayBuffer = await res.arrayBuffer();
+    const pending = EdgeSpeechTTS.inflight.get(cacheKey);
+    if (pending) return pending;
+    const promise = (async () => {
+      const { response, boundaries } = await this.#fetchEdgeSpeech(payload);
+      const arrayBuffer = await response.arrayBuffer();
       const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
-      const objectUrl = URL.createObjectURL(blob);
       EdgeSpeechTTS.audioCache.set(cacheKey, blob);
-      EdgeSpeechTTS.audioUrlCache.set(cacheKey, objectUrl);
-      return objectUrl;
-    } catch (error) {
-      throw error;
+      EdgeSpeechTTS.boundariesCache.set(cacheKey, boundaries);
+      return { blob, boundaries };
+    })();
+    EdgeSpeechTTS.inflight.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      EdgeSpeechTTS.inflight.delete(cacheKey);
     }
+  }
+
+  // Audio bytes for Web Audio decoding. The cache keeps a Blob and every call
+  // mints a fresh ArrayBuffer copy via blob.arrayBuffer() — WebKit's
+  // decodeAudioData detaches its input, so handing out a shared buffer would
+  // break replay from cache on Safari.
+  async createAudioData(
+    payload: EdgeTTSPayload,
+  ): Promise<{ data: ArrayBuffer; boundaries: TTSWordBoundary[] }> {
+    const { blob, boundaries } = await this.#fetchAndCache(payload);
+    return { data: await blob.arrayBuffer(), boundaries };
   }
 }

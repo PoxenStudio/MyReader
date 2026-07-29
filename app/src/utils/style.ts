@@ -16,17 +16,20 @@ import {
 } from '@/styles/themes';
 import { createFontCSS, CustomFont } from '@/styles/fonts';
 import { getOSPlatform } from './misc';
+import { SCROLL_WRAPPER_CLASS, SCROLL_WRAPPER_FIT_CLASS } from './scrollable';
 
-const getFontStyles = (
+/**
+ * Build the resolved CSS font-family lists (serif / sans-serif / monospace)
+ * from the user's font settings. Each value is a ready-to-use `font-family`
+ * string ending in the matching generic family. Shared by getFontStyles (which
+ * exposes them as CSS variables inside the reader iframe) and getBaseFontFamily
+ * (which applies the body font directly to top-level UI such as the RSVP overlay).
+ */
+const buildFontFamilyLists = (
   serif: string,
   sansSerif: string,
   monospace: string,
-  defaultFont: string,
   defaultCJKFont: string,
-  fontSize: number,
-  minFontSize: number,
-  fontWeight: number,
-  overrideFont: boolean,
 ) => {
   const lastSerifFonts = ['Georgia', 'Times New Roman'];
   const serifFonts = [
@@ -49,12 +52,49 @@ const getFontStyles = (
     ...FALLBACK_FONTS,
   ];
   const monospaceFonts = [monospace, ...MONOSPACE_FONTS.filter((font) => font !== monospace)];
+  const quote = (fonts: string[]) => fonts.map((font) => `"${font}"`).join(', ');
+  return {
+    serif: `${quote(serifFonts)}, serif`,
+    sansSerif: `${quote(sansSerifFonts)}, sans-serif`,
+    monospace: `${quote(monospaceFonts)}, monospace`,
+  };
+};
+
+/**
+ * Resolve the body font-family string (serif or sans-serif chain, per the
+ * user's "Default Font" setting) for use outside the reader iframe — e.g. the
+ * RSVP overlay, which renders in the top document and can't read the iframe's
+ * --serif/--sans-serif CSS variables. Custom fonts are already mounted in the
+ * top document, so the returned chain resolves them by family name.
+ */
+export const getBaseFontFamily = (viewSettings: ViewSettings): string => {
+  const families = buildFontFamilyLists(
+    viewSettings.serifFont!,
+    viewSettings.sansSerifFont!,
+    viewSettings.monospaceFont!,
+    viewSettings.defaultCJKFont!,
+  );
+  return viewSettings.defaultFont!.toLowerCase() === 'serif' ? families.serif : families.sansSerif;
+};
+
+const getFontStyles = (
+  serif: string,
+  sansSerif: string,
+  monospace: string,
+  defaultFont: string,
+  defaultCJKFont: string,
+  fontSize: number,
+  minFontSize: number,
+  fontWeight: number,
+  overrideFont: boolean,
+) => {
+  const families = buildFontFamilyLists(serif, sansSerif, monospace, defaultCJKFont);
   const defaultFontFamily = defaultFont.toLowerCase() === 'serif' ? '--serif' : '--sans-serif';
   const fontStyles = `
     html {
-      --serif: ${serifFonts.map((font) => `"${font}"`).join(', ')}, serif;
-      --sans-serif: ${sansSerifFonts.map((font) => `"${font}"`).join(', ')}, sans-serif;
-      --monospace: ${monospaceFonts.map((font) => `"${font}"`).join(', ')}, monospace;
+      --serif: ${families.serif};
+      --sans-serif: ${families.sansSerif};
+      --monospace: ${families.monospace};
       --font-size: ${fontSize}px;
       --min-font-size: ${minFontSize}px;
       --font-weight: ${fontWeight};
@@ -100,6 +140,7 @@ const getFontStyles = (
     }
     pre, code, kbd {
       font-family: var(--monospace);
+      font-variant-ligatures: none;
     }
     body *:not(pre, code, kbd, .code):not(pre *, code *, kbd *, .code *) {
       ${overrideFont ? 'font-family: revert !important;' : ''}
@@ -151,8 +192,14 @@ const getDarkModeLightBackgroundOverrides = (bg: string) => `
     *[style*="background: rgb(255"], *[style*="background:rgb(255"] {
       background-color: ${bg} !important;
     }
+    /* Force transparent, not the theme bg: the dark page fill already comes from
+       the paginator container / reader grid cell, while an opaque body paints over
+       the host background texture (#4446) — and foliate captures docBackground once
+       per section load, so the body must stay transparent regardless of texture
+       state. Book-forced light page backgrounds still get neutralized (#4392) since
+       the theme-dark fill shows through. */
     body.theme-dark {
-      background-color: ${bg} !important;
+      background-color: transparent !important;
     }
 `;
 
@@ -219,7 +266,8 @@ const getColorStyles = (
     }
     img {
       ${isDarkMode && invertImgColorInDark ? 'filter: invert(100%);' : ''}
-      ${!isDarkMode && overrideColor ? 'mix-blend-mode: multiply;' : ''}
+      ${isDarkMode && overrideColor ? 'filter: grayscale(100%) contrast(1.2) brightness(1.2);' : ''}
+      ${overrideColor ? 'mix-blend-mode: multiply;' : ''}
     }
     svg, img {
       ${overrideColor ? `background-color: transparent !important;` : ''};
@@ -257,9 +305,16 @@ const getColorStyles = (
     blockquote {
       ${isDarkMode ? `background: color-mix(in srgb, ${bg} 80%, #000);` : ''}
     }
+    /* Only tint table descendants when the user has opted into color override.
+       By default, leave them transparent so a plain table (and the invisible
+       spacer cells some books use for vertical layout) keeps the page
+       background instead of a different shade. Illegible light/zebra table
+       backgrounds are handled separately by the dark-mode light-background
+       rewriters (getDarkModeLightBackgroundOverrides / transformStylesheet).
+       See #4419 (and #2377, which this gate originally fixed). */
     blockquote, table * {
-      ${isDarkMode ? `background: color-mix(in srgb, ${bg} 80%, #000);` : ''}
-      ${isDarkMode ? `background-color: color-mix(in srgb, ${bg} 80%, #000);` : ''}
+      ${isDarkMode && overrideColor ? `background: color-mix(in srgb, ${bg} 80%, #000);` : ''}
+      ${isDarkMode && overrideColor ? `background-color: color-mix(in srgb, ${bg} 80%, #000);` : ''}
     }
     /* override inline hardcoded text color */
     font[color="#000000"], font[color="#000"], font[color="black"],
@@ -300,7 +355,6 @@ const getPageLayoutStyles = (
   writingMode: string,
   vertical: boolean,
 ) => `
-  @namespace epub "http://www.idpf.org/2007/ops";
   html {
     --margin-top: ${marginTop}px;
     --margin-right: ${marginRight}px;
@@ -318,6 +372,13 @@ const getPageLayoutStyles = (
     zoom: ${zoomLevel};
     padding: unset;
     margin: unset;
+  }
+  /* -webkit-touch-callout on html/body does not reach descendant images in
+     Android WebView, and the native image callout collides with the reader's
+     touch handlers and can freeze the app */
+  img {
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
   }
   svg:where(:not([width])), img:where(:not([width])) {
     width: auto;
@@ -338,39 +399,31 @@ const getPageLayoutStyles = (
     inset: -10px;
   }
 
-  pre, code {
-    white-space: pre-wrap !important;
-  }
-  .readest-table-scroll {
+  .${SCROLL_WRAPPER_CLASS} {
     display: block;
+    overflow: auto;
     max-width: 100%;
-    /* Scrolling is the default so a table wider than the column is never clipped.
-       A table that can wrap to fit doesn't overflow, so no scrollbar shows.
-       applyTableStyle adds .readest-table-scroll-fit (via a ResizeObserver) to
-       clip the few px of min-content slop some layout tables have, suppressing a
-       spurious scrollbar once layout has settled. */
-    overflow-x: auto;
-    overflow-y: visible;
-    -webkit-overflow-scrolling: touch;
-    /* Let the browser handle horizontal pans on the table; paginated swipe uses capture-phase JS when needed. */
     touch-action: pan-x pan-y;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
   }
-  .readest-table-scroll-fit {
-    overflow-x: clip;
-    touch-action: auto;
+  .${SCROLL_WRAPPER_FIT_CLASS} {
+    overflow: visible;
   }
-  .readest-table-scroll > table {
+  .${SCROLL_WRAPPER_CLASS} > table {
     display: table !important;
     max-width: 100%;
   }
-  pre {
-    max-width: calc(var(--available-width) * 1px);
-    max-height: calc(var(--available-height) * 1px);
+  pre, code, math {
+    white-space: pre-wrap !important;
     scrollbar-width: none;
+  }
+  math {
     overflow: auto;
   }
-  pre::-webkit-scrollbar {
-    display: none;
+  table, math {
+    max-width: calc(var(--available-width) * 1px);
+    max-height: calc(var(--available-height) * 1px);
   }
 
   .epubtype-footnote,
@@ -407,6 +460,10 @@ const getPageLayoutStyles = (
     max-height: calc(var(--available-height) * 0.8 * 1px);
   }
 
+  figure.code {
+    overflow: unset !important;
+  }
+
   /* some epubs set insane inline-block for p */
   p {
     display: block;
@@ -422,6 +479,12 @@ const getPageLayoutStyles = (
   }
   img.has-text-siblings {
     ${vertical ? 'width: 1em;' : 'height: 1em;'}
+  }
+  /* Baseline is only Readest's default: applyImageStyle adds this class when the
+     book leaves vertical-align at its initial value, so an author-set value
+     (e.g. a CJK glyph-substitution image nudged with vertical-align: -0.15em)
+     keeps winning. See #4866. */
+  img.has-text-siblings-baseline {
     vertical-align: baseline;
   }
   :is(div) > img.has-text-siblings[style*="object-fit"] {
@@ -497,8 +560,8 @@ const getParagraphLayoutStyles = (
     word-spacing: ${wordSpacing}px ${overrideLayout ? '!important' : ''};
     letter-spacing: ${letterSpacing}px ${overrideLayout ? '!important' : ''};
     text-indent: ${textIndent}em ${overrideLayout ? '!important' : ''};
-    -webkit-hyphens: ${hyphenate ? 'auto' : 'manual'};
-    hyphens: ${hyphenate ? 'auto' : 'manual'};
+    -webkit-hyphens: ${hyphenate ? 'auto' : 'manual'} ${overrideLayout ? '!important' : ''};
+    hyphens: ${hyphenate ? 'auto' : 'manual'} ${overrideLayout ? '!important' : ''};
     -webkit-hyphenate-limit-before: 3;
     -webkit-hyphenate-limit-after: 2;
     -webkit-hyphenate-limit-lines: 2;
@@ -507,8 +570,8 @@ const getParagraphLayoutStyles = (
   }
   li {
     line-height: ${lineSpacing} ${overrideLayout ? '!important' : ''};
-    -webkit-hyphens: ${hyphenate ? 'auto' : 'manual'};
-    hyphens: ${hyphenate ? 'auto' : 'manual'};
+    -webkit-hyphens: ${hyphenate ? 'auto' : 'manual'} ${overrideLayout ? '!important' : ''};
+    hyphens: ${hyphenate ? 'auto' : 'manual'} ${overrideLayout ? '!important' : ''};
   }
   p.aligned-center, blockquote.aligned-center,
   dd.aligned-center, div.aligned-center {
@@ -704,7 +767,13 @@ const getWarichuStyles = () => `
   }
 `;
 
-const getRubyStyles = () => `
+// Word Lens gloss <rt> styling is user-configurable: the font size (relative to
+// the word, in em) and the color. An empty color keeps the default muted,
+// theme-adaptive look (inherit + 0.7 opacity); a set color paints at full opacity.
+const getRubyStyles = (viewSettings: ViewSettings) => {
+  const fontSize = viewSettings.wordLensGlossFontSize || 0.5;
+  const color = viewSettings.wordLensGlossColor || '';
+  return `
   rt {
     user-select: none;
     -webkit-user-select: none;
@@ -712,7 +781,18 @@ const getRubyStyles = () => `
   rp {
     display: none !important;
   }
+  ruby.wl-gloss {
+    cursor: help;
+  }
+  ruby.wl-gloss > rt {
+    font-size: ${fontSize}em;
+    line-height: 1.1;
+    ${color ? `color: ${color};\n    opacity: 1;` : 'opacity: 0.7;'}
+    font-weight: normal;
+    text-align: center;
+  }
 `;
+};
 
 export interface ThemeCode {
   bg: string;
@@ -822,9 +902,15 @@ export const getStyles = (
   );
   const translationStyles = getTranslationStyles(viewSettings.showTranslateSource!);
   const warichuStyles = getWarichuStyles();
-  const rubyStyles = getRubyStyles();
+  const rubyStyles = getRubyStyles(viewSettings);
   const userStylesheet = viewSettings.userStylesheet!;
-  return `${customFontFaces}\n${pageLayoutStyles}\n${paragraphLayoutStyles}\n${fontStyles}\n${colorStyles}\n${translationStyles}\n${warichuStyles}\n${rubyStyles}\n${userStylesheet}`;
+  // The `@namespace` declaration must lead the stylesheet: a `@namespace` rule
+  // placed after any style or `@font-face` rule is invalid and silently ignored,
+  // which drops the namespaced `aside[epub|type~="footnote"]` selector and lets
+  // the footnote aside's border show as a stray horizontal line (#4438). Keep it
+  // ahead of the inlined custom `@font-face` rules.
+  const epubNamespace = `@namespace epub "http://www.idpf.org/2007/ops";`;
+  return `${epubNamespace}\n${customFontFaces}\n${pageLayoutStyles}\n${paragraphLayoutStyles}\n${fontStyles}\n${colorStyles}\n${translationStyles}\n${warichuStyles}\n${rubyStyles}\n${userStylesheet}`;
 };
 
 // Build a CSS chunk of `@font-face` rules for the given user custom
@@ -1075,37 +1161,60 @@ export const applyScrollbarStyle = (document: Document, hideScrollbar: boolean) 
 };
 
 export const applyImageStyle = (document: Document) => {
-  document.querySelectorAll('img').forEach((img) => {
+  const win = document.defaultView ?? window;
+  // Two-phase (read then write): reading getComputedStyle after a class/style
+  // write forces a style recalc, so gather every decision first and apply the
+  // mutations afterwards (same reasoning as keepTextAlignment's split).
+  const plans = Array.from(document.querySelectorAll('img')).map((img) => {
     const widthAttr = img.getAttribute('width');
-    if (widthAttr && (widthAttr.endsWith('%') || widthAttr.endsWith('vw'))) {
-      const percentage = parseFloat(widthAttr);
-      if (!isNaN(percentage)) {
-        img.style.width = `${(percentage / 100) * window.innerWidth}px`;
-        img.removeAttribute('width');
-      }
-    }
-
+    const percentWidth =
+      widthAttr && (widthAttr.endsWith('%') || widthAttr.endsWith('vw'))
+        ? parseFloat(widthAttr)
+        : NaN;
     const heightAttr = img.getAttribute('height');
-    if (heightAttr && (heightAttr.endsWith('%') || heightAttr.endsWith('vh'))) {
-      const percentage = parseFloat(heightAttr);
-      if (!isNaN(percentage)) {
-        img.style.height = `${(percentage / 100) * window.innerHeight}px`;
-        img.removeAttribute('height');
+    const percentHeight =
+      heightAttr && (heightAttr.endsWith('%') || heightAttr.endsWith('vh'))
+        ? parseFloat(heightAttr)
+        : NaN;
+
+    let inlineWithText = false;
+    let keepBaseline = false;
+    const parent = img.parentNode;
+    if (parent && parent.nodeType === Node.ELEMENT_NODE) {
+      const childNodes = Array.from(parent.childNodes);
+      const hasTextSiblings = childNodes.some(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+      );
+      const isInline = childNodes.every(
+        (node) => node.nodeType !== Node.ELEMENT_NODE || (node as Element).tagName !== 'BR',
+      );
+      inlineWithText = hasTextSiblings && isInline;
+      if (inlineWithText) {
+        // Only supply Readest's baseline default when the book leaves
+        // vertical-align at its initial value; an author-set value (e.g. a CJK
+        // glyph-substitution image nudged with `vertical-align: -0.15em`) must
+        // win. Empty string covers environments that report unset props as ''.
+        const valign = win.getComputedStyle(img).verticalAlign;
+        keepBaseline = valign === '' || valign === 'baseline';
       }
     }
-
-    const parent = img.parentNode;
-    if (!parent || parent.nodeType !== Node.ELEMENT_NODE) return;
-    const hasTextSiblings = Array.from(parent.childNodes).some(
-      (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
-    );
-    const isInline = Array.from(parent.childNodes).every(
-      (node) => node.nodeType !== Node.ELEMENT_NODE || (node as Element).tagName !== 'BR',
-    );
-    if (hasTextSiblings && isInline) {
-      img.classList.add('has-text-siblings');
-    }
+    return { img, percentWidth, percentHeight, inlineWithText, keepBaseline };
   });
+
+  for (const { img, percentWidth, percentHeight, inlineWithText, keepBaseline } of plans) {
+    if (!isNaN(percentWidth)) {
+      img.style.width = `${(percentWidth / 100) * window.innerWidth}px`;
+      img.removeAttribute('width');
+    }
+    if (!isNaN(percentHeight)) {
+      img.style.height = `${(percentHeight / 100) * window.innerHeight}px`;
+      img.removeAttribute('height');
+    }
+    if (inlineWithText) {
+      img.classList.add('has-text-siblings');
+      if (keepBaseline) img.classList.add('has-text-siblings-baseline');
+    }
+  }
   document.querySelectorAll('hr').forEach((hr) => {
     const computedStyle = window.getComputedStyle(hr);
     if (computedStyle.backgroundImage && computedStyle.backgroundImage !== 'none') {
@@ -1114,179 +1223,41 @@ export const applyImageStyle = (document: Document) => {
   });
 };
 
-export const TABLE_SCROLL_CLASS = 'readest-table-scroll';
-// Added to a wrapper whose table fits the column within tolerance, so the wrapper
-// clips instead of showing a scrollbar. Wide tables stay scrollable (no class).
-const TABLE_SCROLL_FIT_CLASS = 'readest-table-scroll-fit';
-// Ignore tiny overflows (borders, image rounding) so they don't show a scrollbar.
-const TABLE_SCROLL_TOLERANCE_PX = 4;
-
-const TABLE_TOUCH_SCROLL_FLAG = 'data-readest-table-touch-scroll';
-
-/** Horizontal swipe on a wide table should scroll the table, not turn the page (paginated mode). */
-export const shouldTableScrollConsumeTouch = (
-  wrapper: HTMLElement,
-  dx: number,
-  dy: number,
-): boolean => {
-  if (wrapper.scrollWidth <= wrapper.clientWidth) return false;
-  if (Math.abs(dx) < 8 || Math.abs(dx) <= Math.abs(dy)) return false;
-
-  const atStart = wrapper.scrollLeft <= 1;
-  const atEnd = wrapper.scrollLeft + wrapper.clientWidth >= wrapper.scrollWidth - 1;
-
-  // Finger moves left (dx < 0) reveals content to the right; finger moves right reveals left.
-  if (dx < 0 && !atEnd) return true;
-  if (dx > 0 && !atStart) return true;
-  return false;
-};
-
-/** Horizontal wheel/trackpad over a wide table should scroll the table, not turn the page. */
-export const shouldTableScrollConsumeWheel = (
-  wrapper: HTMLElement,
-  deltaX: number,
-  deltaY: number,
-): boolean => {
-  if (wrapper.scrollWidth <= wrapper.clientWidth) return false;
-  // A horizontal wheel belongs to the table. Consume it regardless of scroll
-  // position: at the edge a wheel gesture (incl. trackpad momentum) must not
-  // chain into a page turn — the table owns the whole horizontal gesture.
-  return Math.abs(deltaX) > Math.abs(deltaY);
-};
-
-/**
- * Capture-phase touch + wheel routing so foliate's paginator and readest's wheel
- * pagination do not steal horizontal scrolls over wide tables. Attached once per
- * iframe document.
- */
-export const applyTableTouchScroll = (document: Document) => {
-  const root = document.documentElement;
-  if (root.getAttribute(TABLE_TOUCH_SCROLL_FLAG) === 'true') return;
-  root.setAttribute(TABLE_TOUCH_SCROLL_FLAG, 'true');
-
-  let touchStartX = 0;
-  let touchStartY = 0;
-  let activeWrapper: HTMLElement | null = null;
-
-  const findWrapper = (target: EventTarget | null): HTMLElement | null => {
-    // This module runs in the top-window realm, but `target` originates from
-    // the iframe's realm, so `target instanceof Element` is always false here.
-    // Duck-type on `closest` instead so the lookup works across realms. Skip
-    // wrappers that fit (they clip, not scroll) so only scrollable tables route.
-    if (!target || !('closest' in target)) return null;
-    const wrapper = (target as Element).closest(`.${TABLE_SCROLL_CLASS}`) as HTMLElement | null;
-    return wrapper && !wrapper.classList.contains(TABLE_SCROLL_FIT_CLASS) ? wrapper : null;
-  };
-
-  const onTouchStart = (e: TouchEvent) => {
-    activeWrapper = findWrapper(e.target);
-    if (!activeWrapper) return;
-    const touch = e.changedTouches[0];
-    if (!touch) return;
-    touchStartX = touch.screenX;
-    touchStartY = touch.screenY;
-  };
-
-  const onTouchMove = (e: TouchEvent) => {
-    if (!activeWrapper) return;
-    if (!activeWrapper.contains(e.target as Node)) return;
-
-    const touch = e.changedTouches[0];
-    if (!touch) return;
-
-    const dx = touch.screenX - touchStartX;
-    const dy = touch.screenY - touchStartY;
-    if (!shouldTableScrollConsumeTouch(activeWrapper, dx, dy)) return;
-
-    e.stopImmediatePropagation();
-  };
-
-  const onTouchEnd = () => {
-    activeWrapper = null;
-  };
-
-  // Trackpad / mouse wheel over a wide table generates wheel events (not touch).
-  // foliate has no wheel handler, but readest forwards iframe wheel events to
-  // pagination (see handleWheel -> 'iframe-wheel'), so a horizontal wheel over
-  // a scrollable table would both scroll the table and turn the page.
-  const onWheel = (e: WheelEvent) => {
-    const wrapper = findWrapper(e.target);
-    if (!wrapper) return;
-    if (!shouldTableScrollConsumeWheel(wrapper, e.deltaX, e.deltaY)) return;
-    // Native overflow scrolling of the table still happens (no preventDefault);
-    // we only stop pagination from also acting on this wheel.
-    e.stopImmediatePropagation();
-  };
-
-  const opts = { capture: true, passive: false } as const;
-  document.addEventListener('touchstart', onTouchStart, opts);
-  document.addEventListener('touchmove', onTouchMove, opts);
-  document.addEventListener('touchend', onTouchEnd, opts);
-  document.addEventListener('touchcancel', onTouchEnd, opts);
-  document.addEventListener('wheel', onWheel, { capture: true, passive: true });
-};
-
-/**
- * Toggle the fit class: a wrapper whose table overflows by no more than the
- * tolerance is treated as fitting (clip the slop, no scrollbar); a genuinely
- * wider table keeps scrolling. Re-runs on resize so the decision is correct once
- * layout has settled (the column width isn't reliable at section-load time).
- */
-const updateTableFit = (wrapper: HTMLElement) => {
-  const fits = wrapper.scrollWidth - wrapper.clientWidth <= TABLE_SCROLL_TOLERANCE_PX;
-  wrapper.classList.toggle(TABLE_SCROLL_FIT_CLASS, fits);
-};
-
-/**
- * Wrap each table so a table wider than its column scrolls horizontally instead
- * of overflowing the page. Tables that wrap to fit show no scrollbar; a
- * ResizeObserver suppresses the scrollbar for tables that overflow only within
- * tolerance, re-evaluating as the column width settles.
- */
-export const applyTableStyle = (document: Document) => {
-  document.querySelectorAll('table').forEach((table) => {
-    const parent = table.parentNode;
-    if (!parent || parent.nodeType !== Node.ELEMENT_NODE) return;
-
-    if (
-      parent instanceof HTMLElement &&
-      parent.classList.contains(TABLE_SCROLL_CLASS) &&
-      parent.querySelector(':scope > table') === table
-    ) {
-      table.style.removeProperty('transform');
-      table.style.removeProperty('transform-origin');
-      return;
-    }
-
-    const wrapper = document.createElement('div');
-    wrapper.className = TABLE_SCROLL_CLASS;
-    parent.insertBefore(wrapper, table);
-    wrapper.appendChild(table);
-    table.style.removeProperty('transform');
-    table.style.removeProperty('transform-origin');
-
-    updateTableFit(wrapper);
-    const win = document.defaultView;
-    if (win?.ResizeObserver) {
-      const observer = new win.ResizeObserver(() => updateTableFit(wrapper));
-      observer.observe(wrapper);
-    }
-  });
-};
-
 export const keepTextAlignment = (document: Document) => {
-  document.querySelectorAll('div, p, blockquote, dd').forEach((el) => {
-    const computedStyle = window.getComputedStyle(el);
-    if (computedStyle.textAlign === 'center') {
-      el.classList.add('aligned-center');
-    } else if (computedStyle.textAlign === 'left') {
-      el.classList.add('aligned-left');
-    } else if (computedStyle.textAlign === 'right') {
-      el.classList.add('aligned-right');
-    } else if (computedStyle.textAlign === 'justify') {
-      el.classList.add('aligned-justify');
-    }
-  });
+  // Why two-phase: the previous version read getComputedStyle and wrote
+  // classList.add inside the same forEach pass. classList.add invalidates
+  // the document's style cache (CSS selectors may target the class on
+  // descendants), so the next getComputedStyle() in the loop forced the
+  // browser to recompute style for the whole document. With ~hundreds of
+  // p/div/blockquote/dd elements per chapter (a typical Harry Potter
+  // section) that turned the loop into N x layout — visible on a release
+  // Android build as a 1210ms "Forced reflow" violation in the browser
+  // console and the dominant chunk of "Layout = 32.8% of TBT" in the
+  // open-book Performance trace.
+  //
+  // Two-phase read-then-write keeps the loop O(N) elements + 1 recalc
+  // instead of O(N) recalcs.
+  const win = document.defaultView ?? window;
+  const els = document.querySelectorAll('div, p, blockquote, dd');
+  const alignClasses = new Array<string | null>(els.length);
+  // Read pass: collect computed text-align for every element. The browser
+  // computes style once for the whole document on the first call, then
+  // every subsequent getComputedStyle in this pass reuses that result.
+  for (let i = 0; i < els.length; i++) {
+    const align = win.getComputedStyle(els[i]!).textAlign;
+    if (align === 'center') alignClasses[i] = 'aligned-center';
+    else if (align === 'left') alignClasses[i] = 'aligned-left';
+    else if (align === 'right') alignClasses[i] = 'aligned-right';
+    else if (align === 'justify') alignClasses[i] = 'aligned-justify';
+    else alignClasses[i] = null;
+  }
+  // Write pass: applies all classList changes in a single batch. Style
+  // invalidation happens once at the end, when the next layout-affecting
+  // operation forces a flush.
+  for (let i = 0; i < els.length; i++) {
+    const cls = alignClasses[i];
+    if (cls) els[i]!.classList.add(cls);
+  }
 };
 
 export const applyFixedlayoutStyles = (
@@ -1301,6 +1272,11 @@ export const applyFixedlayoutStyles = (
   const isEink = viewSettings.isEink;
   const overrideColor = viewSettings.overrideColor!;
   const invertImgColorInDark = viewSettings.invertImgColorInDark!;
+  const contrast = viewSettings.contrast ?? 100;
+  const imgFilters: string[] = [];
+  if (isDarkMode && invertImgColorInDark) imgFilters.push('invert(100%)');
+  if (contrast !== 100) imgFilters.push(`contrast(${contrast}%)`);
+  const imgFilter = imgFilters.length ? `filter: ${imgFilters.join(' ')};` : '';
   const darkMixBlendMode = bg === '#000000' ? 'luminosity' : 'overlay';
   const existingStyleId = 'fixed-layout-styles';
   let style = document.getElementById(existingStyleId) as HTMLStyleElement;
@@ -1328,7 +1304,7 @@ export const applyFixedlayoutStyles = (
       background-color: var(--theme-bg-color);
     }
     img, canvas {
-      ${isDarkMode && invertImgColorInDark ? 'filter: invert(100%);' : ''}
+      ${imgFilter}
       ${overrideColor ? `mix-blend-mode: ${isDarkMode ? darkMixBlendMode : 'multiply'};` : ''}
     }
     img.singlePage {

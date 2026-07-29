@@ -724,7 +724,11 @@ const WebDAVForm: React.FC<WebDAVFormProps> = ({ onBack }) => {
               lives before their first run. */}
           <SyncHistoryPanel entries={stored.syncLog ?? []} onClear={handleClearSyncLog} />
 
-          <WebDAVBrowsePane settings={effective} onAppendSyncLogEntry={appendSyncLogEntry} />
+          <WebDAVBrowsePane
+            settings={effective}
+            onAppendSyncLogEntry={appendSyncLogEntry}
+            onUpdateSettings={persistWebdav}
+          />
 
           <div className='flex justify-end'>
             <button

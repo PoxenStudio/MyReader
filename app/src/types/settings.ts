@@ -18,6 +18,8 @@ export const LibrarySortByType = {
   Size: 'size',
   Format: 'format',
   Published: 'published',
+  Progress: 'progress',
+  TimeRemaining: 'timeRemaining',
 } as const;
 
 export type LibrarySortByType = (typeof LibrarySortByType)[keyof typeof LibrarySortByType];
@@ -53,6 +55,12 @@ export interface ReadSettings {
   autohideCursor: boolean;
   translationProvider: string;
   translateTargetLang: string;
+  /**
+   * Global Word Lens toggle: auto-download a gloss pack on demand when the
+   * pair isn't cached locally. When off, the reader never fetches packs
+   * silently; users download them explicitly from the Word Lens sub-page.
+   */
+  wordLensAutoDownload: boolean;
   highlightStyle: HighlightStyle;
   highlightStyles: Record<HighlightStyle, HighlightColor>;
 
@@ -79,9 +87,21 @@ export interface HardcoverSettings {
   enabled: boolean;
   accessToken: string;
   lastSyncedAt: number;
+  // When true, progress + notes are pushed to Hardcover automatically as the
+  // user reads (debounced) instead of only via the reader menu. Default OFF;
+  // existing connected users (undefined) stay manual until they opt in.
+  autoSync?: boolean;
 }
 
 export type WebDAVConnectionType = 'custom' | 'mybooks';
+
+/**
+ * Sort field for the WebDAV browser listing. 'name' reproduces the
+ * legacy directories-first/alphabetical default; the date fields drive
+ * the "pull up recent books" use case ('created' relies on the server
+ * reporting `<creationdate>`, which not all do). 'size' orders files.
+ */
+export type WebDAVBrowseSortByType = 'name' | 'modified' | 'created' | 'size';
 
 export interface WebDAVSettings {
   enabled: boolean;
@@ -94,12 +114,21 @@ export interface WebDAVSettings {
   username: string;
   password: string;
   rootPath: string;
+  // Browser sort preference, persisted so a chosen "recent first" order
+  // survives across sessions. Both optional: absent => name/ascending,
+  // matching the pre-feature default (no migration needed).
+  browseSortBy?: WebDAVBrowseSortByType;
+  browseSortAscending?: boolean;
   // Sync sub-toggles. Each sub-toggle gates a category independently so a
   // user can e.g. mirror progress to their own server without uploading
   // book binaries.
   syncProgress?: boolean;
   syncNotes?: boolean;
   syncBooks?: boolean;
+  // When true, "Sync now" re-checks every book instead of only those whose
+  // local copy differs from the shared library.json index (the default
+  // incremental walk). An escape hatch for drift or a first full sync.
+  fullSync?: boolean;
   // Conflict policy.
   strategy?: WebDAVSyncStrategy;
   // Stable per-device id (uuidv4); written into library.json so we can tell
@@ -108,6 +137,11 @@ export interface WebDAVSettings {
   // Wall-clock millisecond timestamp of the last successful end-to-end
   // sync, surfaced in the WebDAV settings sub-page.
   lastSyncedAt?: number;
+  // Device-local wall-clock millis of when this provider was made the
+  // selected cloud sync backend on THIS device. Anchors the mixed-fleet
+  // detection probe: any native /api/sync row newer than this means
+  // another device is still writing the gated channels.
+  providerSelectedAt?: number;
   // Diagnostic ring buffer: most recent ten "Sync now" runs, oldest first
   // dropped when full. Persisted alongside the rest of settings so users
   // can screenshot a failure breakdown when reporting issues. We keep the
@@ -220,7 +254,8 @@ export type SyncCategory =
   | 'texture'
   | 'opds_catalog'
   | 'settings'
-  | 'credentials';
+  | 'credentials'
+  | 'stats';
 
 export const SYNC_CATEGORIES: readonly SyncCategory[] = [
   'book',
@@ -231,6 +266,7 @@ export const SYNC_CATEGORIES: readonly SyncCategory[] = [
   'texture',
   'opds_catalog',
   'settings',
+  'stats',
   'credentials',
 ] as const;
 
@@ -250,6 +286,8 @@ export interface HardwarePageTurnerSettings {
     pageNext: KeyBinding | null;
     sectionPrev: KeyBinding | null;
     sectionNext: KeyBinding | null;
+    /** E-ink full screen refresh (clears ghosting). Optional: absent on settings persisted before the feature existed. */
+    refresh?: KeyBinding | null;
   };
 }
 
@@ -268,19 +306,30 @@ export interface SystemSettings {
    * settings backups via `BACKUP_SETTINGS_BLACKLIST`.
    */
   externalLibraryFolders?: string[];
+  /**
+   * Absolute paths of the external library folders the user has opted into
+   * auto-import for. On library open and whenever the app regains focus,
+   * Readest re-scans each of these and imports any newly-added book files.
+   * A subset of {@link externalLibraryFolders} (auto-import requires the
+   * folder to be read in place). Set per-folder from the Import-from-Folder
+   * dialog. Desktop + Android only. Device-local (paths are meaningful only
+   * on this filesystem) and excluded from cloud settings backups via
+   * `BACKUP_SETTINGS_BLACKLIST`.
+   */
+  autoImportFolders?: string[];
 
   keepLogin: boolean;
   autoUpload: boolean;
   alwaysOnTop: boolean;
   openBookInNewWindow: boolean;
   autoCheckUpdates: boolean;
+  updateChannel: 'stable' | 'nightly';
   screenWakeLock: boolean;
   screenBrightness: number;
   autoScreenBrightness: boolean;
   swipeBrightnessGesture: boolean;
   hardwarePageTurner: HardwarePageTurnerSettings;
   alwaysShowStatusBar: boolean;
-  alwaysInForeground: boolean;
   openLastBooks: boolean;
   lastOpenBooks: string[];
   autoImportBooksOnOpen: boolean;
@@ -303,6 +352,20 @@ export interface SystemSettings {
   libraryCoverFit: LibraryCoverFitType;
   libraryAutoColumns: boolean;
   libraryColumns: number;
+  /** Show the recently-read carousel at the top of the library (issue #3797). */
+  libraryRecentShelfEnabled: boolean;
+  /**
+   * Library page background texture, configured independently from the reader
+   * background (issue #4743). When any of these is undefined the library
+   * inherits the corresponding `globalViewSettings.background*` value, so an
+   * existing user's bookshelf looks unchanged until they pick a library
+   * texture. Device-local (the texture *selection* never syncs, matching the
+   * reader's `backgroundTextureId`); only the imported image binaries sync via
+   * the `texture` replica kind. Resolved by `getLibraryViewSettings`.
+   */
+  libraryBackgroundTextureId?: string;
+  libraryBackgroundOpacity?: number;
+  libraryBackgroundSize?: string;
   customFonts: CustomFont[];
   customTextures: CustomTexture[];
   customDictionaries: ImportedDictionary[];
@@ -321,6 +384,14 @@ export interface SystemSettings {
   pinCodeEnabled?: boolean;
   pinCodeHash?: string;
   pinCodeSalt?: string;
+  /**
+   * Mobile-only. When true AND a PIN lock is configured AND the device
+   * has enrolled biometrics, the app-lock screen prompts for biometrics
+   * (fingerprint / Face ID) first and falls back to the PIN. No effect on
+   * desktop/web (no biometric plugin). `undefined` is treated as `false`
+   * so existing PIN users are never silently switched to biometric.
+   */
+  biometricUnlockEnabled?: boolean;
 
   readwise: ReadwiseSettings;
   hardcover: HardcoverSettings;

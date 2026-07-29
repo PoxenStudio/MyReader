@@ -32,6 +32,9 @@ export interface TextSelection {
   href?: string;
   annotated?: boolean;
   rect?: Rect;
+  // Native Android selection handles were suppressed for this selection
+  // (Blink hyphen bounds bug, issue #1553) — the app draws its own handles.
+  handlesSuppressed?: boolean;
 }
 
 const frameRect = (frame: Frame, rect?: Rect, sx = 1, sy = 1) => {
@@ -292,9 +295,38 @@ export const getPosition = (
     ),
     dir: 'down',
   } as Position;
-  const startInView = pointIsInView(start.point);
-  const endInView = pointIsInView(end.point);
-  if (!startInView && !endInView) return { point: { x: 0, y: 0 } };
+  // Decide which selection end is on-screen by testing its UNCLAMPED line-rect
+  // midpoint against the READING FRAME (`rect`) — not the window. A cross-page
+  // selection's off-screen start maps to a negative/sidebar x that is still
+  // inside the window, so a window-based check would wrongly read it "in view"
+  // and pin the popup off the visible page (#1354).
+  const midX = (r: Rect) => (r.left + r.right) / 2;
+  const midY = (r: Rect) => (r.top + r.bottom) / 2;
+  const inFrame = (px: number, py: number) =>
+    px > rect.left && px < rect.right && py > rect.top && py < rect.bottom;
+  const startInView = inFrame(midX(first), midY(first));
+  const endInView = inFrame(midX(last), midY(last));
+  if (!startInView && !endInView) {
+    // Multi-page selection: both ends are off the visible page, but the middle
+    // may cross it. Anchor to the last on-screen line so the popup tracks the
+    // visible part of the selection.
+    const v = rects
+      .map((r) => frameRect(frame, r, sx, sy))
+      .filter((r) => inFrame(midX(r), midY(r)))
+      .at(-1);
+    if (v) {
+      return {
+        point: constrainPointWithinRect(
+          { x: midX(v) - rect.left, y: v.bottom - rect.top + 6 },
+          rect,
+          paddingPx,
+        ),
+        dir: 'down',
+      } as Position;
+    }
+    // Otherwise fall through and anchor to an end so the popup still shows
+    // (the constrained points are always within the frame, never {0,0}).
+  }
   if (!startInView) return end;
   if (!endInView) return start;
   return start.point.y > window.innerHeight - end.point.y ? start : end;
@@ -341,6 +373,59 @@ export const getPopupPosition = (
   }
 
   return { point: popupPoint, dir: position.dir } as Position;
+};
+
+// Standard desktop text-selection shortcuts (#4728): extend the active
+// selection with the keyboard. Pure key→intent mapping so it stays testable.
+//
+// - Shift+←/→            → extend by character
+// - Ctrl/Alt+Shift+←/→   → extend by word (Ctrl on Windows/Linux, Option on macOS)
+//
+// `direction` is visual ('left'/'right') so it matches the arrow key pressed and
+// reads correctly in RTL text. Meta/Cmd is left alone so the browser's native
+// line-boundary selection (Cmd+Shift+←/→ on macOS) still works.
+export interface KeyModifiers {
+  key: string;
+  shiftKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
+}
+
+export interface SelectionAdjustment {
+  direction: 'left' | 'right';
+  granularity: 'character' | 'word';
+}
+
+export const getKeyboardSelectionAdjustment = (ev: KeyModifiers): SelectionAdjustment | null => {
+  if (!ev.shiftKey || ev.metaKey) return null;
+  const direction = ev.key === 'ArrowLeft' ? 'left' : ev.key === 'ArrowRight' ? 'right' : null;
+  if (!direction) return null;
+  const granularity = ev.ctrlKey || ev.altKey ? 'word' : 'character';
+  return { direction, granularity };
+};
+
+// Locate the active (non-collapsed) selection across the rendered section
+// documents (foliate's `renderer.getContents()`) and, in `extend` mode, grow or
+// shrink it per the keyboard adjustment (#4728). Returns whether a selection was
+// found, so the caller can suppress page-turn navigation. With `extend` false it
+// only reports presence — used when the iframe itself held focus and the browser
+// already extended the selection natively.
+export const extendSelectionFromContents = (
+  contents: { doc: Document }[],
+  ev: KeyModifiers,
+  extend: boolean,
+): boolean => {
+  const adjustment = getKeyboardSelectionAdjustment(ev);
+  if (!adjustment) return false;
+  for (const { doc } of contents) {
+    const sel = doc.defaultView?.getSelection();
+    if (sel && !sel.isCollapsed) {
+      if (extend) sel.modify('extend', adjustment.direction, adjustment.granularity);
+      return true;
+    }
+  }
+  return false;
 };
 
 export const snapRangeToWords = (range: Range): void => {
@@ -390,6 +475,303 @@ export const snapRangeToWords = (range: Range): void => {
   snapEndToWordBoundary();
 };
 
+// Expand a caret position (a text node + offset) to the word-like segment that
+// contains it — the same word a native double-click would select. Returns null
+// when the position isn't inside word-like text (whitespace, punctuation, a
+// non-text node). CJK is segmented via Intl.Segmenter, matching snapRangeToWords.
+export const getWordRangeAt = (node: Node, offset: number): Range | null => {
+  if (node.nodeType !== Node.TEXT_NODE) return null;
+  if (typeof Intl === 'undefined' || !Intl.Segmenter) return null;
+  const text = node.textContent ?? '';
+  if (!text) return null;
+  const doc = node.ownerDocument;
+  if (!doc) return null;
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+  for (const seg of segmenter.segment(text)) {
+    if (!seg.isWordLike) continue;
+    const start = seg.index;
+    const end = seg.index + seg.segment.length;
+    // The caret falls inside this word, or sits exactly on either edge (a
+    // caret-from-point at a word boundary should still select the adjacent word).
+    if (offset >= start && offset <= end) {
+      const range = doc.createRange();
+      try {
+        range.setStart(node, start);
+        range.setEnd(node, end);
+      } catch {
+        return null;
+      }
+      return range.collapsed ? null : range;
+    }
+  }
+  return null;
+};
+
+// The word range under a point (in `doc` viewport coordinates), like a native
+// double-click. Returns null when the point isn't on word-like text.
+export const getWordRangeFromPoint = (doc: Document, x: number, y: number): Range | null => {
+  let node: Node | null = null;
+  let offset = 0;
+  if (doc.caretPositionFromPoint) {
+    const pos = doc.caretPositionFromPoint(x, y);
+    if (pos) {
+      node = pos.offsetNode;
+      offset = pos.offset;
+    }
+  } else if (doc.caretRangeFromPoint) {
+    const range = doc.caretRangeFromPoint(x, y);
+    if (range) {
+      node = range.startContainer;
+      offset = range.startOffset;
+    }
+  }
+  if (!node) return null;
+  return getWordRangeAt(node, offset);
+};
+
+// --- Android hyphenation selection-bounds bug (issue #1553) -----------------
+//
+// Blink's `LayoutSelection::ComputePaintingSelectionStateForCursor` compares
+// the selection's paragraph text-content offsets against each fragment's
+// `TextOffset()`. Auto/soft-hyphen fragments are layout-generated text whose
+// offsets are self-relative ({0,1}), so a touch selection starting at the
+// first character of a paragraph marks EVERY hyphen fragment in it as a
+// selection start: the native start handle is painted on the paragraph's last
+// hyphen and drag gestures re-anchor the selection base there. The helpers
+// below detect that condition so the app can repair the range and suppress
+// the broken native handles (touch handles are the only consumer of the bogus
+// bounds, so mouse/desktop selections are unaffected).
+
+const isInlineDisplay = (el: Element): boolean => {
+  const display = el.ownerDocument.defaultView?.getComputedStyle(el).display ?? '';
+  return display === 'inline' || display.startsWith('ruby');
+};
+
+// The element establishing the inline formatting context the range starts in.
+const getBlockAncestor = (node: Node): Element | null => {
+  let el: Element | null =
+    node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  while (el && isInlineDisplay(el)) {
+    el = el.parentElement;
+  }
+  return el;
+};
+
+// Whether the range starts at the first character of its paragraph's inline
+// content (leading collapsed whitespace does not count: it never reaches the
+// paragraph's laid-out text, so the selection still maps to offset 0).
+export const isRangeStartAtBlockStart = (range: Range): boolean => {
+  const block = getBlockAncestor(range.startContainer);
+  if (!block) return false;
+  const probe = (block.ownerDocument ?? document).createRange();
+  try {
+    probe.selectNodeContents(block);
+    probe.setEnd(range.startContainer, range.startOffset);
+  } catch {
+    return false;
+  }
+  return probe.toString().trim().length === 0;
+};
+
+// A generated hyphen is the only way a single text node produces two adjacent
+// boxes on the same line where the trailing one is sub-glyph narrow.
+const HYPHEN_MAX_EM = 0.6;
+const HYPHEN_ADJACENCY_PX = 2;
+
+interface RectLike {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export const hasTrailingHyphenRectPattern = (
+  rects: RectLike[],
+  emPx: number,
+  vertical: boolean,
+): boolean => {
+  for (let i = 1; i < rects.length; i++) {
+    const a = rects[i - 1]!;
+    const b = rects[i]!;
+    const sameLine = vertical
+      ? Math.abs(a.left - b.left) < Math.max(a.width, b.width) / 2
+      : Math.abs(a.top - b.top) < Math.max(a.height, b.height) / 2;
+    if (!sameLine) continue;
+    const adjacent = vertical
+      ? Math.abs(b.top - (a.top + a.height)) <= HYPHEN_ADJACENCY_PX
+      : Math.abs(b.left - (a.left + a.width)) <= HYPHEN_ADJACENCY_PX ||
+        Math.abs(a.left - (b.left + b.width)) <= HYPHEN_ADJACENCY_PX;
+    if (!adjacent) continue;
+    const size = vertical ? b.height : b.width;
+    if (size > 0 && size <= emPx * HYPHEN_MAX_EM) return true;
+  }
+  return false;
+};
+
+const blockHasGeneratedHyphens = (block: Element, vertical: boolean): boolean => {
+  const doc = block.ownerDocument;
+  const win = doc.defaultView;
+  if (!win) return false;
+  const emPx = parseFloat(win.getComputedStyle(block).fontSize) || 16;
+  const walker = doc.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  const probe = doc.createRange();
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (!(node as Text).data.trim()) continue;
+    let rects: RectLike[];
+    try {
+      probe.selectNodeContents(node);
+      rects = Array.from(probe.getClientRects());
+    } catch {
+      return false;
+    }
+    if (hasTrailingHyphenRectPattern(rects, emPx, vertical)) return true;
+  }
+  return false;
+};
+
+// Whether painting this selection hits the Blink generated-hyphen bounds bug:
+// it starts at the first character of a paragraph that renders hyphens.
+export const isHyphenHandleBugProneRange = (range: Range, vertical = false): boolean => {
+  const block = getBlockAncestor(range.startContainer);
+  if (!block) return false;
+  const win = block.ownerDocument.defaultView;
+  if (!win) return false;
+  const style = win.getComputedStyle(block);
+  const mayHyphenate =
+    style.getPropertyValue('hyphens') === 'auto' ||
+    style.getPropertyValue('-webkit-hyphens') === 'auto' ||
+    (block.textContent ?? '').includes('­');
+  if (!mayHyphenate) return false;
+  if (!isRangeStartAtBlockStart(range)) return false;
+  return blockHasGeneratedHyphens(block, vertical);
+};
+
+// Window-coordinate position of the selection focus (caret), or null. The book
+// content lives in a (possibly very wide, multi-column) iframe translated by the
+// pagination offset, so map the caret from iframe space via the iframe element's
+// on-screen rect. Used by the corner auto page-turn (the caret is an engagement
+// signal) and the keyboard turn-on-cross check.
+export const focusCaretWindowPos = (doc: Document, sel: Selection): Point | null => {
+  const focusNode = sel.focusNode;
+  const win = doc.defaultView;
+  if (!focusNode || !win) return null;
+  let rect: DOMRect;
+  try {
+    const range = doc.createRange();
+    const offset =
+      focusNode.nodeType === Node.TEXT_NODE
+        ? Math.min(sel.focusOffset, (focusNode.textContent ?? '').length)
+        : sel.focusOffset;
+    range.setStart(focusNode, offset);
+    range.collapse(true);
+    rect = range.getBoundingClientRect();
+  } catch {
+    return null;
+  }
+  // An unmeasurable range (e.g. focus on an empty element) collapses to 0,0,0,0.
+  if (rect.top === 0 && rect.bottom === 0 && rect.left === 0 && rect.right === 0) return null;
+  const feRect = win.frameElement?.getBoundingClientRect();
+  return {
+    x: (rect.left + rect.right) / 2 + (feRect?.left ?? 0),
+    y: (rect.top + rect.bottom) / 2 + (feRect?.top ?? 0),
+  };
+};
+
+// Rebuild a selection range between a known-good anchor and the caret at a
+// point (in `doc` viewport coordinates) — used to restore the range a
+// corrupted long-press drag was meant to produce: anchored at the
+// gesture-initial position, ending where the finger was. Snapped to word
+// boundaries like the native word-granularity drag.
+export const rangeFromAnchorToPoint = (
+  doc: Document,
+  anchorNode: Node,
+  anchorOffset: number,
+  x: number,
+  y: number,
+): Range | null => {
+  let pointNode: Node | null = null;
+  let pointOffset = 0;
+  if (doc.caretPositionFromPoint) {
+    const pos = doc.caretPositionFromPoint(x, y);
+    if (pos) {
+      pointNode = pos.offsetNode;
+      pointOffset = pos.offset;
+    }
+  } else if (doc.caretRangeFromPoint) {
+    const range = doc.caretRangeFromPoint(x, y);
+    if (range) {
+      pointNode = range.startContainer;
+      pointOffset = range.startOffset;
+    }
+  }
+  if (!pointNode) return null;
+  const range = doc.createRange();
+  try {
+    const anchorPoint = doc.createRange();
+    anchorPoint.setStart(anchorNode, anchorOffset);
+    anchorPoint.collapse(true);
+    const caretPoint = doc.createRange();
+    caretPoint.setStart(pointNode, pointOffset);
+    caretPoint.collapse(true);
+    if (anchorPoint.compareBoundaryPoints(Range.START_TO_START, caretPoint) <= 0) {
+      range.setStart(anchorNode, anchorOffset);
+      range.setEnd(pointNode, pointOffset);
+    } else {
+      range.setStart(pointNode, pointOffset);
+      range.setEnd(anchorNode, anchorOffset);
+    }
+  } catch {
+    return null;
+  }
+  if (range.collapsed) return null;
+  snapRangeToWords(range);
+  return range;
+};
+
+// During a long-press drag the bug re-anchors the selection base at the last
+// hyphen, dropping the word the gesture started on. If the gesture-initial
+// anchor fell out of the final range, rebuild [initial anchor → focus] (the
+// focus is where the finger actually went) and snap it to word boundaries
+// like the native word-granularity drag would.
+export const repairJumpedSelectionRange = (
+  sel: Selection,
+  initialNode: Node,
+  initialOffset: number,
+): Range | null => {
+  if (sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  const { focusNode, focusOffset } = sel;
+  const doc = range.startContainer.ownerDocument;
+  if (!focusNode || !doc) return null;
+  try {
+    if (range.comparePoint(initialNode, initialOffset) === 0) return null;
+  } catch {
+    return null;
+  }
+  const repaired = doc.createRange();
+  try {
+    const initialPoint = doc.createRange();
+    initialPoint.setStart(initialNode, initialOffset);
+    initialPoint.collapse(true);
+    const focusPoint = doc.createRange();
+    focusPoint.setStart(focusNode, focusOffset);
+    focusPoint.collapse(true);
+    if (initialPoint.compareBoundaryPoints(Range.START_TO_START, focusPoint) <= 0) {
+      repaired.setStart(initialNode, initialOffset);
+      repaired.setEnd(focusNode, focusOffset);
+    } else {
+      repaired.setStart(focusNode, focusOffset);
+      repaired.setEnd(initialNode, initialOffset);
+    }
+  } catch {
+    return null;
+  }
+  if (repaired.collapsed) return null;
+  snapRangeToWords(repaired);
+  return repaired;
+};
+
 export const getTextFromRange = (range: Range, rejectTags: string[] = []): string => {
   const clonedRange = range.cloneRange();
   const fragment = clonedRange.cloneContents();
@@ -407,18 +789,20 @@ export const getTextFromRange = (range: Range, rejectTags: string[] = []): strin
     },
   );
 
-  // pdf.js inserts <br role="presentation"> between text spans at line endings
-  // (see TextLayer#appendText in pdfjs). Without this, multi-line PDF
-  // selections collapse adjacent line-final and line-initial words into a
-  // single token (e.g. "lastfirst"). Treat <br> as a newline, matching how
-  // Selection.toString() handles line breaks in the browser.
+  // Preserve explicit line and paragraph boundaries. Without this, adjacent
+  // PDF lines or HTML paragraphs collapse into a single token.
   let text = '';
   let node: Node | null;
   while ((node = walker.nextNode())) {
     if (node.nodeType === Node.TEXT_NODE) {
       text += (node as Text).nodeValue ?? '';
-    } else if ((node as Element).tagName === 'BR') {
-      text += '\n';
+    } else {
+      const tagName = (node as Element).tagName.toLowerCase();
+      if (tagName === 'p' && text && !text.endsWith('\n')) {
+        text += '\n';
+      } else if (tagName === 'br') {
+        text += '\n';
+      }
     }
   }
 

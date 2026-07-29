@@ -1,12 +1,12 @@
 import clsx from 'clsx';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PiUserCircle, PiUserCircleCheck, PiGear } from 'react-icons/pi';
 import { PiSun, PiMoon } from 'react-icons/pi';
 import { TbSunMoon } from 'react-icons/tb';
 import { MdCloudSync, MdOutlineNoAccounts } from 'react-icons/md';
-
 import { invoke, PermissionState } from '@tauri-apps/api/core';
+
 import { isTauriAppPlatform, isWebAppPlatform } from '@/services/environment';
 import { DOWNLOAD_MYBOOKS_URL } from '@/services/constants';
 import { setBackupDialogVisible } from '@/app/library/components/BackupWindow';
@@ -24,6 +24,11 @@ import { setAboutDialogVisible } from '@/components/AboutWindow';
 import { setMigrateDataDirDialogVisible } from '@/app/library/components/MigrateDataWindow';
 import { requestStoragePermission } from '@/utils/permission';
 import { saveSysSettings } from '@/helpers/settings';
+import {
+  getBiometricStatus,
+  getBiometryLabelKey,
+  isBiometricSupported,
+} from '@/services/biometric';
 import { selectDirectory } from '@/utils/bridge';
 import UserAvatar from '@/components/UserAvatar';
 import MenuItem from '@/components/MenuItem';
@@ -47,6 +52,7 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
   const { themeMode, setThemeMode } = useThemeStore();
   const { settings, setSettingsDialogOpen } = useSettingsStore();
   const [isAutoCheckUpdates, setIsAutoCheckUpdates] = useState(settings.autoCheckUpdates);
+  const [isAutoUpload, setIsAutoUpload] = useState(settings.autoUpload);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(settings.alwaysOnTop);
   const [isAlwaysShowStatusBar, setIsAlwaysShowStatusBar] = useState(settings.alwaysShowStatusBar);
   const [isOpenLastBooks, setIsOpenLastBooks] = useState(settings.openLastBooks);
@@ -61,6 +67,26 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
 
   const { openDialog: openAppLockDialogInStore } = useAppLockStore();
   const isPinEnabled = !!settings.pinCodeEnabled;
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometryLabelKey, setBiometryLabelKey] = useState('');
+  const showBiometricToggle = !!appService?.isMobileApp && isPinEnabled && biometricAvailable;
+
+  useEffect(() => {
+    if (!isBiometricSupported(appService) || !isPinEnabled) return;
+    let cancelled = false;
+    void getBiometricStatus().then(({ available, biometryType }) => {
+      if (cancelled) return;
+      setBiometricAvailable(available);
+      setBiometryLabelKey(getBiometryLabelKey(biometryType));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [appService, isPinEnabled]);
+
+  const toggleBiometricUnlock = () => {
+    void saveSysSettings(envConfig, 'biometricUnlockEnabled', !settings.biometricUnlockEnabled);
+  };
 
   const openAppLockDialog = (mode: AppLockDialogMode) => {
     openAppLockDialogInStore(mode);
@@ -111,22 +137,28 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
     setIsDropdownOpen?.(false);
   };
 
+  const toggleAutoCheckUpdates = () => {
+    const newValue = !settings.autoCheckUpdates;
+    saveSysSettings(envConfig, 'autoCheckUpdates', newValue);
+    setIsAutoCheckUpdates(newValue);
+  };
+
   const toggleAlwaysShowStatusBar = () => {
     const newValue = !settings.alwaysShowStatusBar;
     saveSysSettings(envConfig, 'alwaysShowStatusBar', newValue);
     setIsAlwaysShowStatusBar(newValue);
   };
 
+  const toggleAutoUploadBooks = () => {
+    const newValue = !settings.autoUpload;
+    saveSysSettings(envConfig, 'autoUpload', newValue);
+    setIsAutoUpload(newValue);
+  };
+
   const toggleAutoImportBooksOnOpen = () => {
     const newValue = !settings.autoImportBooksOnOpen;
     saveSysSettings(envConfig, 'autoImportBooksOnOpen', newValue);
     setIsAutoImportBooksOnOpen(newValue);
-  };
-
-  const toggleAutoCheckUpdates = () => {
-    const newValue = !settings.autoCheckUpdates;
-    saveSysSettings(envConfig, 'autoCheckUpdates', newValue);
-    setIsAutoCheckUpdates(newValue);
   };
 
   const toggleOpenLastBooks = () => {
@@ -254,6 +286,14 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
         <MenuItem label={_('Sign In')} Icon={PiUserCircle} onClick={handleUserLogin}></MenuItem>
       )}
 
+      {user && (
+        <MenuItem
+          label={_('Auto Upload Books to Cloud')}
+          toggled={isAutoUpload}
+          onClick={toggleAutoUploadBooks}
+        />
+      )}
+
       {isTauriAppPlatform() && !appService?.isMobile && (
         <MenuItem
           label={_('Auto Import on File Open')}
@@ -320,7 +360,11 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
           {!isPinEnabled && (
             <MenuItem
               label={_('Set PIN…')}
-              tooltip={_('Require a 4-digit PIN to open MyReader')}
+              tooltip={
+                appService?.isMobileApp
+                  ? _('Require a PIN (and biometrics, if available) to open MyReader')
+                  : _('Require a 4-digit PIN to open MyReader')
+              }
               onClick={() => openAppLockDialog('set')}
             />
           )}
@@ -329,6 +373,13 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
           )}
           {isPinEnabled && (
             <MenuItem label={_('Disable PIN…')} onClick={() => openAppLockDialog('disable')} />
+          )}
+          {showBiometricToggle && (
+            <MenuItem
+              label={_('Unlock with {{biometry}}', { biometry: _(biometryLabelKey) })}
+              toggled={!!settings.biometricUnlockEnabled}
+              onClick={toggleBiometricUnlock}
+            />
           )}
           {appService?.isAndroidApp && appService?.distChannel !== 'playstore' && (
             <MenuItem

@@ -1,0 +1,119 @@
+# readest v0.11.20 合并记录
+
+- 分支: `merge/readest-v0.11.20`（基于 `v0.3.0`，未合并回 `v0.3.0`，等待人工审阅）
+- 合并范围: 仅 `app/` 目录（对应上游 `apps/readest-app`），忽略 `apps/readest.koplugin`、`apps/readest-calibre-plugin`
+- 上游基线: fork 初始版本对应的 readest commit `176b950c929bde6aa8bef380531c2661ef1d3ecd`
+- 上游目标: readest release tag `v0.11.20`（`1df1505fc5033fc949463c9908f2d53bd0fbdfa6`）
+
+## 合并方法
+
+fork 与 readest 上游没有共同的 git 历史（fork 是单次 squash 而来），因此通过以下方式构造了一个"合成共同祖先"以便三方合并能够正确按路径重映射：
+
+1. 分别在 base commit 与 release tag 上抽取 `apps/readest-app` 子树为 tree 对象。
+2. 用 `git commit-tree` 构造两个合成 commit：`BASE_COMMIT`（对应基线树）与 `REL_COMMIT`（对应 v0.11.20 树，父提交为 `BASE_COMMIT`）。
+3. 用 `git replace --graft` 让 fork 的根提交"看起来"是从 `BASE_COMMIT` 派生的（非破坏性的 replace ref 覆盖，随时可撤销）。
+4. 在 `merge/readest-v0.11.20` 分支上执行 `git merge -X subtree=app <REL_COMMIT>`，Git 能正确按路径把 `apps/readest-app/*` 与 `app/*` 对应起来做三方合并。
+
+合并完成、确认无误后，已执行：
+- `git replace -d <graft-id>` 撤销 graft
+- 移除 `readest_upstream` remote（如果人工审阅时需要重新对比，可重新执行 `git remote add readest_upstream <path-to-readest-repo>`）
+
+## 核心决策：放弃整个新的多provider云同步框架
+
+readest v0.11.20 引入了一套全新的"Readest Cloud"多 provider 同步框架（`services/sync/file/*`、`services/sync/providers/*`、`cloudSyncProvider.ts`、`providerRegistry.ts`、`useFileSync.ts` 等），支持 WebDAV / Google Drive / S3 / OneDrive 多种存储后端，并与 Readest 自己的付费订阅（UserPlan/quota）体系深度耦合。
+
+**用户明确决定：不需要 Google Drive / S3 / OneDrive 支持，且放弃整个新框架，保留 fork 现有的 WebDAV + MyBooks 同步实现。**
+
+据此删除/替换的内容：
+- 整个 `services/sync/**` 新框架目录（provider registry、gdrive/onedrive/s3/webdav provider 实现、file-sync 引擎、cloudSyncActivation、fleetDetection 等）及其配套测试
+- `hooks/useFileSync.ts`、`app/library/hooks/useLibraryFileSync.ts`、`useBookTransferActions.ts`
+- `components/settings/integrations/S3Form.tsx` / `GoogleDriveForm.tsx` / `OneDriveForm.tsx` / `FileSyncForm.tsx`
+- `store/fileSyncStore.ts`
+- `app/gdrive-callback/`、`app/onedrive-callback/`
+- `utils/access.ts` 中整个 UserPlan/订阅分级门禁（`CLOUD_SYNC_PLANS`、`TTS_CACHE_PLANS` 等）
+- `types/settings.ts` 中的 `GoogleDriveSettings`/`S3Settings`/`OneDriveSettings`/`ReadestCloudSettings`
+- `package.json` 中的 `@aws-sdk/client-s3`、`@aws-sdk/s3-request-presigner`、`@googleapis/androidpublisher`、`app-store-server-api`、`google-auth-library`、`stripe` 依赖
+- `IntegrationsPanel.tsx`、`WebDAVForm.tsx`：整体回退为 fork v0.3.0 原版（合并版本因塞入 provider 选择/付费门禁膨胀到近 800 行）
+
+保留并按 fork 命名规范（`myreader://`、`web.mybooks.top`、`MYBOOKS_*`）重新接线的部分：
+- fork 自有的 `services/webdav/WebDAVClient.ts` / `WebDAVPaths.ts` / `WebDAVSync.ts` / `webdavConnectSettings.ts`
+- `components/settings/integrations/WebDAVBrowsePane.tsx` 新增的搜索/排序功能（`webdavBrowseUtils.ts`），已改接回 fork 真实的 WebDAV API（而非新框架的 provider 抽象）
+- WebDAV "sort by date created" 需要的 PROPFIND `<D:creationdate/>` 支持（`WebDAVClient.ts`）
+
+## 决策二：放弃整个 book-sharing（对外分享书籍）功能
+
+readest v0.11.20 新增了完整的书籍分享链接功能：`/s/{token}` 落地页、`/api/share/**` 后端路由（create/list/[token]/cover/download/import/revoke/og.png）、`useOpenShareLink.ts`（处理传入的分享深链）、`libs/share.ts`/`libs/shareServer.ts`/`libs/shareImport.ts`、`middleware.ts` 中针对 `/s` 路径的 COEP 特例。
+
+**用户明确决定：不需要该功能，`useOpenShareLink.ts` 与 `utils/share.ts` 及其依赖的后端整体去掉。**
+
+已删除：
+- `app/s/page.tsx`、`app/s/ShareLanding.tsx`
+- `app/api/share/**`（全部路由）
+- `hooks/useOpenShareLink.ts`
+- `libs/share.ts`、`libs/shareServer.ts`、`libs/shareImport.ts`
+- `utils/object.ts` 中的 R2 签名 URL / put / delete / copy / exists 函数（仅服务于已删除的分享后端，无其他调用方）
+- `utils/r2.ts`（同上，无其他调用方）
+- `services/constants.ts` 中的 `SHARE_BASE_URL`/`SHARE_EXPIRATION_DAYS`/`SHARE_MAX_PER_USER`/`SHARE_TOKEN_LENGTH`/`SHARE_PRESIGN_TTL_SECONDS`/`SHARE_CFI_MAX_LENGTH`
+- `middleware.ts` 中 `/s` 路径的 COEP `credentialless` 特例，统一恢复为 `require-corp`
+- 对应测试文件（`shareImport.test.ts`、`shareServer.test.ts`、`share-download-route.test.ts`，以及 `useClipUrlIngress.test.ts`/`BookDetailView.test.tsx` 中的分享相关用例）
+
+**保留**：`utils/share.ts` 中的 `canShareText`/`shareSelectedText`（OS 级文本分享，供 Annotator.tsx/ImageViewer.tsx 等使用，与"分享书籍链接"功能无关，用户确认保留）。
+
+`BookDetailView.tsx`/`BookDetailModal.tsx` 中恢复的 "More Actions" 下拉菜单（见下文"决策三"）已相应去掉 "Share Book" 菜单项，仅保留 "Search on Goodreads" 与 "Export Book"。
+
+## 决策三：BookDetailView/BookDetailModal 的下拉菜单一度被错误精简，已恢复
+
+合并早期误判 upstream 新增的 "More Actions" 汉堡菜单（Goodreads/Share/Export）与 "Delete Book Options" 下拉菜单（云端+本地/仅云端/仅本地三选项，purge 折叠进删除确认框的开关）为"调用方用不到的冗余功能"，将其还原为 fork 原来的扁平按钮行。
+
+后续跑测试时发现 upstream 为这两个菜单新增了完整的测试覆盖（`BookDetailView.test.tsx`/`BookDetailModal.test.tsx`），证明这是有意为之的真实功能，遂与用户确认后完整恢复：
+- `BookDetailView.tsx`：恢复 `Dropdown`/`MenuItem` 构建的 "Delete Book Options"（三个选项 + fork 特有的 `deleteDisabled` 整体禁用，用于云端书架非管理员场景）与 "More Actions"（Goodreads + Export，已去掉 Share）
+- `BookDetailModal.tsx`：恢复 `activeDeleteAction`/`deleteConfigs` 状态机，新增 `handleBookDeleteCloudBackup`/`handleBookDeleteLocalCopy`/`handleBookPurge` prop，改用 `DeleteConfirmAlert`（`showPurgeToggle`）替代原来的 `Alert`
+- `app/library/page.tsx`：`BookDetailModal` 调用处接入新的三个删除 handler（本地库场景下主删除变为 `handleBookDelete('both')`，云端库场景仍只提供单一的 admin remote-delete）
+
+## 合并过程中发现并修复的真实 bug（非本次合并引入，但被新增测试暴露）
+
+- **`BookshelfItem.tsx` 多处悬空引用**：`useLibraryStore` 未导入、`openBook`/`router` 未定义（应来自 `useOpenBook` hook 但从未接入）、`getCurrentWindow`/`LogicalPosition`/`MenuItemOptions` 未导入。修复后正确接入 `app/library/hooks/useOpenBook.ts`（共享的"打开书籍"流程），并同步给该 hook 的 `makeBookAvailable` 补上了 `isCloudBook()` 判断（云端书架浏览到的纯元数据书籍从未在本设备 `uploadedAt`，之前会被误判为"无需下载"）。
+- **`BookDetailView.tsx` 的 `MdSaveAlt` 未导入**：连带被上面的下拉菜单恢复工作一并解决（Export 按钮移入 "More Actions" 菜单后不再需要这个图标）。
+- **`NodeAppService` 共享可变单例导致的资源泄漏**：`nodeFileSystem` 是模块级单例对象，`customRootDir` 分支会直接对其 `resolvePath` 赋值，导致后续任何新建的 `NodeAppService`（哪�es without customRootDir）都会继承上一个实例残留的自定义解析器。已改为在构造函数中 `{ ...nodeFileSystem }` 克隆。
+- **`utils/txt.ts`（TXT→EPUB 内存转换，全新 upstream 功能）中 zip.js 跨 realm Blob 导致静默失败**：`@zip.js/zip.js` 的 `BlobWriter` 在某些环境下返回的 `Blob` 实例与调用方全局 `Blob`/`File` 不是同一个 realm，导致 `new File([blob], name)` 内部的 `instanceof` 检测失败，转而把 blob 字符串化为字面量 `"[object Blob]"`（而非真实的 zip 字节），产出一个 13 字节的假 epub 文件，解析结果 `book` 恒为 `null`。已改为统一先 `await blob.arrayBuffer()` 再构造 `File`，测试文件 `series-metadata.test.ts` 中同构的测试 helper 也做了同样修复。
+- **`deeplink.ts` 的 scheme/host 不一致**：`buildAnnotationAppUrl` 生成 `myreader://` 链接，但 `parseAnnotationDeepLink`/`parseBookDeepLink` 却在检查 `readest:`/`mybooks:`，二者从未匹配过——这是 fork 早于本次合并就存在的 bug。已统一为 `myreader:`/`web.mybooks.top`。
+- **`useClipUrlIngress.ts` 的 stale host 判断**：注释与 host 检查引用的仍是 `web.readest.com`，实际应为 `web.mybooks.top`（判断逻辑本身通过 `parseShareDeepLink`/`parseAnnotationDeepLink` 是对的，只是文案和测试 fixture 是旧的）。
+
+## 已更新的 git submodule 引用（对齐 readest v0.11.20 的 `.gitmodules` 记录）
+
+| submodule | 旧 commit | 新 commit | 备注 |
+|---|---|---|---|
+| `packages/foliate-js` | `df623dbe` | `dd71f2be` | |
+| `packages/qcms` | `bddcbcb3` | `fc23a407` | |
+| `packages/tauri` | `e74631e0` | `6914700e` | 跟踪 `readest_upstream/readest` 分支 |
+| `packages/js-mdict` | `d01bf62a` | 不变 | 已经是最新 |
+| `packages/simplecc-wasm` | `5e5b56f5` | 不变 | 已经是最新 |
+| `packages/tauri-plugins` | `4350ca65` | 不变 | 已经是最新 |
+| `app/.claude/skills/gstack` | `11de390b` | `22f8c7f4` | readest 上游引用的版本号（v1.46）低于 fork 之前的（v1.58），按用户要求仍以 readest 引用为准 |
+| `app/src-tauri/plugins/tauri-plugin-turso` | `21125f07` | `204dc954` | |
+| `app/src-tauri/plugins/tauri-plugin-webview-upgrade` | `c7c04abe` | 不变 | 已经是最新 |
+
+用户确认：各 submodule fork 本身没有做任何自定义修改，可以直接对齐 readest 最新引用，无需从 PoxenStudio 自己的 fork 同步。
+
+## 未集成、留待后续单独评估的内容
+
+- **`packages/tao`**（新增 submodule，commit `da30a3b9`）与 **`packages/swift-rs`**（readest 已将其从 submodule 转为直接 tracked 目录）：这两个是 Tauri 底层窗口/macOS FFI 依赖的版本调整，需要改动根目录的 Cargo workspace 配置和构建脚本才能正确接入，超出本次"仅合并 app/ 目录"的范围，故未处理。如果后续要跟进 Tauri 相关的行为变化，需要单独评估这两个包的改动。
+- **Nightly 更新通道**（`resolveNightlyUpdate`/`getNightlyPlatformKey`/`UpdaterWindow.tsx` 中的 `ResolvedNightlyUpdate` 相关 UI）：代码已合并但处于休眠状态——需要 mybooks.top 侧真正的 nightly 托管基础设施和一把真实的签名私钥才能启用，目前只是占位。
+- **`UpdaterWindow.test.tsx` 的"自动翻译 changelog"功能（2 个测试用例失败）**：upstream 新增了 changelog 自动翻译 + "Show original" 切换，但相关的翻译触发逻辑似乎未完整接入 `UpdaterWindow.tsx`（或者接入了但触发条件与测试 fixture 不一致），需要单独排查。用户已要求"先忽略测试未通过的问题，稍后处理"，故本次未深入。
+- **`TTSPlayerSheet.test.tsx` 的 "offline audio 未登录/免费用户" 2 个测试用例失败**：与本次合并中对 `utils/access.ts`（已删除 UserPlan 订阅门禁）的改动有关，`isDownloadPremium`/登录跳转逻辑需要重新核对，未深入排查。
+- **3 个因缺少本地生成的移动端脚手架而失败的测试（非本次合并引入的回归，属于环境限制）**：
+  - `android/android-auto-declarations.test.ts`、`android/themed-icon.test.ts`：依赖 `src-tauri/gen/android/...` 下由 `tauri android init` 生成的文件（本沙盒环境未执行过该命令）
+  - `ios/share-extension-activation-rule.test.ts`：依赖 `src-tauri/gen/apple/project.yml`（同上，需要 `tauri ios init`）
+
+  这三个测试文件本身没有问题，只是运行环境缺少移动端构建产物，实机/CI 环境跑过 `tauri android/ios init` 后应该会自动通过。
+
+## 提交前的清理
+
+- 已撤销临时的 `git replace --graft`（`git replace -d`）
+- 已移除 `readest_upstream` remote
+- 已确认全仓库范围内没有残留的 `<<<<<<<`/`=======`/`>>>>>>>` 冲突标记
+- 已删除合并过程中产生的临时文件 `.merge_base_commit.tmp`/`.merge_rel_commit.tmp`
+
+## 测试现状（合并完成时）
+
+`pnpm test` 全量跑：6374 通过 / 5 失败（1 个 skip），失败项均已在上文"未集成、留待后续单独评估的内容"中列出并给出排查方向，均非合并阻塞项。

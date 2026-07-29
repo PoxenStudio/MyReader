@@ -43,11 +43,17 @@ import {
   compareSortValues,
   resolveEffectivePrimarySort,
   resolveEffectiveSecondarySort,
+  selectRecentShelfBooks,
+  withReadingStatus,
+  withTimeRemainingLast,
 } from '../utils/libraryUtils';
 import { eventDispatcher } from '@/utils/event';
+import { getLocalBookFilename } from '@/utils/book';
+import { MIMETYPES, EXTS } from '@/libs/document';
+import { makeSafeFilename } from '@/utils/misc';
 
 import { useSpatialNavigation } from '../hooks/useSpatialNavigation';
-import Alert from '@/components/Alert';
+import DeleteConfirmAlert from '@/components/DeleteConfirmAlert';
 import Spinner from '@/components/Spinner';
 import ModalPortal from '@/components/ModalPortal';
 import BookshelfItem, { generateBookshelfItems } from './BookshelfItem';
@@ -56,6 +62,8 @@ import SendToDeviceDialog from './SendToDeviceDialog';
 import { useAuth } from '@/context/AuthContext';
 import GroupingModal from './GroupingModal';
 import SetStatusAlert from './SetStatusAlert';
+import RecentShelf, { RECENT_SHELF_BOOK_COUNT } from './RecentShelf';
+import { useOpenBook } from '../hooks/useOpenBook';
 
 interface BookshelfProps {
   libraryBooks: Book[];
@@ -70,6 +78,7 @@ interface BookshelfProps {
   ) => Promise<boolean>;
   handleBookUpload: (book: Book, syncBooks?: boolean) => Promise<boolean>;
   handleBookDelete: (book: Book) => Promise<boolean>;
+  handleBookPurge: (book: Book) => Promise<boolean>;
   handleSetSelectMode: (selectMode: boolean) => void;
   handleShowDetailsBook: (book: Book) => void;
   handleLibraryNavigation: (targetGroup: string) => void;
@@ -91,7 +100,26 @@ interface BookshelfProps {
 type BookshelfListContext = {
   autoColumns: boolean;
   fixedColumns: number;
+  /**
+   * The recently-read shelf, rendered in the Virtuoso header so it scrolls with
+   * the shelf content (not sticky). `null` when hidden. Passed through context
+   * (rather than recreating the Header component) so Virtuoso keeps the Header
+   * identity stable and does not reset its scroller on every Bookshelf render.
+   */
+  recentShelfHeader: React.ReactNode;
+  /**
+   * Height (px) of the trailing Footer spacer. Defaults to the baseline
+   * breathing room, but grows to clear the fixed select-mode action bar so the
+   * last book can scroll above it instead of hiding behind it (#5175).
+   */
+  footerHeight: number;
 };
+
+const DEFAULT_FOOTER_HEIGHT = 34;
+
+const BookshelfFooter = ({ context }: { context?: BookshelfListContext }) => (
+  <div style={{ height: context?.footerHeight ?? DEFAULT_FOOTER_HEIGHT }} />
+);
 
 const BOOKSHELF_GRID_CLASSES =
   'bookshelf-items transform-wrapper grid gap-x-4 px-4 sm:gap-x-0 sm:px-2 ' +
@@ -120,22 +148,29 @@ const BookshelfGridList: GridComponents<BookshelfListContext>['List'] = React.fo
 ));
 BookshelfGridList.displayName = 'BookshelfGridList';
 
-const BookshelfLinearList: Components['List'] = React.forwardRef<HTMLDivElement, ListProps>(
-  ({ children, style, 'data-testid': testId }, ref) => (
-    <div ref={ref} data-testid={testId} className={BOOKSHELF_LIST_CLASSES} style={style}>
-      {children}
-    </div>
-  ),
-);
+const BookshelfLinearList: Components<unknown, BookshelfListContext>['List'] = React.forwardRef<
+  HTMLDivElement,
+  ListProps
+>(({ children, style, 'data-testid': testId }, ref) => (
+  <div ref={ref} data-testid={testId} className={BOOKSHELF_LIST_CLASSES} style={style}>
+    {children}
+  </div>
+));
 BookshelfLinearList.displayName = 'BookshelfLinearList';
+
+const BookshelfHeader = ({ context }: { context?: BookshelfListContext }) => (
+  <>{context?.recentShelfHeader ?? null}</>
+);
 
 const GRID_VIRTUOSO_COMPONENTS: GridComponents<BookshelfListContext> = {
   List: BookshelfGridList,
-  Footer: () => <div style={{ height: 34 }} />,
+  Header: BookshelfHeader,
+  Footer: BookshelfFooter,
 };
-const LIST_VIRTUOSO_COMPONENTS: Components = {
+const LIST_VIRTUOSO_COMPONENTS: Components<unknown, BookshelfListContext> = {
   List: BookshelfLinearList,
-  Footer: () => <div style={{ height: 34 }} />,
+  Header: BookshelfHeader,
+  Footer: BookshelfFooter,
 };
 
 const Bookshelf: React.FC<BookshelfProps> = ({
@@ -148,6 +183,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   handleBookUpload,
   handleBookDownload,
   handleBookDelete,
+  handleBookPurge,
   handleSetSelectMode,
   handleShowDetailsBook,
   handleLibraryNavigation,
@@ -179,10 +215,13 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     settings.librarySortBy2 ?? 'none',
   );
   const sortBy2 = resolveEffectiveSecondarySort(sortBy2Raw, groupBy);
+  const showTimeRemaining =
+    sortBy === LibrarySortByType.TimeRemaining || sortBy2 === LibrarySortByType.TimeRemaining;
   const coverFit = searchParams?.get('cover') || settings.libraryCoverFit;
 
   const [loading, setLoading] = useState(false);
   const [showSelectModeActions, setShowSelectModeActions] = useState(false);
+  const [selectModeActionsHeight, setSelectModeActionsHeight] = useState(0);
   const [bookIdsToDelete, setBookIdsToDelete] = useState<string[]>([]);
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
   const [showStatusAlert, setShowStatusAlert] = useState(false);
@@ -281,12 +320,9 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     // Sort books within each group
     // For series groups, series index is always ascending; sort direction applies to fallback only
     const sortAscending = sortOrder === 'asc';
-    const withinGroupSorter = createWithinGroupSorter(
-      groupBy,
+    const withinGroupSorter = withTimeRemainingLast<Book>(
       sortBy,
-      uiLanguage,
-      sortAscending,
-      sortBy2,
+      createWithinGroupSorter(groupBy, sortBy, uiLanguage, sortAscending, sortBy2),
     );
     groups.forEach((group) => {
       group.books.sort(withinGroupSorter);
@@ -301,39 +337,43 @@ const Bookshelf: React.FC<BookshelfProps> = ({
       // to avoid the merge sort below overriding the within-group sort order
       return ungroupedBooks;
     } else {
-      ungroupedBooks.sort((a, b) => bookSorter(a, b) * sortOrderMultiplier);
+      ungroupedBooks.sort(
+        withTimeRemainingLast<Book>(sortBy, (a, b) => bookSorter(a, b) * sortOrderMultiplier),
+      );
     }
 
     // Merge groups and ungrouped books, then sort them together
     const allItems: (Book | BooksGroup)[] = [...groups, ...ungroupedBooks];
     const groupSorter = createGroupSorter(sortBy, uiLanguage, groupBy);
 
-    allItems.sort((a, b) => {
-      const isAGroup = 'books' in a;
-      const isBGroup = 'books' in b;
+    allItems.sort(
+      withTimeRemainingLast<Book | BooksGroup>(sortBy, (a, b) => {
+        const isAGroup = 'books' in a;
+        const isBGroup = 'books' in b;
 
-      // If both are groups, use group sorter
-      if (isAGroup && isBGroup) {
-        return groupSorter(a, b) * sortOrderMultiplier;
-      }
+        // If both are groups, use group sorter
+        if (isAGroup && isBGroup) {
+          return groupSorter(a, b) * sortOrderMultiplier;
+        }
 
-      // If both are books, use book sorter
-      if (!isAGroup && !isBGroup) {
-        return bookSorter(a, b) * sortOrderMultiplier;
-      }
+        // If both are books, use book sorter
+        if (!isAGroup && !isBGroup) {
+          return bookSorter(a, b) * sortOrderMultiplier;
+        }
 
-      // For series/author groups: compare sort values to interleave properly
-      if (isAGroup && !isBGroup) {
-        const groupValue = getGroupSortValue(a, sortBy, groupBy);
-        const bookValue = getBookSortValue(b, sortBy);
-        return compareSortValues(groupValue, bookValue, uiLanguage) * sortOrderMultiplier;
-      } else if (!isAGroup && isBGroup) {
-        const bookValue = getBookSortValue(a, sortBy);
-        const groupValue = getGroupSortValue(b, sortBy, groupBy);
-        return compareSortValues(bookValue, groupValue, uiLanguage) * sortOrderMultiplier;
-      }
-      return 0;
-    });
+        // For series/author groups: compare sort values to interleave properly
+        if (isAGroup && !isBGroup) {
+          const groupValue = getGroupSortValue(a, sortBy, groupBy);
+          const bookValue = getBookSortValue(b, sortBy);
+          return compareSortValues(groupValue, bookValue, uiLanguage) * sortOrderMultiplier;
+        } else if (!isAGroup && isBGroup) {
+          const bookValue = getBookSortValue(a, sortBy);
+          const groupValue = getGroupSortValue(b, sortBy, groupBy);
+          return compareSortValues(bookValue, groupValue, uiLanguage) * sortOrderMultiplier;
+        }
+        return 0;
+      }),
+    );
 
     return allItems;
   }, [sortOrder, sortBy, sortBy2, groupBy, groupId, uiLanguage, currentBookshelfItems]);
@@ -397,8 +437,12 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     return filteredBooks.filter((book) => wanted.has(book.hash) && !book.deletedAt);
   };
 
-  const confirmDelete = async () => {
+  const confirmDelete = async (purgeData: boolean) => {
     const books = getBooksToDelete();
+    // Toggling "purge all reading data" on the confirmation routes the whole
+    // batch through the purge path, which also wipes each book's reading-data
+    // sidecars (config/nav) instead of leaving the metadata folder behind.
+    const deleteBook = purgeData ? handleBookPurge : handleBookDelete;
     const concurrency = 20;
 
     for (let i = 0; i < books.length; i += concurrency) {
@@ -407,7 +451,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
         break;
       }
       const batch = books.slice(i, i + concurrency);
-      await Promise.all(batch.map((book) => handleBookDelete(book)));
+      await Promise.all(batch.map((book) => deleteBook(book)));
     }
     setSelectedBooks([]);
     setShowDeleteAlert(false);
@@ -457,6 +501,113 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     setShowStatusAlert(true);
   };
 
+  const sendSelectedBook = async () => {
+    // "Send" hands the actual book file (epub/pdf/...) to the OS share
+    // sheet (UIActivityViewController on iOS, Intent.ACTION_SEND on
+    // Android, NSSharingServicePicker on macOS) so the user can fire it
+    // off to Mail / Messages / WeChat / AirDrop / etc. Backed by
+    // tauri-plugin-sharekit via appService.saveFile({ share: true }).
+    //
+    // This is intentionally distinct from the per-item "Share Book"
+    // context menu, which uploads the book to the readest backend and
+    // generates a public link. "Send" is offline file egress; "Share
+    // Book" is remote collaboration. They share zero infra.
+    //
+    // Linux has no system share sheet, and Windows is intentionally
+    // disabled (issue #4343 — WebView2's native share UI blocks the main
+    // thread waiting on cancel/complete callbacks that may never fire).
+    // We hide the button entirely on those platforms (see sendEnabled
+    // in the JSX) so users don't see an action that can't be honoured.
+
+    const ids = getSelectedBooks();
+    if (ids.length !== 1) return;
+    const book = filteredBooks.find((b) => b.hash === ids[0]);
+    if (!book || !appService) return;
+
+    // Anchor the macOS share popover to the selected book's cover, not
+    // to the Send button — the user just tapped/clicked the book, so
+    // their visual focus is on the cover. We look the cover up via the
+    // `data-book-hash` attribute that BookshelfItem stamps on its root
+    // div. The rect must be captured *before* setShowSelectModeActions
+    // tears the popup down (the bookshelf itself stays mounted, but we
+    // still want to grab it up front to keep the share-call site
+    // simple). preferredEdge='bottom' maps to NSMinYEdge, which in
+    // WKWebView's flipped coord space is the rect's top edge, so the
+    // popover renders above the cover (and only auto-flips below when
+    // there's no room above). On iOS / Android the share sheet is modal
+    // and ignores sharePosition, so this work is harmless there.
+    const coverEl = document.querySelector<HTMLElement>(`[data-book-hash="${book.hash}"]`);
+    const anchorRect = coverEl?.getBoundingClientRect();
+    const sharePosition = anchorRect
+      ? {
+          x: anchorRect.left + anchorRect.width / 2,
+          y: anchorRect.top + anchorRect.height / 2,
+          preferredEdge: 'bottom' as const,
+        }
+      : undefined;
+
+    setShowSelectModeActions(false);
+    handleSetSelectMode(false);
+
+    try {
+      // Resolve the file the same way bookContent.resolveBookContentSource
+      // does, but via the public AppService surface (the underlying `fs`
+      // is protected): managed copy under Books/<hash>/ first, then the
+      // device-local in-place import path. Cloud-only books or remote
+      // URL books can't be shared without first downloading them.
+      const managedPath = getLocalBookFilename(book);
+      let path: string;
+      let base: 'Books' | 'None';
+      if (await appService.exists(managedPath, 'Books')) {
+        path = managedPath;
+        base = 'Books';
+      } else if (book.filePath && (await appService.exists(book.filePath, 'None'))) {
+        path = book.filePath;
+        base = 'None';
+      } else {
+        eventDispatcher.dispatch('toast', {
+          type: 'warning',
+          message: _('Book file is not available locally'),
+          timeout: 2500,
+        });
+        return;
+      }
+      const ext = EXTS[book.format] ?? 'bin';
+      const mimeType = MIMETYPES[book.format]?.[0] ?? 'application/octet-stream';
+      const baseName = makeSafeFilename(book.sourceTitle || book.title || book.hash);
+      const shareFilename = `${baseName}.${ext}`;
+
+      // Native (Tauri) only — the Share button is hidden on web because
+      // browsers can't surface a real "share to <app>" sheet for an
+      // arbitrary local file. Hand the already-on-disk file straight to
+      // the OS share sheet via `options.filePath`. Without it,
+      // saveFile() falls back to writing a temp copy under
+      // BaseDirectory.Temp, which on Android resolves to
+      // /data/local/tmp/ — the app sandbox has no write permission
+      // there and the call fails with EACCES ("failed to open file at
+      // path: /data/local/tmp/...epub Permission denied (os error
+      // 13)"). Passing the absolute path also avoids re-buffering the
+      // whole epub/pdf into memory just to have saveFile write it back
+      // to disk.
+      const absoluteFilePath = await appService.resolveFilePath(path, base);
+      // `null` content: there's nothing to write — the file already lives at
+      // `filePath`, which the native share path reads directly.
+      await appService.saveFile(shareFilename, null, {
+        share: true,
+        mimeType,
+        filePath: absoluteFilePath,
+        sharePosition,
+      });
+    } catch (err) {
+      console.error('Failed to send book file:', err);
+      eventDispatcher.dispatch('toast', {
+        type: 'error',
+        message: _('Failed to send book'),
+        timeout: 2500,
+      });
+    }
+  };
+
   const updateBooksStatus = async (status: ReadingStatus | undefined) => {
     const selectedIds = getSelectedBooks();
     const booksToUpdate: Book[] = [];
@@ -464,7 +615,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     for (const id of selectedIds) {
       const book = filteredBooks.find((b) => b.hash === id);
       if (book) {
-        booksToUpdate.push({ ...book, readingStatus: status, updatedAt: Date.now() });
+        booksToUpdate.push(withReadingStatus(book, status));
       }
     }
 
@@ -479,7 +630,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
 
   const handleUpdateReadingStatus = useCallback(
     async (book: Book, status: ReadingStatus | undefined) => {
-      const updatedBook = { ...book, readingStatus: status, updatedAt: Date.now() };
+      const updatedBook = withReadingStatus(book, status);
       await updateBooks(envConfig, [updatedBook]);
     },
     [envConfig, updateBooks],
@@ -595,12 +746,82 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     : 0;
   const listTotalCount = hasItems ? sortedBookshelfItems.length + (showLoadMoreTile ? 1 : 0) : 0;
 
+  // Recently-read shelf: shares the availability-aware open path with per-item
+  // taps so cloud-only synced books download before opening. `openBook` is
+  // memoized inside the hook, keeping `openRecentBook` -> `recentShelfHeader`
+  // -> `listContext` identities stable (no full-grid re-render churn).
+  const { openBook } = useOpenBook({ setLoading, handleBookDownload });
+  const openRecentBook = useCallback((book: Book) => openBook(book), [openBook]);
+
+  // Flat recency slice of the whole library, independent of the main shelf's
+  // sort/grouping. Built from `libraryBooks` (not the sorted/filtered items).
+  const recentBooks = useMemo(
+    () => selectRecentShelfBooks(libraryBooks, RECENT_SHELF_BOOK_COUNT),
+    [libraryBooks],
+  );
+
+  // A top-level quick-resume strip: hidden while searching, inside a group,
+  // selecting, or when nothing has been read yet.
+  const showRecentShelf =
+    settings.libraryRecentShelfEnabled &&
+    !queryTerm &&
+    !groupId &&
+    !isSelectMode &&
+    recentBooks.length > 0;
+
+  const recentShelfHeader = useMemo(
+    () =>
+      showRecentShelf ? (
+        <RecentShelf
+          books={recentBooks}
+          coverFit={coverFit as LibraryCoverFitType}
+          autoColumns={settings.libraryAutoColumns}
+          fixedColumns={settings.libraryColumns}
+          onOpenBook={openRecentBook}
+          handleBookUpload={handleBookUpload}
+          handleBookDownload={handleBookDownload}
+          showBookDetailsModal={handleShowDetailsBook}
+          showTimeRemaining={showTimeRemaining}
+        />
+      ) : null,
+    [
+      showRecentShelf,
+      recentBooks,
+      coverFit,
+      settings.libraryAutoColumns,
+      settings.libraryColumns,
+      openRecentBook,
+      handleBookUpload,
+      handleBookDownload,
+      handleShowDetailsBook,
+      showTimeRemaining,
+    ],
+  );
+
+  // Reserve enough trailing space for the fixed select-mode action bar so the
+  // last book scrolls clear of it (#5175). `selectModeActionsHeight` already
+  // includes the bar's safe-area padding and is 0 whenever the bar is hidden,
+  // so the baseline breathing room applies at all other times.
+  const footerHeight =
+    selectModeActionsHeight > 0
+      ? selectModeActionsHeight + DEFAULT_FOOTER_HEIGHT
+      : DEFAULT_FOOTER_HEIGHT;
+
   const listContext = useMemo<BookshelfListContext>(
     () => ({
       autoColumns: settings.libraryAutoColumns,
       fixedColumns: settings.libraryColumns,
+      recentShelfHeader,
+      showTimeRemaining,
+      footerHeight,
     }),
-    [settings.libraryAutoColumns, settings.libraryColumns],
+    [
+      settings.libraryAutoColumns,
+      settings.libraryColumns,
+      recentShelfHeader,
+      showTimeRemaining,
+      footerHeight,
+    ],
   );
 
   const renderBookshelfItem = useCallback(
@@ -676,6 +897,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
           showCloudIcon={showCloudIcon}
           showAllFormatsBadge={showAllFormatsBadge}
           isCloudLibrary={isCloudLibrary}
+          showTimeRemaining={showTimeRemaining}
         />
       );
     },
@@ -705,6 +927,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
       onLoadMoreCloudBooks,
       libraryBooks,
       cloudBooksTotal,
+      showTimeRemaining,
     ],
   );
 
@@ -744,10 +967,11 @@ const Bookshelf: React.FC<BookshelfProps> = ({
           />
         )}
         {hasItems && !isGridMode && (
-          <Virtuoso
+          <Virtuoso<unknown, BookshelfListContext>
             overscan={200}
             totalCount={listTotalCount}
             components={LIST_VIRTUOSO_COMPONENTS}
+            context={listContext}
             computeItemKey={computeItemKey}
             itemContent={renderBookshelfItem}
             scrollerRef={handleScrollerRef}
@@ -763,12 +987,25 @@ const Bookshelf: React.FC<BookshelfProps> = ({
         <SelectModeActions
           selectedBooks={selectedBooks}
           safeAreaBottom={safeAreaInsets?.bottom || 0}
+          onHeightChange={setSelectModeActionsHeight}
+          // Native send targets: iOS, Android, macOS — route through
+          // tauri-plugin-sharekit (UIActivityViewController /
+          // Intent.ACTION_SEND / NSSharingServicePicker). Linux has no
+          // system share sheet, Windows WebView2 share UI is disabled
+          // upstream (issue #4343 — deadlocks the main thread), and web
+          // browsers don't expose a real "send file to <app>" sheet, so
+          // the button is hidden on those platforms.
+          sendEnabled={
+            !!appService &&
+            (appService.isIOSApp || appService.isAndroidApp || appService.isMacOSApp)
+          }
           onOpen={openSelectedBooks}
           onGroup={groupSelectedBooks}
           onDetails={openBookDetails}
           onUpload={uploadSelectedBooks}
           canUpload={canUploadSelectedBooks}
           onStatus={showStatusSelection}
+          onSend={sendSelectedBook}
           onDelete={deleteSelectedBooks}
           onCancel={() => handleSetSelectMode(false)}
         />
@@ -791,18 +1028,21 @@ const Bookshelf: React.FC<BookshelfProps> = ({
         </ModalPortal>
       )}
       {showDeleteAlert && (
-        <Alert
-          title={_('Confirm Deletion')}
-          message={_('Are you sure to delete {{count}} selected book(s)?', {
-            count: getBooksToDelete().length,
-          })}
-          onCancel={() => {
-            abortDeletionRef.current = true;
-            setShowDeleteAlert(false);
-            setShowSelectModeActions(true);
-          }}
-          onConfirm={confirmDelete}
-        />
+        <ModalPortal>
+          <DeleteConfirmAlert
+            title={_('Confirm Deletion')}
+            message={_('Are you sure to delete {{count}} selected book(s)?', {
+              count: getBooksToDelete().length,
+            })}
+            showPurgeToggle
+            onCancel={() => {
+              abortDeletionRef.current = true;
+              setShowDeleteAlert(false);
+              setShowSelectModeActions(true);
+            }}
+            onConfirm={confirmDelete}
+          />
+        </ModalPortal>
       )}
       {showStatusAlert && (
         <SetStatusAlert

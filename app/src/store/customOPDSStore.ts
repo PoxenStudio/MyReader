@@ -7,7 +7,7 @@ import { useSettingsStore } from './settingsStore';
  * Simple synchronous hash for a URL string, used as the stable
  * cross-device contentId for OPDS catalogs.
  */
-const computeOpdsCatalogContentId = (url: string): string => {
+export const computeOpdsCatalogContentId = (url: string): string => {
   let hash = 5381;
   for (let i = 0; i < url.length; i++) {
     hash = ((hash << 5) + hash + url.charCodeAt(i)) | 0;
@@ -56,8 +56,9 @@ interface OPDSStoreState {
 
   /**
    * Add (or revive) a catalog. Computes `contentId` from URL if absent.
-   * Re-import of a previously soft-deleted entry mints a reincarnation
-   * token so the server-side tombstone gets replaced rather than stuck.
+   * Always attaches a reincarnation token (minted when absent, existing
+   * one preserved) so the upsert replaces any server-side tombstone with
+   * a fresh row instead of losing to it under remove-wins.
    */
   addCatalog(catalog: Omit<OPDSCatalog, 'contentId'> & { contentId?: string }): OPDSCatalog;
   /**
@@ -99,10 +100,18 @@ export const useCustomOPDSStore = create<OPDSStoreState>((set, get) => ({
   addCatalog: (input) => {
     const contentId = input.contentId ?? computeOpdsCatalogContentId(input.url);
     const existing = get().catalogs.find((c) => c.contentId === contentId);
+    // Under CRDT remove-wins a plain upsert can't revive a server-side
+    // tombstone, so a re-added catalog silently vanishes on the next
+    // pull (issue #5180, same class as fonts/textures #4410). We can't
+    // see the server's tombstone from here, and — unlike fonts/textures —
+    // saveCustomOPDSCatalogs strips local tombstones at persistence, so
+    // after an app restart `existing` is usually absent even when the
+    // server row is dead. Always carry a reincarnation token on add so
+    // the upsert beats any server tombstone; the token is inert when the
+    // row is alive. Preserve an existing token to avoid churning a new
+    // one on every add.
     const reincarnation =
-      existing?.deletedAt && !input.reincarnation
-        ? Math.random().toString(36).slice(2)
-        : input.reincarnation;
+      input.reincarnation ?? existing?.reincarnation ?? Math.random().toString(36).slice(2);
     const catalog: OPDSCatalog = {
       ...input,
       contentId,

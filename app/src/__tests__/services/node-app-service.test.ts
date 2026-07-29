@@ -85,7 +85,7 @@ describe('NodeAppService', () => {
     const settingsPrefix = await defaultService.resolveFilePath('', 'Settings');
     expect(settingsPrefix).toBeTruthy();
     expect(path.isAbsolute(settingsPrefix)).toBe(true);
-    expect(settingsPrefix.toLowerCase()).toContain('readest');
+    expect(settingsPrefix.toLowerCase()).toContain('myreader');
   });
 
   fsTests(() => service);

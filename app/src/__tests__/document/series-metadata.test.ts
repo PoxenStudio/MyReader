@@ -46,7 +46,13 @@ const makeCbzFixture = async ({
     await writer.add(comicInfoPath, new TextReader(comicInfo));
   }
   const blob = await writer.close();
-  return new File([blob], 'page-count.cbz', { type: 'application/vnd.comicbook+zip' });
+  // zip.js's BlobWriter can hand back a Blob from a different realm than the
+  // test environment's global Blob/File, which fails File's internal
+  // instanceof-style check and silently stringifies to "[object Blob]"
+  // instead of the zip bytes. Route through arrayBuffer() first.
+  return new File([await blob.arrayBuffer()], 'page-count.cbz', {
+    type: 'application/vnd.comicbook+zip',
+  });
 };
 
 describe('Calibre series metadata', () => {
@@ -74,6 +80,25 @@ describe('Calibre series metadata', () => {
 
     it('preserves the title', () => {
       expect(book.metadata.title).toBe('PDF Metadata');
+    });
+  });
+
+  describe('FB2 (title-info sequence)', () => {
+    let book: BookDoc;
+
+    beforeAll(async () => {
+      book = await loadFixture('sample-metadata.fb2', 'application/x-fictionbook+xml', 'FB2');
+    });
+
+    it('extracts series name and position from the sequence element', () => {
+      const series = getSeries(book);
+      expect(series).toBeTruthy();
+      expect(series!.name).toBe('Metadata Series');
+      expect(series!.position).toBe('3');
+    });
+
+    it('preserves the title', () => {
+      expect(book.metadata.title).toBe('FB2 Metadata');
     });
   });
 

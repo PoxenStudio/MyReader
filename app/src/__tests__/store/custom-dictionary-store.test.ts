@@ -1,20 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('@/services/sync/replicaPublish', () => ({
-  publishReplicaDelete: vi.fn(),
-  publishReplicaUpsert: vi.fn(),
-}));
-
-import { useCustomDictionaryStore, findDictionaryByContentId } from '@/store/customDictionaryStore';
-import { enableReplicaAutoPersist } from '@/services/sync/replicaPersist';
+import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
 import { BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
-import { publishReplicaUpsert } from '@/services/sync/replicaPublish';
 import { useSettingsStore } from '@/store/settingsStore';
 import type { EnvConfigType } from '@/services/environment';
-import type { ImportedDictionary } from '@/services/dictionaries/types';
 
 const ZERO = (s: string) => s.startsWith('web:builtin:');
-const mockPublishReplicaUpsert = vi.mocked(publishReplicaUpsert);
 
 describe('customDictionaryStore — web search CRUD', () => {
   beforeEach(() => {
@@ -210,232 +201,6 @@ describe('customDictionaryStore — web search CRUD', () => {
     // Unknown id: silent no-op.
     expect(() => updateDictionary('mdict:nope', { name: 'X' })).not.toThrow();
   });
-
-  describe('replica auto-persist', () => {
-    const baseDict = (overrides: Partial<ImportedDictionary> = {}): ImportedDictionary => ({
-      id: 'remote-bundle-1',
-      contentId: 'content-hash-1',
-      kind: 'mdict',
-      name: 'Remote Webster',
-      bundleDir: 'remote-bundle-1',
-      files: { mdx: 'webster.mdx' },
-      addedAt: 1,
-      unavailable: true,
-      ...overrides,
-    });
-
-    const setupSpyEnv = () => {
-      // saveCustomDictionaries calls setSettings + saveSettings on the
-      // settings store. Spy both to assert the chain fires.
-      const setSettings = vi.spyOn(useSettingsStore.getState(), 'setSettings');
-      const saveSettings = vi
-        .spyOn(useSettingsStore.getState(), 'saveSettings')
-        .mockResolvedValue(undefined);
-      const fakeEnv = { name: 'test-env' } as unknown as EnvConfigType;
-      enableReplicaAutoPersist(fakeEnv);
-      return { setSettings, saveSettings, fakeEnv };
-    };
-
-    it('applyRemoteDictionary persists state via saveCustomDictionaries when env is registered', async () => {
-      const { setSettings, saveSettings, fakeEnv } = setupSpyEnv();
-      useCustomDictionaryStore.getState().applyRemoteDictionary(baseDict());
-
-      // setSettings runs synchronously inside saveCustomDictionaries; the
-      // microtask queue flush makes the fire-and-forget save observable.
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(setSettings).toHaveBeenCalled();
-      expect(saveSettings).toHaveBeenCalledWith(fakeEnv, expect.any(Object));
-      const persisted = setSettings.mock.calls.at(-1)![0];
-      expect(persisted.customDictionaries?.some((d) => d.id === 'remote-bundle-1')).toBe(true);
-    });
-
-    it('softDeleteByContentId persists state via saveCustomDictionaries when env is registered', async () => {
-      const { saveSettings } = setupSpyEnv();
-      // Seed an alive dict to be tombstoned.
-      useCustomDictionaryStore.getState().applyRemoteDictionary(baseDict());
-      saveSettings.mockClear();
-
-      useCustomDictionaryStore.getState().softDeleteByContentId('content-hash-1');
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(saveSettings).toHaveBeenCalledOnce();
-    });
-
-    it('softDeleteByContentId scrubs stale providerOrder/providerEnabled when local dict is already deletedAt', async () => {
-      // Reproduces the field-asymmetry bug from real-world data: a remote
-      // tombstone arrives, but our local dict is already soft-deleted from
-      // a prior session. Without this fix the function bails before
-      // touching providerOrder/providerEnabled, leaving stale entries
-      // that get republished with a fresh HLC and overwrite the cleaned
-      // server state.
-      setupSpyEnv();
-      useCustomDictionaryStore.setState({
-        dictionaries: [
-          {
-            id: 'imp1',
-            contentId: 'content-imp1',
-            kind: 'mdict',
-            name: 'Stale',
-            bundleDir: 'imp1',
-            files: { mdx: 'imp1.mdx' },
-            addedAt: 1,
-            deletedAt: 12345,
-          },
-        ],
-        settings: {
-          providerOrder: ['builtin:wikipedia', 'imp1'],
-          providerEnabled: { 'builtin:wikipedia': true, imp1: true },
-          webSearches: [],
-        },
-      });
-
-      useCustomDictionaryStore.getState().softDeleteByContentId('content-imp1');
-      await Promise.resolve();
-      await Promise.resolve();
-
-      const after = useCustomDictionaryStore.getState().settings;
-      expect(after.providerOrder).toEqual(['builtin:wikipedia']);
-      expect('imp1' in after.providerEnabled).toBe(false);
-    });
-
-    it('softDeleteByContentId scrubs providerOrder/providerEnabled even when no local dict exists', async () => {
-      // Real-world bug from Device B fresh-install: settings replica
-      // pulled providerOrder/providerEnabled with a contentId, but the
-      // dict replica row for that contentId arrived as tombstoned. The
-      // local dict was never created, yet the providerOrder slot must
-      // still be cleaned — otherwise the UI renders a "skipped" gap
-      // above the builtins (the slot exists but lookup in `dictionaries`
-      // misses), and the orphan-rescue would re-pin it back.
-      setupSpyEnv();
-      useCustomDictionaryStore.setState({
-        dictionaries: [],
-        settings: {
-          providerOrder: ['phantom-imp', 'builtin:wikipedia', 'builtin:wiktionary'],
-          providerEnabled: {
-            'phantom-imp': true,
-            'builtin:wikipedia': true,
-            'builtin:wiktionary': true,
-          },
-          webSearches: [],
-        },
-      });
-
-      // Pull-side soft-delete using the contentId (== replica_id == dict.id
-      // for sync-era dicts) — no matching local row.
-      useCustomDictionaryStore.getState().softDeleteByContentId('phantom-imp');
-      await Promise.resolve();
-      await Promise.resolve();
-
-      const after = useCustomDictionaryStore.getState().settings;
-      expect(after.providerOrder).toEqual(['builtin:wikipedia', 'builtin:wiktionary']);
-      expect('phantom-imp' in after.providerEnabled).toBe(false);
-    });
-
-    it('does not persist when env has not been registered', async () => {
-      // Wipe the registry by re-enabling with null-equivalent. We expose
-      // enableReplicaAutoPersist with a nullable arg for test isolation.
-      enableReplicaAutoPersist(null);
-      const setSettings = vi.spyOn(useSettingsStore.getState(), 'setSettings');
-      const saveSettings = vi
-        .spyOn(useSettingsStore.getState(), 'saveSettings')
-        .mockResolvedValue(undefined);
-
-      useCustomDictionaryStore.getState().applyRemoteDictionary(baseDict());
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(setSettings).not.toHaveBeenCalled();
-      expect(saveSettings).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('findDictionaryByContentId', () => {
-    it('returns the in-memory dict when present', () => {
-      useCustomDictionaryStore.getState().applyRemoteDictionary({
-        id: 'in-mem-1',
-        contentId: 'hash-1',
-        kind: 'mdict',
-        name: 'In Memory',
-        bundleDir: 'in-mem-1',
-        files: { mdx: 'm.mdx' },
-        addedAt: 1,
-      });
-      const found = findDictionaryByContentId('hash-1');
-      expect(found?.id).toBe('in-mem-1');
-    });
-
-    it('falls back to settings.customDictionaries when in-memory store has no match', () => {
-      // Simulate fresh-boot state: in-memory store empty, but persisted
-      // settings (loaded from disk) carries the dict.
-      useSettingsStore.setState({
-        settings: {
-          customDictionaries: [
-            {
-              id: 'persisted-1',
-              contentId: 'hash-2',
-              kind: 'mdict',
-              name: 'Persisted',
-              bundleDir: 'persisted-1',
-              files: { mdx: 'p.mdx' },
-              addedAt: 1,
-            },
-          ],
-        } as never,
-      });
-      const found = findDictionaryByContentId('hash-2');
-      expect(found?.id).toBe('persisted-1');
-    });
-
-    it('returns undefined when neither store has it', () => {
-      useSettingsStore.setState({ settings: {} as never });
-      expect(findDictionaryByContentId('hash-nope')).toBeUndefined();
-    });
-
-    it('skips tombstoned persisted entries', () => {
-      useSettingsStore.setState({
-        settings: {
-          customDictionaries: [
-            {
-              id: 'tombstoned-1',
-              contentId: 'hash-3',
-              kind: 'mdict',
-              name: 'Tombstoned',
-              bundleDir: 'tombstoned-1',
-              files: { mdx: 'p.mdx' },
-              addedAt: 1,
-              deletedAt: 100,
-            },
-          ],
-        } as never,
-      });
-      expect(findDictionaryByContentId('hash-3')).toBeUndefined();
-    });
-  });
-
-  it('updateDictionary preserves reincarnation when publishing a renamed dictionary', () => {
-    const { addDictionary, updateDictionary } = useCustomDictionaryStore.getState();
-    addDictionary({
-      id: 'mdict:abc',
-      contentId: 'content-abc',
-      kind: 'mdict',
-      name: 'Old title',
-      bundleDir: 'abc',
-      files: { mdx: 'abc.mdx' },
-      addedAt: 1,
-      reincarnation: 'epoch-1',
-    });
-
-    mockPublishReplicaUpsert.mockClear();
-    updateDictionary('mdict:abc', { name: 'New title' });
-
-    expect(mockPublishReplicaUpsert).toHaveBeenCalledOnce();
-    // Args: (kind, record, contentId, reincarnation?)
-    const call = mockPublishReplicaUpsert.mock.calls[0]!;
-    expect(call[0]).toBe('dictionary');
-    expect(call[1]).toMatchObject({ name: 'New title', reincarnation: 'epoch-1' });
-    expect(call[2]).toBe('content-abc');
-    expect(call[3]).toBe('epoch-1');
-  });
 });
 
 describe('customDictionaryStore — saveCustomDictionaries reference identity (PR 6)', () => {
@@ -479,52 +244,6 @@ describe('customDictionaryStore — saveCustomDictionaries reference identity (P
     expect(after).not.toBe(before);
     // …and the new reference reflects the reorder.
     expect(after.dictionarySettings.providerOrder).toEqual(['b', 'a']);
-  });
-});
-
-describe('customDictionaryStore — applyRemoteDictionarySettings (PR 6)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    useCustomDictionaryStore.setState({
-      dictionaries: [],
-      settings: {
-        providerOrder: ['local-x'],
-        providerEnabled: { 'local-x': true },
-        defaultProviderId: 'local-x',
-        webSearches: [],
-      },
-    });
-  });
-
-  it('overlays the remote dictionarySettings patch onto the in-memory mirror', () => {
-    const { applyRemoteDictionarySettings } = useCustomDictionaryStore.getState();
-    applyRemoteDictionarySettings({
-      providerOrder: ['remote-y'],
-      providerEnabled: { 'remote-y': true },
-      webSearches: [{ id: 'web:remote-y', name: 'Y', urlTemplate: 'https://y/?q=%WORD%' }],
-    });
-    const after = useCustomDictionaryStore.getState().settings;
-    expect(after.providerOrder).toEqual(['remote-y']);
-    expect(after.providerEnabled).toEqual({ 'remote-y': true });
-    expect(after.webSearches).toEqual([
-      { id: 'web:remote-y', name: 'Y', urlTemplate: 'https://y/?q=%WORD%' },
-    ]);
-  });
-
-  it('preserves defaultProviderId (per-device, not in remote patch)', () => {
-    const { applyRemoteDictionarySettings } = useCustomDictionaryStore.getState();
-    applyRemoteDictionarySettings({
-      providerOrder: ['remote-y'],
-      providerEnabled: { 'remote-y': true },
-    });
-    const after = useCustomDictionaryStore.getState().settings;
-    expect(after.defaultProviderId).toBe('local-x');
-  });
-
-  it('does NOT call publishReplicaUpsert (this is a pull, not a local edit)', () => {
-    const { applyRemoteDictionarySettings } = useCustomDictionaryStore.getState();
-    applyRemoteDictionarySettings({ providerOrder: ['remote-y'] });
-    expect(mockPublishReplicaUpsert).not.toHaveBeenCalled();
   });
 });
 
@@ -652,6 +371,7 @@ describe('customDictionaryStore — loadCustomDictionaries reconciliation', () =
       'web:builtin:google',
       'web:builtin:urban',
       'web:builtin:merriam-webster',
+      'web:builtin:goodreads',
     ]);
   });
 
@@ -692,5 +412,70 @@ describe('customDictionaryStore — loadCustomDictionaries reconciliation', () =
     const after = useCustomDictionaryStore.getState().settings;
     expect(after.providerOrder.includes('imp-tombstoned')).toBe(false);
     expect('imp-tombstoned' in after.providerEnabled).toBe(false);
+  });
+});
+
+describe('customDictionaryStore — fontScale (dictionary popup font size, #4443)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useCustomDictionaryStore.setState({
+      dictionaries: [],
+      settings: {
+        providerOrder: ['local-x'],
+        providerEnabled: { 'local-x': true },
+        webSearches: [],
+      },
+    });
+  });
+
+  it('setFontScale updates the in-memory setting', () => {
+    const { setFontScale } = useCustomDictionaryStore.getState();
+    setFontScale(1.3);
+    expect(useCustomDictionaryStore.getState().settings.fontScale).toBe(1.3);
+  });
+
+  it('loadCustomDictionaries defaults fontScale to 1 when the persisted settings omit it', async () => {
+    type SettingsState = ReturnType<typeof useSettingsStore.getState>;
+    useSettingsStore.setState({
+      settings: {
+        customDictionaries: [],
+        dictionarySettings: {
+          providerOrder: ['builtin:wikipedia'],
+          providerEnabled: { 'builtin:wikipedia': true },
+          webSearches: [],
+        },
+      } as unknown as SettingsState['settings'],
+    } as unknown as SettingsState);
+
+    const fakeAppService = { exists: vi.fn().mockResolvedValue(false) };
+    const fakeEnv = {
+      getAppService: () => Promise.resolve(fakeAppService),
+    } as unknown as EnvConfigType;
+
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    expect(useCustomDictionaryStore.getState().settings.fontScale).toBe(1);
+  });
+
+  it('loadCustomDictionaries preserves a persisted fontScale', async () => {
+    type SettingsState = ReturnType<typeof useSettingsStore.getState>;
+    useSettingsStore.setState({
+      settings: {
+        customDictionaries: [],
+        dictionarySettings: {
+          providerOrder: ['builtin:wikipedia'],
+          providerEnabled: { 'builtin:wikipedia': true },
+          webSearches: [],
+          fontScale: 1.15,
+        },
+      } as unknown as SettingsState['settings'],
+    } as unknown as SettingsState);
+
+    const fakeAppService = { exists: vi.fn().mockResolvedValue(false) };
+    const fakeEnv = {
+      getAppService: () => Promise.resolve(fakeAppService),
+    } as unknown as EnvConfigType;
+
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    expect(useCustomDictionaryStore.getState().settings.fontScale).toBe(1.15);
   });
 });

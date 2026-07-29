@@ -15,6 +15,7 @@ import { useNotebookStore } from '@/store/notebookStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useDeviceControlStore } from '@/store/deviceStore';
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
+import { useScreenBrightness } from '@/app/reader/hooks/useScreenBrightness';
 import { useTransferQueue } from '@/hooks/useTransferQueue';
 import { eventDispatcher } from '@/utils/event';
 import { interceptWindowOpen } from '@/utils/open';
@@ -59,7 +60,6 @@ const Reader: React.FC<{ ids?: string }> = ({ ids }) => {
   const { sideBarBookKey } = useSidebarStore();
   const { hoveredBookKey } = useReaderStore();
   const { showSystemUI, dismissSystemUI } = useThemeStore();
-  const { getScreenBrightness, setScreenBrightness } = useDeviceControlStore();
   const { acquireBackKeyInterception, releaseBackKeyInterception } = useDeviceControlStore();
   const { isSideBarVisible, isSideBarPinned } = useSidebarStore();
   const { getIsSideBarVisible, setSideBarVisible } = useSidebarStore();
@@ -69,6 +69,7 @@ const Reader: React.FC<{ ids?: string }> = ({ ids }) => {
 
   useTheme({ systemUIVisible: settings.alwaysShowStatusBar, appThemeColor: 'base-100' });
   useScreenWakeLock(settings.screenWakeLock);
+  useScreenBrightness();
   useTransferQueue(libraryLoaded, 5000);
 
   useEffect(() => {
@@ -79,27 +80,6 @@ const Reader: React.FC<{ ids?: string }> = ({ ids }) => {
     }
     initDayjs(getLocale());
   }, []);
-
-  useEffect(() => {
-    const brightness = settings.screenBrightness;
-    const autoBrightness = settings.autoScreenBrightness;
-    if (appService?.hasScreenBrightness && !autoBrightness && brightness >= 0) {
-      setScreenBrightness(brightness / 100);
-    }
-    let previousBrightness = -1;
-    if (appService?.isIOSApp) {
-      getScreenBrightness().then((b) => {
-        previousBrightness = b;
-      });
-    }
-
-    return () => {
-      if (appService?.hasScreenBrightness && !autoBrightness) {
-        setScreenBrightness(previousBrightness);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appService]);
 
   const handleKeyDown = (event: CustomEvent) => {
     if (event.detail.keyName === 'Back') {
@@ -178,7 +158,7 @@ const Reader: React.FC<{ ids?: string }> = ({ ids }) => {
       </Suspense>
     </div>
   ) : (
-    <div className={clsx('full-height', !appService?.isLinuxApp && 'bg-base-100')}></div>
+    <div className='full-height bg-base-100'></div>
   );
 };
 

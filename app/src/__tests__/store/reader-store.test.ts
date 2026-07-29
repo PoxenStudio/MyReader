@@ -41,11 +41,15 @@ vi.mock('@/utils/misc', () => ({
 
 // These are transitive imports needed by readerStore
 vi.mock('@/services/nav', () => ({ updateToc: vi.fn() }));
-vi.mock('@/utils/book', () => ({
-  formatTitle: vi.fn((t: string) => t),
-  getMetadataHash: vi.fn(() => 'hash'),
-  getPrimaryLanguage: vi.fn(() => 'en'),
-}));
+vi.mock('@/utils/book', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/book')>();
+  return {
+    ...actual,
+    formatTitle: vi.fn((t: string) => t),
+    getMetadataHash: vi.fn(() => 'hash'),
+    getPrimaryLanguage: vi.fn(() => 'en'),
+  };
+});
 vi.mock('@/utils/path', () => ({
   getBaseFilename: vi.fn((n: string) => n),
 }));
@@ -59,6 +63,13 @@ vi.mock('@/services/opds/pseStream', () => ({
   isPseStreamFileName: () => false,
   openPseStreamBook: vi.fn(),
   parsePseStreamFileName: vi.fn(),
+}));
+vi.mock('@/services/rss/feedBookUrl', () => ({
+  isFeedBookUrl: () => false,
+  parseFeedBookUrl: vi.fn(),
+}));
+vi.mock('@/services/rss/feedReader', () => ({
+  openFeedBookDoc: vi.fn(),
 }));
 
 import { useReaderStore } from '@/store/readerStore';
@@ -79,9 +90,9 @@ function seedViewState(key: string, overrides: Record<string, unknown> = {}) {
         loading: false,
         inited: false,
         error: null,
-        progress: null,
         ribbonVisible: false,
         ttsEnabled: false,
+        autoScrollEnabled: false,
         syncing: false,
         gridInsets: null,
         previewMode: false,
@@ -209,7 +220,7 @@ describe('readerStore', () => {
     });
 
     test('setViewSettings stores and getViewSettings retrieves settings', () => {
-      const key = 'bookid-0';
+      const key = 'bookid-abc1234';
       seedViewState(key, { isPrimary: false });
 
       // setViewSettings requires bookData to exist for the book id

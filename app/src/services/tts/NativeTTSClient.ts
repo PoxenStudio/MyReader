@@ -1,9 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { addPluginListener, PluginListener } from '@tauri-apps/api/core';
 import { getUserLocale } from '@/utils/misc';
+import { isSameLang } from '@/utils/lang';
 import { parseSSMLMarks } from '@/utils/ssml';
 import { stubTranslation as _ } from '@/utils/misc';
-import { TTSClient, TTSMessageEvent } from './TTSClient';
+import { TTSCapabilities, TTSClient, TTSMessageEvent } from './TTSClient';
 import { TTSGranularity, TTSMark, TTSVoice, TTSVoicesGroup } from './types';
 import { TTSUtils } from './TTSUtils';
 import { TTSController } from './TTSController';
@@ -213,7 +214,17 @@ export class NativeTTSClient implements TTSClient {
   }
 
   async stop() {
-    await invoke('plugin:native-tts|stop');
+    // Bound the native stop so teardown (controller.stop / shutdown, and thus
+    // the TTS icon turning off) can never hang if the native side is slow to
+    // resolve — e.g. iOS AVSpeechSynthesizer / audio-session teardown. See #4676.
+    try {
+      await Promise.race([
+        invoke('plugin:native-tts|stop'),
+        new Promise<void>((resolve) => setTimeout(resolve, 1500)),
+      ]);
+    } catch (error) {
+      console.warn('Native TTS stop failed:', error);
+    }
     this.#activeUtterances.clear();
   }
 
@@ -250,9 +261,10 @@ export class NativeTTSClient implements TTSClient {
   async getVoices(lang: string) {
     const locale = lang === 'en' ? getUserLocale(lang) || lang : lang;
     const voices = await this.getAllVoices();
-    const filteredVoices = voices.filter(
-      (v) => v.lang.startsWith(locale) || (lang === 'en' && ['en-US', 'en-GB'].includes(v.lang)),
-    );
+    // Match by primary language so the voice set stays the same across a book
+    // whose sections mix region variants (e.g. en-US front matter and en-GB
+    // body text); the requested locale's voices sort first. See #4033.
+    const filteredVoices = voices.filter((v) => isSameLang(v.lang, lang));
     const voiceGroups = new Map<string, TTSVoice[]>();
     filteredVoices.forEach((voice) => {
       const { name, lang } = voice;
@@ -279,7 +291,7 @@ export class NativeTTSClient implements TTSClient {
           ({
             id: groupId,
             name: TTSEngines[groupId] || groupId,
-            voices: voices.sort(TTSUtils.sortVoicesFunc),
+            voices: voices.sort(TTSUtils.sortVoicesPreferLocaleFunc(locale)),
             disabled: !this.initialized || voices.length === 0,
           }) as TTSVoicesGroup,
       )
@@ -292,6 +304,12 @@ export class NativeTTSClient implements TTSClient {
 
   setPrimaryLang(lang: string) {
     this.#primaryLang = lang;
+  }
+
+  getCapabilities(): TTSCapabilities {
+    // Direct-speak engine: the OS renders the audio, so there is no media
+    // clock, no word boundaries, and no gap or live-rate control.
+    return { wordBoundaries: false, mediaClock: false, gapControl: false, liveRateChange: false };
   }
 
   getGranularities(): TTSGranularity[] {

@@ -3,14 +3,11 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { MDX, MDD, BlobScanner } from 'js-mdict';
 
-const MDX_PATH = path.resolve(
-  __dirname,
-  '../../../../../packages/js-mdict/tests/data/mini/mini.mdx',
-);
-const MDD_PATH = path.resolve(
-  __dirname,
-  '../../../../../packages/js-mdict/tests/data/mini/mini.mdd',
-);
+// Fork flattens upstream's apps/readest-app/ to app/ (one directory level
+// shallower), so this only needs four levels up to reach the repo root's
+// packages/, not the five upstream test would use.
+const MDX_PATH = path.resolve(__dirname, '../../../../packages/js-mdict/tests/data/mini/mini.mdx');
+const MDD_PATH = path.resolve(__dirname, '../../../../packages/js-mdict/tests/data/mini/mini.mdd');
 
 describe('js-mdict resolves from readest-app', () => {
   it('exports the expected symbols', () => {

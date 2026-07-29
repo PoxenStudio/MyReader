@@ -133,6 +133,7 @@ export const CommandPaletteProvider: React.FC<CommandPaletteProviderProps> = ({ 
         toggleTelemetry,
         isDesktop,
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       _,
       openSettingsPanel,

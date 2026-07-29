@@ -2,10 +2,10 @@ import { render, cleanup, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { Book } from '@/types/book';
 
-let capturedOnContextMenu: (() => void) | null = null;
+let capturedOnContextMenu: ((e: { clientX: number; clientY: number }) => void) | null = null;
 
 vi.mock('@/hooks/useLongPress', () => ({
-  useLongPress: (opts: { onContextMenu?: () => void }) => {
+  useLongPress: (opts: { onContextMenu?: (e: { clientX: number; clientY: number }) => void }) => {
     capturedOnContextMenu = opts.onContextMenu ?? null;
     return { pressing: false, handlers: {} };
   },
@@ -66,6 +66,20 @@ vi.mock('@tauri-apps/api/menu', () => ({
   },
 }));
 
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    innerSize: async () => ({ width: 1280, height: 800 }),
+    scaleFactor: async () => 1,
+  }),
+  LogicalPosition: class {
+    readonly type = 'Logical';
+    constructor(
+      public x: number,
+      public y: number,
+    ) {}
+  },
+}));
+
 vi.mock('@tauri-apps/plugin-opener', () => ({
   revealItemInDir: vi.fn(),
 }));
@@ -119,7 +133,7 @@ describe('BookshelfItem context menu in the cloud bookshelf', () => {
     );
 
     expect(capturedOnContextMenu).not.toBeNull();
-    capturedOnContextMenu!();
+    capturedOnContextMenu!({ clientX: 0, clientY: 0 });
 
     await waitFor(() => expect(popupMock).toHaveBeenCalled());
 
@@ -155,7 +169,7 @@ describe('BookshelfItem context menu in the cloud bookshelf', () => {
     );
 
     expect(capturedOnContextMenu).not.toBeNull();
-    capturedOnContextMenu!();
+    capturedOnContextMenu!({ clientX: 0, clientY: 0 });
 
     await waitFor(() => expect(popupMock).toHaveBeenCalled());
 

@@ -1,5 +1,6 @@
 import { isOPDSCatalog } from 'foliate-js/opds.js';
-import { OPDSBaseLink } from '@/types/opds';
+import { replace as expandURITemplate, getVariables } from 'foliate-js/uri-template.js';
+import { OPDSBaseLink, OPDSCatalog } from '@/types/opds';
 import { EXTS } from '@/libs/document';
 import { fetchWithAuth } from './opdsReq';
 
@@ -26,7 +27,13 @@ export const MIME = {
   EPUB: 'application/epub+zip',
   PDF: 'application/pdf',
   OPENSEARCH: 'application/opensearchdescription+xml',
+  OPDS2: 'application/opds+json',
 };
+
+export const getSafeDOMParserMimeType = (mimeType: string): DOMParserSupportedType =>
+  mimeType.toLowerCase().includes('xml')
+    ? (MIME.XML as DOMParserSupportedType)
+    : (mimeType as DOMParserSupportedType);
 
 export const enum VALIDATION_ERROR {
   INVALID_URL = 'Invalid URL format',
@@ -82,9 +89,94 @@ export const parseMediaType = (str?: string) => {
  */
 export const looksLikeXMLContent = (text: string): boolean => text.trimStart().startsWith('<');
 
+/**
+ * Detect a DOMParser error document. Strict XML parsers (Firefox, and jsdom in
+ * tests) replace the whole document with a <parsererror> element on any
+ * well-formedness violation; Chrome is lenient and often parses on regardless.
+ */
+const hasXMLParseError = (doc: Document): boolean =>
+  doc.documentElement?.localName === 'parsererror' ||
+  doc.getElementsByTagName('parsererror').length > 0;
+
+/**
+ * Parse an OPDS/Atom XML string, tolerating "junk after the document element".
+ *
+ * Old OPDS servers (e.g. the Hungarian MEK catalog, issue #4479) emit a valid
+ * feed followed by trailing junk — a stray PHP warning, an extra tag, or text
+ * after </feed>. Chrome's XML parser ignores it, but Firefox's strict parser
+ * fails with "junk after document element" / "text data outside of root node"
+ * and replaces the whole document with a <parsererror>. Callers then see a
+ * non-feed root, treat the response as HTML, find no OPDS link, and silently
+ * navigate back.
+ *
+ * Recovery: on a parser error, re-parse the slice from the root element's start
+ * tag to its last matching end tag (dropping any leading prolog and trailing
+ * junk). If recovery still fails, the original error document is returned so
+ * callers fall through to their existing HTML/non-OPDS handling.
+ */
+export const parseOPDSXML = (text: string): Document => {
+  const doc = new DOMParser().parseFromString(text, getSafeDOMParserMimeType(MIME.XML));
+  if (!hasXMLParseError(doc)) return doc;
+
+  const rootMatch = text.match(/<([A-Za-z_][\w.:-]*)/);
+  const rootName = rootMatch?.[1];
+  if (rootMatch && rootName !== undefined) {
+    const startIdx = rootMatch.index ?? 0;
+    const closeTag = `</${rootName}>`;
+    const closeIdx = text.lastIndexOf(closeTag);
+    if (closeIdx > startIdx) {
+      const sliced = text.slice(startIdx, closeIdx + closeTag.length);
+      const retry = new DOMParser().parseFromString(sliced, getSafeDOMParserMimeType(MIME.XML));
+      if (!hasXMLParseError(retry)) return retry;
+    }
+  }
+  return doc;
+};
+
+/**
+ * Return the first OPDS-navigable href from a links array (e.g. on an OPDS 2.0
+ * JSON author or subject). Only links whose `type` is an OPDS catalog type
+ * (per foliate-js `isOPDSCatalog`, e.g. `application/opds+json`) qualify, so a
+ * non-OPDS link such as an author's external homepage is ignored. Returns
+ * undefined when no such link exists.
+ */
+export const getOPDSNavLink = (
+  links?: Array<{ href?: string; type?: string }>,
+): string | undefined => links?.find((link) => link.href && isOPDSCatalog(link.type ?? ''))?.href;
+
+/**
+ * Calibre stores commas in contributor names escaped as pipes (`Doe, John` →
+ * `Doe| John`), and Calibre-Web serves that raw form in its OPDS feeds
+ * (readest issue #5183). Restore the commas for display.
+ */
+export const formatContributorName = (name: string): string => name.replace(/\|/g, ',');
+
 export const isSearchLink = (link: OPDSBaseLink): boolean => {
   const rels = Array.isArray(link.rel) ? link.rel : [link.rel || ''];
-  return rels.includes('search') && (link.type === MIME.OPENSEARCH || link.type === MIME.ATOM);
+  if (!rels.includes('search')) return false;
+  return (
+    link.type === MIME.OPENSEARCH ||
+    link.type === MIME.ATOM ||
+    // OPDS 2.0 JSON feeds expose search as a templated link whose href is an
+    // RFC 6570 URI template (e.g. `/search{?query}`).
+    (link.type === MIME.OPDS2 && !!link.templated)
+  );
+};
+
+// Template variable names that conventionally carry a free-text search query.
+const SEARCH_TERM_VARS = ['query', 'searchTerms', 'q'];
+
+/**
+ * Expand an OPDS 2.0 search link's RFC 6570 URI template with a single free-text
+ * query term. The term is placed into the template's primary text variable
+ * (`query`, `searchTerms`, or `q`; otherwise the first variable). Returns the
+ * href unchanged when it has no template variables.
+ */
+export const expandOPDSSearchTemplate = (templateHref: string, queryTerm: string): string => {
+  const variables = Array.from(getVariables(templateHref) as Set<string>);
+  const textVar = variables.find((name) => SEARCH_TERM_VARS.includes(name)) ?? variables[0];
+  if (!textVar) return templateHref;
+  return expandURITemplate(templateHref, new Map([[textVar, queryTerm]]));
 };
 
 export const resolveURL = (url: string, relativeTo: string): string => {
@@ -146,7 +238,7 @@ export const validateOPDSURL = async (
 
     // Check if it's XML-based OPDS
     if (looksLikeXMLContent(text)) {
-      const doc = new DOMParser().parseFromString(text, MIME.XML as DOMParserSupportedType);
+      const doc = parseOPDSXML(text);
       const {
         documentElement: { localName },
       } = doc;
@@ -170,7 +262,7 @@ export const validateOPDSURL = async (
         // Check for HTML with OPDS link
         const contentType = res.headers.get('Content-Type') ?? MIME.HTML;
         const type = parseMediaType(contentType)?.mediaType ?? MIME.HTML;
-        const htmlDoc = new DOMParser().parseFromString(text, type as DOMParserSupportedType);
+        const htmlDoc = new DOMParser().parseFromString(text, getSafeDOMParserMimeType(type));
 
         if (!htmlDoc.head) {
           return {
@@ -237,6 +329,25 @@ export const validateOPDSURL = async (
       error: e instanceof Error ? e.message : VALIDATION_ERROR.NOT_OPDS,
     };
   }
+};
+
+/**
+ * Filter the built-in "popular" OPDS catalogs down to those the user hasn't
+ * already added to their personal list. Matching is by normalized URL (trim +
+ * lowercase), mirroring the store's `findByUrl` dedup so case/whitespace
+ * differences still hide a popular entry once it's been added. Disabled
+ * popular entries are always excluded. Without this an added popular catalog
+ * would keep rendering in the Popular section and look like a duplicate
+ * (issue #4782).
+ */
+export const getUnaddedPopularCatalogs = (
+  popularCatalogs: OPDSCatalog[],
+  addedCatalogs: OPDSCatalog[],
+): OPDSCatalog[] => {
+  const addedUrls = new Set(addedCatalogs.map((c) => c.url.trim().toLowerCase()));
+  return popularCatalogs.filter(
+    (catalog) => !catalog.disabled && !addedUrls.has(catalog.url.trim().toLowerCase()),
+  );
 };
 
 export const getFileExtFromPath = (pathname: string, delimiter = '/'): string => {
