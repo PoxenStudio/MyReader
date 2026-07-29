@@ -28,6 +28,22 @@
 sudo xattr -rd com.apple.quarantine MyReader-<xxxxxxxxxxx>.dmg
 ```
 
+## 书库目录及日志目录
+
+MyReader 会在应用私有数据目录下维护本地书库文件（`MyReader/Books`）和运行日志，不同系统下的具体路径如下（`<AppId>` 固定为 `com.poxenstudio.myreader`）：
+
+| 系统 | 书库目录 | 日志目录 |
+| --- | --- | --- |
+| Windows | `%APPDATA%\<AppId>\MyReader\Books` | `%LOCALAPPDATA%\<AppId>\logs` |
+| macOS | `~/Library/Application Support/<AppId>/MyReader/Books` | `~/Library/Logs/<AppId>` |
+| Linux | `~/.local/share/<AppId>/MyReader/Books`（或 `$XDG_DATA_HOME/<AppId>/MyReader/Books`） | `~/.local/share/<AppId>/logs`（或 `$XDG_DATA_HOME/<AppId>/logs`） |
+| Android | `/data/user/0/<AppId>/MyReader/Books` | `/data/user/0/<AppId>/logs` |
+| iOS | `<App 沙盒目录>/Library/Application Support/<AppId>/MyReader/Books` | `<App 沙盒目录>/Library/Application Support/<AppId>/logs` |
+
+说明：
+- Windows/macOS/Linux 桌面端可在设置中配置"自定义根目录"，配置后书库与日志目录会分别改为 `<自定义目录>/MyReader/Books` 与 `<自定义目录>/Log`。
+- Android、iOS 下书库和日志都位于应用沙盒内的私有存储，属于应用私有数据，普通文件管理器 / Files App 无法直接访问；iOS 的沙盒目录路径会随应用重新安装变化，不是固定路径。
+
 ## Development
 
 请按照以下步骤克隆并构建项目。
