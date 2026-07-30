@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import React, { useEffect, useMemo, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import {
   MdFolder,
   MdFolderOff,
@@ -32,7 +33,12 @@ import {
 } from '@/services/webdav/WebDAVClient';
 import { buildBasePath, WEBDAV_BOOKS_DIR } from '@/services/webdav/WebDAVPaths';
 import { deleteRemoteBookDir } from '@/services/webdav/WebDAVSync';
-import { WebDAVBrowseSortByType, WebDAVSettings } from '@/types/settings';
+import {
+  WebDAVBrowseSortByType,
+  WebDAVSettings,
+  WebDAVSyncLogEntry,
+  WebDAVSyncLogFailure,
+} from '@/types/settings';
 import { Book } from '@/types/book';
 import { SettingLabel } from '../primitives';
 import {
@@ -60,9 +66,20 @@ export interface WebDAVBrowsePaneProps {
    * (sort/search just stay session-local) when a caller omits it.
    */
   onUpdateSettings?: (patch: Partial<WebDAVSettings>) => void | Promise<void>;
+  /**
+   * Append a diagnostic entry to the shared WebDAV sync log so batch
+   * cleanup runs (Delete from server) are auditable alongside manual
+   * Sync now runs. Optional so the pane still renders (cleanup just
+   * isn't logged) when a caller omits it.
+   */
+  onAppendSyncLogEntry?: (entry: WebDAVSyncLogEntry) => void | Promise<void>;
 }
 
-const WebDAVBrowsePane: React.FC<WebDAVBrowsePaneProps> = ({ settings, onUpdateSettings }) => {
+const WebDAVBrowsePane: React.FC<WebDAVBrowsePaneProps> = ({
+  settings,
+  onUpdateSettings,
+  onAppendSyncLogEntry,
+}) => {
   const _ = useTranslation();
   const { envConfig } = useEnv();
   const { user } = useAuth();
@@ -219,6 +236,7 @@ const WebDAVBrowsePane: React.FC<WebDAVBrowsePaneProps> = ({ settings, onUpdateS
     );
     if (!confirmed) return;
 
+    const startedAt = Date.now();
     let succeeded = 0;
     const failed: Array<{ hash: string; title: string; reason: string }> = [];
     let authFailed = false;
@@ -269,16 +287,23 @@ const WebDAVBrowsePane: React.FC<WebDAVBrowsePaneProps> = ({ settings, onUpdateS
     // listing in lock-step with the server, and a redundant reload
     // would briefly swap in the loading spinner — visible jump.
 
+    // One source of truth for the toast and the log entry.
     let toastType: 'info' | 'warning' | 'error';
     let message: string;
+    let status: 'success' | 'partial' | 'failure';
+    let errorMessage: string | undefined;
     if (authFailed) {
       toastType = 'error';
+      status = 'failure';
       message = _('WebDAV authentication failed. Reconnect in Settings.');
+      errorMessage = message;
     } else if (failed.length === 0) {
       toastType = 'info';
+      status = 'success';
       message = _('Deleted {{n}} book(s) from server.', { n: succeeded });
     } else if (succeeded > 0) {
       toastType = 'warning';
+      status = 'partial';
       message = _(
         'Deleted {{ok}} of {{total}} book(s) from server; {{n}} failed (first: "{{first}}").',
         {
@@ -290,6 +315,7 @@ const WebDAVBrowsePane: React.FC<WebDAVBrowsePaneProps> = ({ settings, onUpdateS
       );
     } else {
       toastType = 'warning';
+      status = 'failure';
       message = _('Couldn\'t delete any of {{n}} book(s) from server (first: "{{first}}").', {
         n: failed.length,
         first: failed[0]?.title ?? '',
@@ -300,6 +326,43 @@ const WebDAVBrowsePane: React.FC<WebDAVBrowsePaneProps> = ({ settings, onUpdateS
       console.warn('[webdav cleanup] delete failures', failed);
     }
     eventDispatcher.dispatch('toast', { type: toastType, message });
+
+    // Persist into the shared sync log so cleanup runs are auditable
+    // alongside Sync now. The 'cleanup' kind tag drives the panel's
+    // badge and summary line; sync-only counters stay zero and the
+    // panel's zero-suppress filter hides them.
+    if (onAppendSyncLogEntry) {
+      const failedBooks: WebDAVSyncLogFailure[] | undefined =
+        failed.length > 0
+          ? failed.map((f) => ({ hash: f.hash, title: f.title, reason: f.reason }))
+          : undefined;
+      const entry: WebDAVSyncLogEntry = {
+        id: uuidv4(),
+        startedAt,
+        finishedAt: Date.now(),
+        kind: 'cleanup',
+        status,
+        trigger: 'manual',
+        totalBooks: targets.length,
+        booksDownloaded: 0,
+        filesUploaded: 0,
+        filesAlreadyInSync: 0,
+        configsUploaded: 0,
+        configsDownloaded: 0,
+        coversUploaded: 0,
+        booksDeleted: succeeded,
+        failures: failed.length,
+        summary: message,
+        errorMessage,
+        failedBooks,
+      };
+      // Fire-and-forget: a log-write failure shouldn't surface as a
+      // second toast right after the cleanup result, the user has
+      // already seen the outcome they care about.
+      void Promise.resolve(onAppendSyncLogEntry(entry)).catch((e) =>
+        console.warn('WD cleanup: failed to append sync log entry', e),
+      );
+    }
   };
 
   // Drop stale paths from the selection whenever displayedEntries

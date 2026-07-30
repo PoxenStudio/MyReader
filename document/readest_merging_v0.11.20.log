@@ -70,6 +70,28 @@ readest v0.11.20 新增了完整的书籍分享链接功能：`/s/{token}` 落�
 - `BookDetailModal.tsx`：恢复 `activeDeleteAction`/`deleteConfigs` 状态机，新增 `handleBookDeleteCloudBackup`/`handleBookDeleteLocalCopy`/`handleBookPurge` prop，改用 `DeleteConfirmAlert`（`showPurgeToggle`）替代原来的 `Alert`
 - `app/library/page.tsx`：`BookDetailModal` 调用处接入新的三个删除 handler（本地库场景下主删除变为 `handleBookDelete('both')`，云端库场景仍只提供单一的 admin remote-delete）
 
+## 决策四：`WebDAVForm.tsx` 回退到 fork 原版时遗漏了 `SyncHistoryPanel.tsx`
+
+`pnpm tauri dev` 报错 `Module not found: Can't resolve './SyncHistoryPanel'`。排查发现这不是"upstream 新引入、fork 未合入"的组件，而是相反：
+
+- `SyncHistoryPanel.tsx` 是 fork 自有功能（诊断用的"最近十次 WebDAV 同步记录"面板），fork 合并前的树（`9b15777`）里存在，readest 上游 base 版本（`176b950c`）里也存在。
+- readest 上游在 `e80ab1762b05614fa889d89eac381646b5df6419`（`refactor(settings): polish sync and integration panels (#4774)`，2026-06-25）中主动删除了这个组件及其持久化的 log model（"the sync engine still reports per-book failures in its result"），所以 v0.11.20 release 树里已经没有它。
+- 按"决策三"同样的模式，`WebDAVForm.tsx` 因为塞入了 provider 选择/付费门禁而整体回退为 fork v0.3.0 原版，但回退时只搬回了 `WebDAVForm.tsx` 本身，没有连带搬回它依赖的 `SyncHistoryPanel.tsx`——而 `syncLog`/`WebDAVSyncLogEntry` 相关的类型（`types/settings.ts`）、写入逻辑（`appendSyncLogEntry`/`handleClearSyncLog`）、`WebDAVSync.ts` 里的注释、甚至测试文件 `webdav-connect-settings.test.ts` 都完整保留，只是这一个展示组件文件丢了。
+
+修复：直接从 fork 合并前的树（`9b15777`）取回 `app/src/components/settings/integrations/SyncHistoryPanel.tsx`，props（`entries`/`onClear`）与当前 `WebDAVForm.tsx` 调用处完全匹配，未做任何改动。`tsgo --noEmit` 与 `pnpm test` 全量跑（6383 通过 / 2 失败，均为已知的 android/ios 脚手架环境限制）均确认无回归。
+
+### 追加发现：`WebDAVBrowsePane.tsx` 的批量清理（Delete from server）漏记同步日志
+
+用户追问"`SyncHistoryPanel.tsx` 依赖的数据是否还正常"后，顺藤摸瓜排查了整条数据链路（`stored.syncLog` 读取 → `appendSyncLogEntry`/`handleClearSyncLog` 写入 → `handleSyncNow` 手动同步埋点），发现 `handleSyncNow`（Sync now 按钮）这条链路完全正常，但 `WebDAVBrowsePane.tsx` 的批量删除（cleanup mode 里的 "Delete from server"）这条链路断了：
+
+- `WebDAVForm.tsx` 第 729 行调用 `<WebDAVBrowsePane onAppendSyncLogEntry={appendSyncLogEntry} .../>`，但当前 `WebDAVBrowsePaneProps` 接口根本没有声明 `onAppendSyncLogEntry` 字段，组件体内也完全没有引用它——这是一个真实的 TS 类型错误（`Property 'onAppendSyncLogEntry' does not exist`），只是项目用来跑 `pnpm lint` 的 `tsgo`（快速类型检查器）没有捕获到这处 JSX 多余属性错误，用标准 `tsc --noEmit` 才复现出来。
+- 对比 fork 合并前的版本（`9b15777`）确认：`handleDelete` 原本在批量删除结束后会构造一条 `kind: 'cleanup'` 的 `WebDAVSyncLogEntry`（携带 `booksDeleted`/`failedBooks` 等字段）并调用 `onAppendSyncLogEntry` 写入日志，这段逻辑在合并时把 `WebDAVBrowsePane.tsx` 换成新版本（叠加 upstream 的搜索/排序功能，见"合并方法"一节里保留的部分）时被整段遗漏了。
+- 影响：只影响批量清理场景的"可审计性"——用户从 WebDAV 浏览器执行 "Delete from server" 后，`SyncHistoryPanel` 里看不到这次清理记录（`kind: 'cleanup'` 的条目不会出现），但清理操作本身（`deleteRemoteBookDir` 调用、toast 提示、列表刷新）功能不受影响。手动 "Sync now" 记录不受此问题影响。
+
+修复：在 `WebDAVBrowsePane.tsx` 里补回 `onAppendSyncLogEntry` 可选 prop、`startedAt`/`status`/`errorMessage` 状态追踪，以及 `handleDelete` 末尾构造并写入 `kind: 'cleanup'` 日志条目的逻辑，与 `9b15777` 版本的实现一致（`uuidv4`/`WebDAVSyncLogEntry`/`WebDAVSyncLogFailure` 一并补回导入）。用标准 `tsc --noEmit` 确认 `onAppendSyncLogEntry` 相关的类型错误已消失，`pnpm test` 全量跑仍为 6383 通过 / 2 失败（同上，环境限制），无回归。
+
+**遗留提醒**：`pnpm lint` 依赖的 `tsgo` 未能捕获这处 JSX 多余属性错误，说明它对某些 JSX excess-property 场景的检测弱于标准 `tsc`；后续如果怀疑某处改动引入了组件 prop 不匹配，建议用 `npx tsc --noEmit -p tsconfig.json` 兜底核实一遍，不要只信 `tsgo`。
+
 ## 合并过程中发现并修复的真实 bug（非本次合并引入，但被新增测试暴露）
 
 - **`BookshelfItem.tsx` 多处悬空引用**：`useLibraryStore` 未导入、`openBook`/`router` 未定义（应来自 `useOpenBook` hook 但从未接入）、`getCurrentWindow`/`LogicalPosition`/`MenuItemOptions` 未导入。修复后正确接入 `app/library/hooks/useOpenBook.ts`（共享的"打开书籍"流程），并同步给该 hook 的 `makeBookAvailable` 补上了 `isCloudBook()` 判断（云端书架浏览到的纯元数据书籍从未在本设备 `uploadedAt`，之前会被误判为"无需下载"）。
