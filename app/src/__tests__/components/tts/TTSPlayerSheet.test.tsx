@@ -66,28 +66,23 @@ vi.mock('@/store/readerProgressStore', () => ({
   useBookProgress: () => ({ sectionLabel: 'Chapter 5' }),
 }));
 
-// Premium gating for the offline-audio row. Defaults to a signed-in premium
-// user so the existing tests (which don't render the row) are unaffected;
-// the gating tests below flip these.
-const { routerPush, mockAuth, mockQuota } = vi.hoisted(() => ({
+// Sign-in gating for the offline-audio row. Defaults to a signed-in user so
+// the existing tests (which don't render the row) are unaffected; the gating
+// test below flips this.
+const { routerPush, mockAuth } = vi.hoisted(() => ({
   routerPush: vi.fn(),
   mockAuth: { user: { id: 'u' } as { id: string } | null },
-  mockQuota: {
-    userProfilePlan: 'pro' as 'free' | 'plus' | 'pro' | 'purchase' | undefined,
-  },
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: routerPush }) }));
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: mockAuth.user, token: 'tok' }),
-}));
-vi.mock('@/hooks/useQuotaStats', () => ({
-  useQuotaStats: () => ({ userProfilePlan: mockQuota.userProfilePlan }),
 }));
 vi.mock('@/app/reader/components/tts/TTSChaptersView', () => ({
   default: () => <div>chapters-view</div>,
 }));
 
 import TTSPlayerSheet from '@/app/reader/components/tts/TTSPlayerSheet';
+import { useAuthUIStore } from '@/store/authUIStore';
 
 const waitFor = <T,>(callback: () => T | Promise<T>) =>
   waitForWithOptions(callback, { interval: 1 });
@@ -153,9 +148,9 @@ describe('TTSPlayerSheet', () => {
     getBookData.mockReturnValue({
       book: { title: 'Alice in Wonderland', coverImageUrl: null },
     });
-    // Default: signed-in premium user (the row-less tests never hit the gate).
+    // Default: signed-in user (the row-less tests never hit the gate).
     mockAuth.user = { id: 'u' };
-    mockQuota.userProfilePlan = 'pro';
+    useAuthUIStore.setState({ isLoginDialogOpen: false });
   });
 
   afterEach(() => {
@@ -319,39 +314,24 @@ describe('TTSPlayerSheet', () => {
     ...over,
   });
 
-  test('offline audio row: a premium user has no badge and opens the chapters view', () => {
-    mockQuota.userProfilePlan = 'pro';
+  test('offline audio row: a signed-in user opens the chapters view directly', () => {
     const props = makeProps({ downloads: makeDownloads() });
     render(<TTSPlayerSheet {...props} />);
     const row = screen.getByLabelText('Offline Audio');
-    expect(screen.queryByText('Premium')).toBeNull();
     expect(screen.getByText('1 of 1 downloaded')).toBeTruthy();
     fireEvent.click(row);
     expect(screen.getByText('chapters-view')).toBeTruthy();
     expect(routerPush).not.toHaveBeenCalled();
   });
 
-  test('offline audio row: a free user sees a Premium badge and is routed to upgrade', () => {
-    mockQuota.userProfilePlan = 'free';
+  test('offline audio row: a signed-out user is prompted to sign in', () => {
+    mockAuth.user = null;
     const props = makeProps({ downloads: makeDownloads() });
     render(<TTSPlayerSheet {...props} />);
-    expect(screen.getByText('Premium')).toBeTruthy();
     expect(screen.getByText('Download chapters for offline playback')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Offline Audio'));
-    expect(routerPush).toHaveBeenCalledWith('/user');
+    expect(useAuthUIStore.getState().isLoginDialogOpen).toBe(true);
     expect(props.onClose).toHaveBeenCalled();
-    // The premium chapters view must not open for a free user.
-    expect(screen.queryByText('chapters-view')).toBeNull();
-  });
-
-  test('offline audio row: a signed-out user is routed to sign-in', () => {
-    mockAuth.user = null;
-    mockQuota.userProfilePlan = undefined;
-    const props = makeProps({ downloads: makeDownloads() });
-    render(<TTSPlayerSheet {...props} />);
-    expect(screen.getByText('Premium')).toBeTruthy();
-    fireEvent.click(screen.getByLabelText('Offline Audio'));
-    expect(routerPush).toHaveBeenCalledWith(expect.stringContaining('/auth?redirect='));
     expect(screen.queryByText('chapters-view')).toBeNull();
   });
 

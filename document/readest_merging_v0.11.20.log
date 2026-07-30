@@ -99,13 +99,21 @@ readest v0.11.20 新增了完整的书籍分享链接功能：`/s/{token}` 落�
 
 - **`packages/tao`**（新增 submodule，commit `da30a3b9`）与 **`packages/swift-rs`**（readest 已将其从 submodule 转为直接 tracked 目录）：这两个是 Tauri 底层窗口/macOS FFI 依赖的版本调整，需要改动根目录的 Cargo workspace 配置和构建脚本才能正确接入，超出本次"仅合并 app/ 目录"的范围，故未处理。如果后续要跟进 Tauri 相关的行为变化，需要单独评估这两个包的改动。
 - **Nightly 更新通道**（`resolveNightlyUpdate`/`getNightlyPlatformKey`/`UpdaterWindow.tsx` 中的 `ResolvedNightlyUpdate` 相关 UI）：代码已合并但处于休眠状态——需要 mybooks.top 侧真正的 nightly 托管基础设施和一把真实的签名私钥才能启用，目前只是占位。
-- **`UpdaterWindow.test.tsx` 的"自动翻译 changelog"功能（2 个测试用例失败）**：upstream 新增了 changelog 自动翻译 + "Show original" 切换，但相关的翻译触发逻辑似乎未完整接入 `UpdaterWindow.tsx`（或者接入了但触发条件与测试 fixture 不一致），需要单独排查。用户已要求"先忽略测试未通过的问题，稍后处理"，故本次未深入。
-- **`TTSPlayerSheet.test.tsx` 的 "offline audio 未登录/免费用户" 2 个测试用例失败**：与本次合并中对 `utils/access.ts`（已删除 UserPlan 订阅门禁）的改动有关，`isDownloadPremium`/登录跳转逻辑需要重新核对，未深入排查。
 - **3 个因缺少本地生成的移动端脚手架而失败的测试（非本次合并引入的回归，属于环境限制）**：
   - `android/android-auto-declarations.test.ts`、`android/themed-icon.test.ts`：依赖 `src-tauri/gen/android/...` 下由 `tauri android init` 生成的文件（本沙盒环境未执行过该命令）
   - `ios/share-extension-activation-rule.test.ts`：依赖 `src-tauri/gen/apple/project.yml`（同上，需要 `tauri ios init`）
 
   这三个测试文件本身没有问题，只是运行环境缺少移动端构建产物，实机/CI 环境跑过 `tauri android/ios init` 后应该会自动通过。
+
+## 剩余 5 个失败测试的排查结果（2026-07-30 补充）
+
+上一节遗留的 5 个失败（不含上述 3 个环境限制项，另加一个当时未提及的 `pdf-canvas-memory-cap.test.ts` 2 个失败，实际共 7 个待查）逐一排查如下：
+
+- **`pdf-canvas-memory-cap.test.ts`（2 个用例，未在初次记录中列出）**：根因是提交时 `packages/foliate-js` 子模块的本地工作区检出仍停留在旧的 `df623dbe`（`git submodule status` 显示 `+` 前缀，表示与父仓库记录的 `dd71f2be` 不一致），导致测试针对的 `getRenderDpr`/`isMobileWebView` 逻辑用的是旧版代码。执行 `git submodule update` 校正检出后 4 个用例全部通过。顺带发现 `gstack`、`tauri-plugin-turso`、`qcms`、`packages/tauri` 四个子模块也处于同样的"记录已更新、工作区未检出"状态，一并执行 `git submodule update` 修正（不影响任何代码逻辑，纯粹是提交前遗漏的检出步骤）。
+- **`UpdaterWindow.test.tsx`（2 个用例）**：测试 mock 里 `@/services/constants` 用的是 upstream 命名 `READEST_UPDATER_FILE`/`READEST_CHANGELOG_FILE`/`READEST_UPDATER_PUBKEY`，但 fork 的实际常量已按命名规范改为 `MYBOOKS_*`（见 `src/services/constants.ts`），导致 mock 未生效、组件里 `fetch(MYBOOKS_CHANGELOG_FILE)` 报错。翻译/"Show original"切换的实现代码本身完全正确，只改了测试 mock 的常量名即修复。
+- **`TTSPlayerSheet.test.tsx`（2 个用例）**：测试期望一套 `useQuotaStats`（free/plus/pro 订阅分级）驱动的 "Premium" 徽章 + 跳转 `/user` 升级页的门禁，但 `useQuotaStats` 钩子和 `TTS_CACHE_PLANS` 已在"决策一"中作为被放弃的 UserPlan 付费门禁体系的一部分整体删除，组件当前只用 `!!user`（是否登录）做门禁，不存在任何 plan 分级或 Premium 徽章。**与用户确认后**，判定测试对新功能的假设与已定案的"放弃 UserPlan 付费门禁"决策冲突，选择更新测试而非恢复门禁代码：移除 Premium 徽章/plan 分级相关断言，合并"premium 用户"与"free 用户"两个用例为单一"已登录用户直接进入下载章节列表"用例；同时发现测试原先断言的"未登录跳转 `/auth?redirect=`"路由方式与实际实现（`navigateToLogin` 调用 `useAuthUIStore().openLoginDialog()` 弹出登录对话框，而非路由跳转）不符，一并改为断言 `useAuthUIStore.getState().isLoginDialogOpen`。
+
+修复后 `pnpm test` 结果：6383 通过 / 2 失败（1 skip），失败项仅剩上文"3 个因缺少本地生成的移动端脚手架而失败的测试"中的 2 个（`android-auto-declarations.test.ts` 因缺少 `AndroidManifest.xml` 直接报 suite 级错误、未计入用例失败数），均为环境限制，非代码问题。
 
 ## 提交前的清理
 
@@ -117,3 +125,5 @@ readest v0.11.20 新增了完整的书籍分享链接功能：`/s/{token}` 落�
 ## 测试现状（合并完成时）
 
 `pnpm test` 全量跑：6374 通过 / 5 失败（1 个 skip），失败项均已在上文"未集成、留待后续单独评估的内容"中列出并给出排查方向，均非合并阻塞项。
+
+**更新（2026-07-30）**：上述失败项已逐一排查修复，详见"剩余 5 个失败测试的排查结果"一节。修复后仅剩 2 个因缺少本地移动端构建产物导致的环境限制性失败，非合并阻塞项。

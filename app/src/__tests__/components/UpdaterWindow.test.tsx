@@ -60,9 +60,9 @@ vi.mock('@/helpers/updater', () => ({
 }));
 
 vi.mock('@/services/constants', () => ({
-  READEST_UPDATER_FILE: 'https://example.com/latest.json',
-  READEST_CHANGELOG_FILE: 'https://example.com/release-notes.json',
-  READEST_UPDATER_PUBKEY: 'pk',
+  MYBOOKS_UPDATER_FILE: 'https://example.com/latest.json',
+  MYBOOKS_CHANGELOG_FILE: 'https://example.com/release-notes.json',
+  MYBOOKS_UPDATER_PUBKEY: 'pk',
 }));
 
 // ── Tauri / heavy modules pulled in by UpdaterWindow's top-level imports ──
