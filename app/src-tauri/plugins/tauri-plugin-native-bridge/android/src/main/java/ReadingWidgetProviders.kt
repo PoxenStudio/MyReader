@@ -1,4 +1,4 @@
-package com.readest.native_bridge
+package com.mybooks.native_bridge
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager

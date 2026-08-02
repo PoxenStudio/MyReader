@@ -5,8 +5,6 @@ import { PiUserCircle, PiUserCircleCheck, PiGear } from 'react-icons/pi';
 import { PiSun, PiMoon } from 'react-icons/pi';
 import { TbSunMoon } from 'react-icons/tb';
 import { MdCloudSync, MdOutlineNoAccounts } from 'react-icons/md';
-import { invoke, PermissionState } from '@tauri-apps/api/core';
-
 import { isTauriAppPlatform, isWebAppPlatform } from '@/services/environment';
 import { DOWNLOAD_MYBOOKS_URL } from '@/services/constants';
 import { setBackupDialogVisible } from '@/app/library/components/BackupWindow';
@@ -39,11 +37,6 @@ interface SettingsMenuProps {
   setIsDropdownOpen?: (isOpen: boolean) => void;
 }
 
-interface Permissions {
-  postNotification: PermissionState;
-  manageStorage: PermissionState;
-}
-
 const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
   const _ = useTranslation();
   const router = useRouter();
@@ -59,7 +52,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
   const [isAutoImportBooksOnOpen, setIsAutoImportBooksOnOpen] = useState(
     settings.autoImportBooksOnOpen,
   );
-  const [alwaysInForeground, setAlwaysInForeground] = useState(settings.alwaysInForeground);
   const [savedBookCoverForLockScreen, setSavedBookCoverForLockScreen] = useState(
     settings.savedBookCoverForLockScreen || '',
   );
@@ -201,23 +193,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
     setSavedBookCoverForLockScreen(newValue);
   };
 
-  const toggleAlwaysInForeground = async () => {
-    const requestAlwaysInForeground = !settings.alwaysInForeground;
-
-    if (requestAlwaysInForeground) {
-      let permission = await invoke<Permissions>('plugin:native-tts|checkPermissions');
-      if (permission.postNotification !== 'granted') {
-        permission = await invoke<Permissions>('plugin:native-tts|requestPermissions', {
-          permissions: ['postNotification'],
-        });
-      }
-      if (permission.postNotification !== 'granted') return;
-    }
-
-    saveSysSettings(envConfig, 'alwaysInForeground', requestAlwaysInForeground);
-    setAlwaysInForeground(requestAlwaysInForeground);
-  };
-
   const avatarUrl = user?.user_metadata?.['picture'] || user?.user_metadata?.['avatar_url'];
   const userFullName = user?.user_metadata?.['full_name'];
   const userDisplayName = userFullName ? userFullName.split(' ')[0] : null;
@@ -332,13 +307,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
           label={_('Always Show Status Bar')}
           toggled={isAlwaysShowStatusBar}
           onClick={toggleAlwaysShowStatusBar}
-        />
-      )}
-      {appService?.isAndroidApp && (
-        <MenuItem
-          label={_(_('Background Read Aloud'))}
-          toggled={alwaysInForeground}
-          onClick={toggleAlwaysInForeground}
         />
       )}
       <MenuItem

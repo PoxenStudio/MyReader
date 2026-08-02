@@ -95,7 +95,6 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   alwaysOnTop: false,
   openBookInNewWindow: true,
   alwaysShowStatusBar: false,
-  alwaysInForeground: false,
   autoCheckUpdates: false,
   updateChannel: 'stable',
   screenWakeLock: false,

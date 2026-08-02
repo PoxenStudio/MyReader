@@ -1,4 +1,4 @@
-package com.readest.native_bridge
+package com.mybooks.native_bridge
 
 /**
  * Pure decision logic for routing a dictionary `ACTION_PROCESS_TEXT`

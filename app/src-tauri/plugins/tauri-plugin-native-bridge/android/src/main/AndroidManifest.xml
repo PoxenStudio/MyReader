@@ -19,10 +19,10 @@
              browser-excluding dictionary chooser so the user's pick is
              remembered and launched directly on subsequent lookups. -->
         <receiver
-            android:name="com.readest.native_bridge.LookupChoiceReceiver"
+            android:name="com.mybooks.native_bridge.LookupChoiceReceiver"
             android:exported="false" />
         <receiver
-            android:name="com.readest.native_bridge.ReadingWidgetProvider"
+            android:name="com.mybooks.native_bridge.ReadingWidgetProvider"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

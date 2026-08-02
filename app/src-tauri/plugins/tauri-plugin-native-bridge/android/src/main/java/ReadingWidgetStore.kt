@@ -1,4 +1,4 @@
-package com.readest.native_bridge
+package com.mybooks.native_bridge
 
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
