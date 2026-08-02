@@ -480,6 +480,10 @@ describe('services/constants', () => {
       expect(typeof DEFAULT_BOOK_STYLE.keepCoverSpread).toBe('boolean');
     });
 
+    it('defaults overrideFont to true so book font is overridden by default', () => {
+      expect(DEFAULT_BOOK_STYLE.overrideFont).toBe(true);
+    });
+
     it('has theme and appearance settings', () => {
       expect(typeof DEFAULT_BOOK_STYLE.theme).toBe('string');
       expect(typeof DEFAULT_BOOK_STYLE.backgroundTextureId).toBe('string');

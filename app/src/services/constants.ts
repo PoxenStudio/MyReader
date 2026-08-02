@@ -277,7 +277,7 @@ export const DEFAULT_BOOK_STYLE: BookStyle = {
   userStylesheet: '',
   userUIStylesheet: '',
 
-  overrideFont: false,
+  overrideFont: true,
   overrideLayout: false,
   overrideColor: false,
   useBookLayout: false,
