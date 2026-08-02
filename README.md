@@ -116,6 +116,7 @@ pnpm tauri android build
 # 只打包aarch64的包
 pnpm tauri android build -t aarch64
 # 打出签名的apk包
+# 定义环境变量ANDROID_KEY_PASSWORD及ANDROID_KEY_FILE(jks文件路径)
 pnpm build-android-signed
 ```
 
