@@ -35,11 +35,6 @@ interface NasCookieRecord {
   capturedAt: number;
 }
 
-/**
- * Cookie names if need to filter out
- */
-const EXCLUDED_COOKIE_NAMES = new Set([]);
-
 const normalizeHostKey = (host: string): string => host.trim().toLowerCase();
 
 const readAll = (): Record<string, NasCookieRecord> => {
@@ -58,15 +53,14 @@ const writeAll = (records: Record<string, NasCookieRecord>): void => {
 };
 
 export function setNasCookies(host: string, cookies: NasCookieEntry[]): void {
-  const filtered = cookies.filter((c) => !EXCLUDED_COOKIE_NAMES.has(c.name));
   const records = readAll();
   const key = normalizeHostKey(host);
-  records[key] = { cookies: filtered, capturedAt: Date.now() };
+  records[key] = { cookies, capturedAt: Date.now() };
   writeAll(records);
-  const preview = filtered
+  const preview = cookies
     .map((c) => `${c.name}=${c.value} (${c.domain ? `domain=${c.domain}` : 'host-only'})`)
     .join('; ');
-  console.log(`[nas-cookie-store] saved ${filtered.length} cookies for host "${key}": ${preview}`);
+  console.log(`[nas-cookie-store] saved ${cookies.length} cookies for host "${key}": ${preview}`);
 }
 
 /** Whether `entry` would actually be sent to `requestedHost` per RFC 6265 domain matching. */
@@ -100,9 +94,8 @@ export function getNasCookies(host: string): string | null {
   for (;;) {
     const record = records[candidate];
     if (record) {
-      const applicable = record.cookies.filter(
-        (c) =>
-          !EXCLUDED_COOKIE_NAMES.has(c.name) && cookieAppliesToHost(c, requestedHost, candidate),
+      const applicable = record.cookies.filter((c) =>
+        cookieAppliesToHost(c, requestedHost, candidate),
       );
       const cookieHeader = applicable.length
         ? applicable.map((c) => `${c.name}=${c.value}`).join('; ')

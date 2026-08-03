@@ -65,31 +65,4 @@ describe('nasCookieStore', () => {
     setNasCookies('nas.example.com', [hostOnly('sid', 'abc123')]);
     expect(getNasCookies('other.example.com')).toBeNull();
   });
-
-  it('never stores fnos-long-token, even when the webview captured it', () => {
-    setNasCookies('horkynas.fnos.net', [
-      hostOnly('fnos-long-token', 'shouldnotbesaved'),
-      domainScoped('entry-token', 'tok123', 'horkynas.fnos.net'),
-    ]);
-    expect(getNasCookies('horkynas.fnos.net')).toBe('entry-token=tok123');
-  });
-
-  it('filters excluded cookie names out of records saved before the exclusion existed', () => {
-    // Simulates localStorage data written by an older version of this
-    // module, before `fnos-long-token` (and friends) were excluded.
-    localStorage.setItem(
-      'mybooks_nas_cookies',
-      JSON.stringify({
-        'horkynas.fnos.net': {
-          cookies: [
-            hostOnly('fnos-long-token', 'stale'),
-            hostOnly('fnos-token', 'stale'),
-            domainScoped('entry-token', 'tok123', 'horkynas.fnos.net'),
-          ],
-          capturedAt: Date.now(),
-        },
-      }),
-    );
-    expect(getNasCookies('horkynas.fnos.net')).toBe('entry-token=tok123');
-  });
 });
