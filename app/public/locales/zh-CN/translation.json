@@ -121,6 +121,7 @@
   "Failed to download book: {{title}}": "下载书籍失败：{{title}}",
   "Upload Book": "上传书籍",
   "Auto Upload Books to Cloud": "自动上传书籍到云端",
+  "Auto Set Read State": "自动更新阅读状态",
   "Book deleted: {{title}}": "书籍已删除：{{title}}",
   "Failed to delete book: {{title}}": "删除书籍失败：{{title}}",
   "Check Updates on Start": "启动时检查更新",

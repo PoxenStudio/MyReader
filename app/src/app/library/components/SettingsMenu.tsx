@@ -45,7 +45,7 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
   const { themeMode, setThemeMode } = useThemeStore();
   const { settings, setSettingsDialogOpen } = useSettingsStore();
   const [isAutoCheckUpdates, setIsAutoCheckUpdates] = useState(settings.autoCheckUpdates);
-  const [isAutoUpload, setIsAutoUpload] = useState(settings.autoUpload);
+  const [isAutoSetReadState, setIsAutoSetReadState] = useState(settings.autoSetReadState);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(settings.alwaysOnTop);
   const [isAlwaysShowStatusBar, setIsAlwaysShowStatusBar] = useState(settings.alwaysShowStatusBar);
   const [isOpenLastBooks, setIsOpenLastBooks] = useState(settings.openLastBooks);
@@ -141,10 +141,10 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
     setIsAlwaysShowStatusBar(newValue);
   };
 
-  const toggleAutoUploadBooks = () => {
-    const newValue = !settings.autoUpload;
-    saveSysSettings(envConfig, 'autoUpload', newValue);
-    setIsAutoUpload(newValue);
+  const toggleAutoSetReadState = () => {
+    const newValue = !settings.autoSetReadState;
+    saveSysSettings(envConfig, 'autoSetReadState', newValue);
+    setIsAutoSetReadState(newValue);
   };
 
   const toggleAutoImportBooksOnOpen = () => {
@@ -263,9 +263,9 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
 
       {user && (
         <MenuItem
-          label={_('Auto Upload Books to Cloud')}
-          toggled={isAutoUpload}
-          onClick={toggleAutoUploadBooks}
+          label={_('Auto Set Read State')}
+          toggled={isAutoSetReadState}
+          onClick={toggleAutoSetReadState}
         />
       )}
 

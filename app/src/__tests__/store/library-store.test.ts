@@ -14,9 +14,11 @@ vi.mock('@/services/mybooksService', () => ({
 }));
 
 import { useLibraryStore } from '@/store/libraryStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import type { Book, BooksGroup } from '@/types/book';
 import type { EnvConfigType } from '@/services/environment';
 import type { AppService } from '@/types/system';
+import type { SystemSettings } from '@/types/settings';
 
 function makeEnvConfig(appService: Partial<AppService>): EnvConfigType {
   return {
@@ -50,6 +52,10 @@ describe('libraryStore', () => {
       hashIndex: new Map(),
       visibleLibrary: [],
     });
+    // MyBooks reading-status sync is opt-in via settings.autoSetReadState;
+    // default it on here so the existing sync tests below exercise the
+    // sync path, and override to false in the tests that check the gate.
+    useSettingsStore.setState({ settings: { autoSetReadState: true } as SystemSettings });
   });
 
   describe('setLibrary', () => {
@@ -190,6 +196,16 @@ describe('libraryStore', () => {
 
     test('does not sync when the book has no bookId (not from MyBooks)', () => {
       const books = [makeBook({ hash: 'a', readingStatus: undefined })];
+      useLibraryStore.getState().setLibrary(books);
+
+      useLibraryStore.getState().updateBookProgress('a', [100, 100], 'finished');
+
+      expect(updateReadState).not.toHaveBeenCalled();
+    });
+
+    test('does not sync when autoSetReadState setting is disabled', () => {
+      useSettingsStore.setState({ settings: { autoSetReadState: false } as SystemSettings });
+      const books = [makeBook({ hash: 'a', bookId: 42, readingStatus: undefined })];
       useLibraryStore.getState().setLibrary(books);
 
       useLibraryStore.getState().updateBookProgress('a', [100, 100], 'finished');

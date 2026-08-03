@@ -120,6 +120,7 @@
   "Failed to download book: {{title}}": "書籍下載失敗：{{title}}",
   "Upload Book": "上傳書籍",
   "Auto Upload Books to Cloud": "自動上傳書籍到雲端",
+  "Auto Set Read State": "自動更新閱讀狀態",
   "Book deleted: {{title}}": "書籍已刪除：{{title}}",
   "Failed to delete book: {{title}}": "書籍刪除失敗：{{title}}",
   "Check Updates on Start": "啟動時檢查更新",

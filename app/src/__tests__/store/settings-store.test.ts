@@ -31,6 +31,7 @@ function makeSettings(overrides: Partial<SystemSettings> = {}): SystemSettings {
     localBooksDir: '/books',
     keepLogin: false,
     autoUpload: false,
+    autoSetReadState: false,
     alwaysOnTop: false,
     openBookInNewWindow: false,
     autoCheckUpdates: true,
