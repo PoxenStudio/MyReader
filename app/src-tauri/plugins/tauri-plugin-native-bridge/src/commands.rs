@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{command, AppHandle, Runtime, State};
 
 use crate::models::*;
@@ -313,41 +315,36 @@ pub(crate) async fn capture_webview_region<R: Runtime>(
     Ok(tauri::ipc::Response::new(png))
 }
 
-/// Read cookies for `payload.url` out of the NAS remote-login child webview
+/// Read cookies for `payload.url` out of the NAS remote-login popup webview
 /// (`payload.label`), joined into a ready-to-send `Cookie` header value.
+///
+/// The popup is a separate `WebviewWindow`, not a child webview of the
+/// calling window, so we look it up app-wide by label (`Manager::get_webview`,
+/// which requires the `unstable` tauri feature — enabled on the app crate)
+/// rather than restricting the search to the calling window's own webviews.
 ///
 /// Desktop and iOS use `tauri::Webview::cookies_for_url`, which reads the
 /// per-webview WKWebView/WebView2/WebKitGTK cookie store directly. Android's
 /// `wry` cookie APIs are unimplemented (always empty), so there we go
 /// through the mobile plugin instead, which reads Android's app-wide
 /// `android.webkit.CookieManager` — the same store every system WebView
-/// (including this child one) writes to, so `label` isn't needed there.
+/// writes to, so `label` isn't needed there.
 #[command]
 pub(crate) async fn get_webview_cookies<R: Runtime>(
     app: AppHandle<R>,
-    window: tauri::Window<R>,
     payload: GetWebviewCookiesRequest,
 ) -> Result<GetWebviewCookiesResponse> {
     #[cfg(target_os = "android")]
     {
-        let _ = window;
         app.native_bridge().get_webview_cookies_android(payload)
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = app;
-        use tauri::Url;
+        use tauri::{Manager, Url};
 
-        let webview = window
-            .webviews()
-            .into_iter()
-            .find(|w| w.label() == payload.label)
-            .ok_or_else(|| {
-                crate::Error::NativeBridgeError(format!(
-                    "no webview with label '{}'",
-                    payload.label
-                ))
-            })?;
+        let webview = app.get_webview(&payload.label).ok_or_else(|| {
+            crate::Error::NativeBridgeError(format!("no webview with label '{}'", payload.label))
+        })?;
         let url = Url::parse(&payload.url)
             .map_err(|e| crate::Error::NativeBridgeError(format!("invalid url: {e}")))?;
         let cookies = webview
@@ -360,4 +357,138 @@ pub(crate) async fn get_webview_cookies<R: Runtime>(
             .join("; ");
         Ok(GetWebviewCookiesResponse { cookie_header })
     }
+}
+
+/// How often the title-bar loading indicator's dots animate, in
+/// milliseconds.
+const NAS_LOADING_TITLE_INTERVAL_MS: u64 = 400;
+
+/// Minimum time the local loading page (see `NAS_LOADING_PAGE_ASSET`)
+/// stays up before navigating on to the real NAS URL. `PageLoadEvent::
+/// Finished` means the DOM finished loading, not that it's been painted —
+/// navigating away synchronously on that event can tear the page down
+/// before it renders a single frame.
+const NAS_LOADING_PAGE_MIN_DISPLAY_MS: u64 = 300;
+
+/// An in-page HTML overlay was tried first, but it can't paint anything
+/// until the webview surface itself has painted at least once — for a
+/// popup pointed straight at a third-party (often slow, self-signed-cert)
+/// NAS origin, that first paint can lag well behind window creation, so
+/// the popup looked "stuck" on a blank/black surface no matter how early
+/// the injected script ran. The window's native title bar has no such
+/// dependency — it's OS chrome, rendered the instant the window exists —
+/// so that's what carries the loading indicator instead: an animated
+/// "· / ·· / ···" suffix appended to the title while the page loads,
+/// swapped back to the plain title once it finishes (or the window is
+/// closed, via the `loading` flag simply stopping the animation task).
+fn spawn_nas_loading_title_animation<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    base_title: String,
+    loading: Arc<AtomicBool>,
+) {
+    // A plain OS thread rather than `tauri::async_runtime::spawn` — this
+    // only ever sleeps and calls `set_title` (which dispatches through the
+    // runtime's own thread-safe event-loop proxy), so it doesn't need an
+    // async executor and avoids pulling in `tokio` as a direct dependency
+    // just for `time::sleep`.
+    std::thread::spawn(move || {
+        const FRAMES: [&str; 3] = [".", "..", "..."];
+        let mut frame = 0usize;
+        while loading.load(Ordering::SeqCst) {
+            let _ = window.set_title(&format!(
+                "{base_title} (Loading{})",
+                FRAMES[frame % FRAMES.len()]
+            ));
+            frame += 1;
+            std::thread::sleep(std::time::Duration::from_millis(
+                NAS_LOADING_TITLE_INTERVAL_MS,
+            ));
+        }
+        let _ = window.set_title(&base_title);
+    });
+}
+
+/// Bundled app asset (see `public/nas-loading.html`) shown as the popup's
+/// *first* navigation target instead of the external NAS URL directly.
+///
+/// A `data:` URL was tried first for this (no network round trip needed, so
+/// it paints essentially the instant the window exists), but any CSS at all
+/// — inline `style`, or a class defined in a `<style>` block, on any
+/// element — left the whole document blank once Tauri's `webview-data-url`
+/// feature injects its required CSP `<meta>` tag into a `data:`-origin
+/// document; verified across several isolated reproductions that the HTML
+/// string itself was never mangled, so this looks like a WebKit-side quirk
+/// with CSP `<meta>` tags on `data:` (opaque-origin) documents specifically.
+/// A bundled asset sidesteps the whole thing: it loads through the same
+/// `tauri://localhost` + CSP path every other page in this app already uses
+/// successfully, so CSS/JS just works.
+const NAS_LOADING_PAGE_ASSET: &str = "nas-loading.html";
+
+/// Create the NAS remote-login popup window (see
+/// `GetWebviewCookiesRequest`/`get_webview_cookies` for how the frontend
+/// later reads its cookies). A dedicated command rather than the frontend's
+/// plain `new WebviewWindow(...)` because both the loading-page-then-navigate
+/// sequencing (see `NAS_LOADING_PAGE_ASSET`) and the title-bar loading
+/// animation (see `spawn_nas_loading_title_animation`) need the Rust-only
+/// `WebviewWindowBuilder::on_page_load`/`WebviewWindow::navigate` hooks,
+/// which have no JS-side equivalent.
+#[command]
+pub(crate) async fn create_nas_login_window<R: Runtime>(
+    app: AppHandle<R>,
+    payload: CreateNasLoginWindowRequest,
+) -> Result<()> {
+    let target_url = tauri::Url::parse(&payload.url)
+        .map_err(|e| crate::Error::NativeBridgeError(format!("invalid url: {e}")))?;
+    let base_title = payload.title.clone();
+
+    let loading = Arc::new(AtomicBool::new(true));
+    // Gates the one-time hop from the local loading page to `target_url` —
+    // `on_page_load` fires `Finished` for every navigation in this window
+    // (the loading page's own load, then the real NAS page's), and only
+    // the first of those should trigger the navigate.
+    let navigated_to_target = Arc::new(AtomicBool::new(false));
+
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        &payload.label,
+        tauri::WebviewUrl::App(std::path::PathBuf::from(NAS_LOADING_PAGE_ASSET)),
+    )
+    .inner_size(payload.width, payload.height)
+    .center()
+    .resizable(true)
+    .title(format!("{base_title} (Loading...)"))
+    .background_color(tauri::webview::Color(255, 255, 255, 255))
+    .on_page_load(move |window, event_payload| match event_payload.event() {
+        tauri::webview::PageLoadEvent::Started => {
+            loading.store(true, Ordering::SeqCst);
+            spawn_nas_loading_title_animation(window, base_title.clone(), loading.clone());
+        }
+        tauri::webview::PageLoadEvent::Finished => {
+            if !navigated_to_target.swap(true, Ordering::SeqCst) {
+                // `Finished` means the loading page's DOM is done loading,
+                // not that it's been painted yet — navigating on to
+                // `target_url` synchronously here can tear the page down
+                // before it ever renders a frame, so the loading page
+                // never actually becomes visible. A short delay gives it
+                // time to actually show up on screen first.
+                let win = window.clone();
+                let url = target_url.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        NAS_LOADING_PAGE_MIN_DISPLAY_MS,
+                    ));
+                    let _ = win.navigate(url);
+                });
+            } else {
+                loading.store(false, Ordering::SeqCst);
+            }
+        }
+    });
+    if let Some(user_agent) = &payload.user_agent {
+        builder = builder.user_agent(user_agent);
+    }
+    builder
+        .build()
+        .map_err(|e| crate::Error::NativeBridgeError(e.to_string()))?;
+    Ok(())
 }

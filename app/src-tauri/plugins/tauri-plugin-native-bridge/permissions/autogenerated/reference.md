@@ -50,6 +50,7 @@ Default permissions for the plugin
 - `allow-capture-webview-region`
 - `allow-set-text-selection-suppressed`
 - `allow-get-webview-cookies`
+- `allow-create-nas-login-window`
 
 ## Permission Table
 
@@ -342,6 +343,32 @@ Enables the copy_uri_to_path command without any pre-configured scope.
 <td>
 
 Denies the copy_uri_to_path command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:allow-create-nas-login-window`
+
+</td>
+<td>
+
+Enables the create_nas_login_window command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-create-nas-login-window`
+
+</td>
+<td>
+
+Denies the create_nas_login_window command without any pre-configured scope.
 
 </td>
 </tr>

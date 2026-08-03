@@ -47,4 +47,5 @@ permissions = [
   "allow-capture-webview-region",
   "allow-set-text-selection-suppressed",
   "allow-get-webview-cookies",
+  "allow-create-nas-login-window",
 ]

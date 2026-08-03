@@ -407,9 +407,26 @@ export async function updateReadingWidget(request: UpdateReadingWidgetRequest): 
   await invoke('plugin:native-bridge|update_reading_widget', { payload: request });
 }
 
-// ── NAS remote-login webview cookies ──────────────────────────────────────
-// Reads cookies for `url` out of a child webview (see NasRemoteWebview),
-// used to capture the session cookies set by a NAS device's own login page.
+// ── NAS remote-login popup window ─────────────────────────────────────────
+// See NasRemoteWebview: the NAS device portal opens in a dedicated popup
+// window (created via `create_nas_login_window` rather than the JS
+// `new WebviewWindow(...)` so we can inject a loading-overlay
+// initialization_script, which has no JS-side equivalent). Cookies set by
+// that popup are read back via `get_webview_cookies` to capture the
+// session the NAS device's own login page establishes.
+
+export interface CreateNasLoginWindowRequest {
+  label: string;
+  url: string;
+  title: string;
+  width: number;
+  height: number;
+  userAgent?: string;
+}
+
+export async function createNasLoginWindow(request: CreateNasLoginWindowRequest): Promise<void> {
+  await invoke('plugin:native-bridge|create_nas_login_window', { payload: request });
+}
 
 export interface GetWebviewCookiesRequest {
   label: string;

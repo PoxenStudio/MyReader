@@ -16,6 +16,11 @@ tauri = { version = "2" }
 serde = "1.0"
 thiserror = "2"
 schemars = "0.8"
+# Encodes the NAS-login loading overlay's SVG into a `data:` URI for the
+# initialization script injected by create_nas_login_window (commands.rs) —
+# needed on every platform, not just mobile (see the ios/android-only block
+# below for the pre-existing webview-snapshot use of this crate).
+base64 = "0.22"
 
 [dev-dependencies]
 serde_json = "1"
@@ -46,7 +51,8 @@ block = "0.1.6"
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 # The Swift/Kotlin plugin boundary is JSON-only, so webview snapshots
 # arrive base64-encoded and are decoded back to bytes in mobile.rs.
-base64 = "0.22"
+# (base64 itself is now a plain dependency above; kept as a comment marker
+# for why mobile needs it too.)
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-native-keyring-store = "1"

@@ -390,10 +390,19 @@ const LoginDialog: React.FC = () => {
           )}
 
           <div className='w-full mb-4'>
-            <div className='flex items-center justify-between mb-2'>
-              <label className='block text-sm font-medium text-base-content/75'>
-                {_('Host Address')}
-              </label>
+            <label className='block text-sm font-medium text-base-content/75 mb-2'>
+              {_('Host Address')}
+            </label>
+            <div className='flex items-center gap-2'>
+              <input
+                type='url'
+                value={host}
+                onChange={(e) => setHost(e.target.value)}
+                placeholder='https://your-mybooks-server.com'
+                list='mybooks-host-history'
+                className={inputClass}
+                disabled={isLoading}
+              />
               {isTauriAppPlatform() && nasSettings?.enabled && nasSettings.loginUrl && (
                 <NasRemoteLoginIconButton
                   onClick={() => setShowNasWebview(true)}
@@ -401,15 +410,6 @@ const LoginDialog: React.FC = () => {
                 />
               )}
             </div>
-            <input
-              type='url'
-              value={host}
-              onChange={(e) => setHost(e.target.value)}
-              placeholder='https://your-mybooks-server.com'
-              list='mybooks-host-history'
-              className={inputClass}
-              disabled={isLoading}
-            />
             <datalist id='mybooks-host-history'>
               {hostHistory.map((entry) => (
                 <option key={entry} value={entry} />

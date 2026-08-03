@@ -93,6 +93,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::capture_webview_region,
             commands::set_text_selection_suppressed,
             commands::get_webview_cookies,
+            commands::create_nas_login_window,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

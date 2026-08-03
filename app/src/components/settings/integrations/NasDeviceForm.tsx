@@ -1,10 +1,10 @@
 import { useState } from 'react';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { useEnv } from '@/context/EnvContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useSettingsStore } from '@/store/settingsStore';
 import { NAS_MIN_EXPIRY_MINUTES, NasVendorType } from '@/types/settings';
 import { eventDispatcher } from '@/utils/event';
-import { setNasCookies } from '@/services/mybooks/nasCookieStore';
 import SubPageHeader from '../SubPageHeader';
 import {
   BoxedList,
@@ -13,7 +13,6 @@ import {
   SettingsSelect,
   SettingsSwitchRow,
 } from '../primitives';
-import NasRemoteWebview from '../../nas/NasRemoteWebview';
 
 interface NasDeviceFormProps {
   onBack: () => void;
@@ -47,7 +46,7 @@ const NasDeviceForm: React.FC<NasDeviceFormProps> = ({ onBack }) => {
     stored?.expiryMinutes ?? NAS_MIN_EXPIRY_MINUTES,
   );
   const [autoPromptOnExpiry, setAutoPromptOnExpiry] = useState(stored?.autoPromptOnExpiry ?? false);
-  const [showTestWebview, setShowTestWebview] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const persistNas = async (patch: Partial<typeof stored>) => {
@@ -75,7 +74,13 @@ const NasDeviceForm: React.FC<NasDeviceFormProps> = ({ onBack }) => {
     eventDispatcher.dispatch('toast', { type: 'info', message: _('Saved') });
   };
 
-  const handleTestConnection = () => {
+  /**
+   * "Connectable" just means the NAS address answers at all — any HTTP
+   * response (even a login redirect or 4xx) proves the server is reachable.
+   * We don't need an actual login/cookie exchange for this check, so it's a
+   * plain request instead of opening the login popup.
+   */
+  const handleTestConnection = async () => {
     if (!isValidHttpsUrl(loginUrl)) {
       eventDispatcher.dispatch('toast', {
         type: 'error',
@@ -84,16 +89,18 @@ const NasDeviceForm: React.FC<NasDeviceFormProps> = ({ onBack }) => {
       return;
     }
     setTestStatus('idle');
-    setShowTestWebview(true);
-  };
-
-  const handleTestWebviewClose = (cookieHeader: string | null) => {
-    setShowTestWebview(false);
-    if (cookieHeader) {
-      setNasCookies(new URL(loginUrl).host, cookieHeader);
+    setIsTesting(true);
+    try {
+      await tauriFetch(loginUrl, {
+        method: 'GET',
+        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+      });
       setTestStatus('success');
-    } else {
+    } catch (e) {
+      console.error('NAS connection test failed:', e);
       setTestStatus('error');
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -168,9 +175,14 @@ const NasDeviceForm: React.FC<NasDeviceFormProps> = ({ onBack }) => {
                 <button
                   type='button'
                   onClick={handleTestConnection}
-                  className='eink-bordered h-10 rounded-lg px-4 text-sm font-medium transition-colors duration-150'
+                  disabled={isTesting}
+                  className='eink-bordered h-10 rounded-lg px-4 text-sm font-medium transition-colors duration-150 disabled:opacity-60'
                 >
-                  {_('Test Connection')}
+                  {isTesting ? (
+                    <span className='loading loading-spinner loading-xs' />
+                  ) : (
+                    _('Test Connection')
+                  )}
                 </button>
                 <button
                   type='button'
@@ -184,8 +196,6 @@ const NasDeviceForm: React.FC<NasDeviceFormProps> = ({ onBack }) => {
           </>
         )}
       </div>
-
-      {showTestWebview && <NasRemoteWebview url={loginUrl} onClose={handleTestWebviewClose} />}
     </div>
   );
 };

@@ -479,3 +479,20 @@ pub struct GetWebviewCookiesResponse {
     /// Empty string when no cookies are set for `url`.
     pub cookie_header: String,
 }
+
+/// Create the NAS remote-login popup window. A dedicated command (rather
+/// than the JS `new WebviewWindow(...)` constructor) so we can attach an
+/// `initialization_script` — the JS `WebviewOptions` type has no equivalent
+/// hook — that shows a centered loading indicator over the (externally
+/// hosted, otherwise blank-while-loading) NAS page until it finishes
+/// loading. See `commands.rs::build_nas_loading_script`.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateNasLoginWindowRequest {
+    pub label: String,
+    pub url: String,
+    pub title: String,
+    pub width: f64,
+    pub height: f64,
+    pub user_agent: Option<String>,
+}

@@ -42,6 +42,7 @@ const COMMANDS: &[&str] = &[
     "capture_webview_region",
     "set_text_selection_suppressed",
     "get_webview_cookies",
+    "create_nas_login_window",
 ];
 
 fn main() {

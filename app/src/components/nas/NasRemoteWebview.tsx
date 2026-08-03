@@ -1,24 +1,24 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { MdClose, MdRefresh } from 'react-icons/md';
-import { Webview } from '@tauri-apps/api/webview';
+import { useEffect, useRef } from 'react';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { type as osType } from '@tauri-apps/plugin-os';
-import { useTranslation } from '@/hooks/useTranslation';
-import { getWebviewCookies } from '@/utils/bridge';
+import { createNasLoginWindow, getWebviewCookies } from '@/utils/bridge';
 
 const MAX_WIDTH = 800;
 const MAX_HEIGHT = 1024;
-const TOOLBAR_HEIGHT = 40;
 
 /**
  * NAS portals are ordinary consumer web apps that branch on UA the same way
  * any mobile-first site does — match the app's own platform so the NAS login
  * page renders its mobile layout on phones instead of a desktop one squeezed
- * into an 800px popup.
+ * into an 800px popup. Always a standard Chrome UA (never the popup's real
+ * engine default — WKWebView's Safari UA on macOS, WebView2's on Windows —
+ * since some NAS vendor portals branch on browser vendor and don't expect
+ * those).
  */
-const getUserAgentForPlatform = (): string | undefined => {
+const getUserAgentForPlatform = (): string => {
   const platform = osType();
   if (platform === 'android') {
     return 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
@@ -26,53 +26,56 @@ const getUserAgentForPlatform = (): string | undefined => {
   if (platform === 'ios') {
     return 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
   }
-  return undefined;
+  if (platform === 'macos') {
+    return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  }
+  if (platform === 'linux') {
+    return 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  }
+  return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+};
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 };
 
 interface NasRemoteWebviewProps {
   /** NAS device portal URL to open. */
   url: string;
   /**
-   * Called once the webview is closed (by the user or on unmount), with the
+   * Called once the popup is closed (by the user or on unmount), with the
    * `Cookie` header captured for `url`, or `null` if none could be read.
    */
   onClose: (cookieHeader: string | null) => void;
 }
 
-/**
- * Full-screen overlay hosting an embedded (in-window) child Tauri webview
- * for NAS device login. Not an OS-level window — sized/positioned within
- * the current app window so it behaves the same on desktop and mobile, and
- * clamped to `MAX_WIDTH`x`MAX_HEIGHT` (or the window size, if smaller).
- *
- * Closing (via the toolbar button or unmount) reads back the cookies set
- * for `url` via the `get_webview_cookies` native-bridge command before
- * tearing the child webview down.
- */
 const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => {
-  const _ = useTranslation();
-  const webviewRef = useRef<Webview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [reloadNonce, setReloadNonce] = useState(0);
+  const windowRef = useRef<WebviewWindow | null>(null);
   const closedRef = useRef(false);
 
   const captureAndClose = async () => {
     if (closedRef.current) return;
     closedRef.current = true;
-    const webview = webviewRef.current;
-    webviewRef.current = null;
+    const win = windowRef.current;
+    windowRef.current = null;
     let cookieHeader: string | null = null;
-    if (webview) {
+    if (win) {
       try {
-        const result = await getWebviewCookies({ label: webview.label, url });
+        const result = await getWebviewCookies({ label: win.label, url });
         cookieHeader = result.cookieHeader || null;
       } catch (e) {
-        console.error('Failed to read NAS webview cookies:', e);
+        console.error('Failed to read NAS window cookies:', e);
       }
       try {
-        await webview.close();
+        // destroy(), not close() — close() re-emits closeRequested (which
+        // we already handle below), destroy() forces it without looping.
+        await win.destroy();
       } catch (e) {
-        console.error('Failed to close NAS webview:', e);
+        console.error('Failed to close NAS window:', e);
       }
     }
     onClose(cookieHeader);
@@ -80,7 +83,7 @@ const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => 
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    closedRef.current = false;
 
     const create = async () => {
       const parent = getCurrentWindow();
@@ -88,88 +91,74 @@ const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => 
       const scaleFactor = await parent.scaleFactor();
       const logicalWidth = innerSize.width / scaleFactor;
       const logicalHeight = innerSize.height / scaleFactor;
-      const availableHeight = Math.max(0, logicalHeight - TOOLBAR_HEIGHT);
       const width = Math.min(MAX_WIDTH, logicalWidth);
-      const height = Math.min(MAX_HEIGHT, availableHeight);
-      const x = Math.max(0, (logicalWidth - width) / 2);
-      const y = TOOLBAR_HEIGHT + Math.max(0, (availableHeight - height) / 2);
+      const height = Math.min(MAX_HEIGHT, logicalHeight);
 
       if (cancelled) return;
-      const label = `nas-login-${Date.now()}`;
-      const webview = new Webview(parent, label, {
-        url,
-        x,
-        y,
-        width,
-        height,
-        userAgent: getUserAgentForPlatform(),
+      const label = `nas-login-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      try {
+        // Goes through our own `create_nas_login_window` command (not the
+        // plain JS `new WebviewWindow(...)`) so the popup's title bar can
+        // show a "(Loading...)" animation while the (externally hosted) NAS
+        // page loads — driven by the Rust-side `on_page_load` hook, which
+        // has no JS-side equivalent.
+        await createNasLoginWindow({
+          label,
+          url,
+          title: hostOf(url),
+          width,
+          height,
+          userAgent: getUserAgentForPlatform(),
+        });
+      } catch (e) {
+        console.error('Failed to create NAS window:', e);
+        return;
+      }
+      if (cancelled) {
+        // Unmounted while the window was being created — nothing else will
+        // ever reference this label, so close it now instead of leaving an
+        // orphaned popup.
+        WebviewWindow.getByLabel(label).then((w) => w?.destroy());
+        return;
+      }
+      const win = await WebviewWindow.getByLabel(label);
+      if (!win) {
+        console.error('NAS window not found right after creation');
+        return;
+      }
+      windowRef.current = win;
+      await win.onCloseRequested(async (event) => {
+        // Intercept the native close button too, so we still capture
+        // cookies before the window actually goes away.
+        event.preventDefault();
+        await captureAndClose();
       });
-      webview.once('tauri://created', () => {
-        if (!cancelled) setLoading(false);
-      });
-      webview.once('tauri://error', (e) => {
-        console.error('Failed to create NAS webview:', e);
-        if (!cancelled) setLoading(false);
-      });
-      webviewRef.current = webview;
     };
 
     create();
 
     return () => {
       cancelled = true;
-      if (!closedRef.current) {
+      // Only tear down if this invocation actually produced a window.
+      // React's dev-mode StrictMode double-invokes effects (mount → cleanup
+      // → mount again) on first mount — the cleanup for that first,
+      // throwaway invocation fires before `create()`'s awaited IPC calls
+      // resolve, so `windowRef.current` is still null here. Calling
+      // `captureAndClose()` (and hence `onClose(null)`) unconditionally in
+      // that case fires the "closed" callback for a window that was never
+      // shown, which made the *real* (second) invocation's popup — created
+      // moments later — get torn down almost immediately by the parent
+      // reacting to that spurious close, sometimes before the native window
+      // had even finished registering (surfacing as "no webview with label
+      // ...' when we then tried to read its cookies).
+      if (windowRef.current) {
         captureAndClose();
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, reloadNonce]);
+  }, [url]);
 
-  const handleRefresh = async () => {
-    const webview = webviewRef.current;
-    webviewRef.current = null;
-    if (webview) {
-      try {
-        await webview.close();
-      } catch (e) {
-        console.error('Failed to close NAS webview before refresh:', e);
-      }
-    }
-    setReloadNonce((n) => n + 1);
-  };
-
-  return (
-    <div className='fixed inset-0 z-[100] flex flex-col bg-black/50'>
-      <div
-        className='bg-base-100 border-base-300 flex items-center justify-between border-b px-3'
-        style={{ height: TOOLBAR_HEIGHT }}
-      >
-        <span className='text-base-content/70 truncate text-sm'>{url}</span>
-        <div className='flex flex-shrink-0 items-center gap-1'>
-          {loading && <span className='loading loading-spinner loading-xs' />}
-          <button
-            type='button'
-            onClick={handleRefresh}
-            className='btn btn-ghost btn-xs'
-            title={_('Refresh')}
-            aria-label={_('Refresh')}
-          >
-            <MdRefresh className='h-4 w-4' />
-          </button>
-          <button
-            type='button'
-            onClick={captureAndClose}
-            className='btn btn-ghost btn-xs'
-            title={_('Close')}
-            aria-label={_('Close')}
-          >
-            <MdClose className='h-4 w-4' />
-          </button>
-        </div>
-      </div>
-      <div className='flex-1' />
-    </div>
-  );
+  return null;
 };
 
 export default NasRemoteWebview;
