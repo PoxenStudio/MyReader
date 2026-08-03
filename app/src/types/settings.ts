@@ -236,6 +236,31 @@ export interface WebDAVSyncLogEntry {
 /** Maximum entries retained in {@link WebDAVSettings.syncLog}. */
 export const WEBDAV_SYNC_LOG_LIMIT = 10;
 
+/** NAS device manufacturer, used only as a display label — no vendor-specific logic. */
+export type NasVendorType = 'feiniu' | 'ugreen' | 'synology' | 'other';
+
+/** Minimum allowed value for {@link NasDeviceSettings.expiryMinutes}. */
+export const NAS_MIN_EXPIRY_MINUTES = 5;
+
+/**
+ * NAS remote-access settings. Some NAS setups require logging into the NAS
+ * device itself (which sets cookies) before the MyReader server hosted on
+ * that NAS will respond — this config drives when/how we re-prompt that NAS
+ * login via an embedded webview. Tauri-only feature; ignored on web.
+ */
+export interface NasDeviceSettings {
+  enabled: boolean;
+  vendor: NasVendorType;
+  /** NAS device portal address. Must be a valid https:// URL. */
+  loginUrl: string;
+  /** Session validity window in minutes; minimum {@link NAS_MIN_EXPIRY_MINUTES}. */
+  expiryMinutes: number;
+  /** When true, an expired session auto-opens the NAS login webview instead of waiting for the user to trigger it manually. */
+  autoPromptOnExpiry: boolean;
+  /** Wall-clock ms of the last successful NAS webview login capture. */
+  lastLoginAt: number | null;
+}
+
 /**
  * User-facing sync categories. 'progress' gates the existing book-config
  * (reading progress) sync, 'note' gates annotations, 'book' gates book
@@ -397,6 +422,7 @@ export interface SystemSettings {
   readwise: ReadwiseSettings;
   hardcover: HardcoverSettings;
   webdav: WebDAVSettings;
+  nas: NasDeviceSettings;
 
   aiSettings: AISettings;
   /**

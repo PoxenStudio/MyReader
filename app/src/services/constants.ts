@@ -21,6 +21,8 @@ import {
   HardcoverSettings,
   LibraryGroupByType,
   LibrarySortByType,
+  NasDeviceSettings,
+  NAS_MIN_EXPIRY_MINUTES,
   ReadSettings,
   ReadwiseSettings,
   SystemSettings,
@@ -89,6 +91,15 @@ export const DEFAULT_WEBDAV_SETTINGS = {
   lastSyncedAt: 0,
 } as WebDAVSettings;
 
+export const DEFAULT_NAS_SETTINGS: NasDeviceSettings = {
+  enabled: false,
+  vendor: 'other',
+  loginUrl: '',
+  expiryMinutes: NAS_MIN_EXPIRY_MINUTES,
+  autoPromptOnExpiry: false,
+  lastLoginAt: null,
+};
+
 export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   keepLogin: true,
   autoUpload: false,
@@ -145,6 +156,7 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   readwise: DEFAULT_READWISE_SETTINGS,
   hardcover: DEFAULT_HARDCOVER_SETTINGS,
   webdav: DEFAULT_WEBDAV_SETTINGS,
+  nas: DEFAULT_NAS_SETTINGS,
   aiSettings: DEFAULT_AI_SETTINGS,
 
   lastSyncedAtReplicas: {},

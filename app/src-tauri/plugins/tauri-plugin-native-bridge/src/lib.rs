@@ -92,6 +92,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::update_reading_widget,
             commands::capture_webview_region,
             commands::set_text_selection_suppressed,
+            commands::get_webview_cookies,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

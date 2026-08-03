@@ -28,6 +28,7 @@ import android.os.Looper
 import android.util.Base64
 import android.view.PixelCopy
 import android.webkit.WebView
+import android.webkit.CookieManager
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.fonts.SystemFonts
@@ -109,6 +110,12 @@ class OpenExternalUrlArgs {
 @InvokeArg
 class ShowLookupPopoverArgs {
     var word: String? = null
+}
+
+@InvokeArg
+class GetWebviewCookiesRequestArgs {
+    var label: String? = null
+    var url: String? = null
 }
 
 @InvokeArg
@@ -500,6 +507,18 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             }
             if (isActive) invoke.resolve(ret)
         }
+    }
+
+    // wry's cookies_for_url is unimplemented on Android, so we read the
+    // app-wide android.webkit.CookieManager instead — every system WebView
+    // (including the NAS login child webview, which is backed by the same
+    // engine) shares this one store, so `label` is unused here.
+    @Command
+    fun get_webview_cookies(invoke: Invoke) {
+        val args = invoke.parseArgs(GetWebviewCookiesRequestArgs::class.java)
+        val r = JSObject()
+        r.put("cookieHeader", CookieManager.getInstance().getCookie(args.url ?: "") ?: "")
+        invoke.resolve(r)
     }
 
     @Command

@@ -459,3 +459,23 @@ pub struct CaptureWebviewRegionRequest {
 pub struct CaptureWebviewRegionResponse {
     pub data: String,
 }
+
+/// Read back cookies captured by the NAS remote-login webview (a child
+/// `Webview` created directly from the frontend via `@tauri-apps/api/webview`,
+/// not tracked by `NativeBridge` itself — we look it up by label at call time).
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetWebviewCookiesRequest {
+    /// Label of the child webview to read cookies from.
+    pub label: String,
+    /// URL whose cookies should be returned.
+    pub url: String,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetWebviewCookiesResponse {
+    /// Ready-to-send `Cookie` request-header value (`name=value; name2=value2`).
+    /// Empty string when no cookies are set for `url`.
+    pub cookie_header: String,
+}

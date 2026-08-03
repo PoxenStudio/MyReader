@@ -393,3 +393,18 @@ impl<R: Runtime> NativeBridge<R> {
             .map_err(|e| crate::Error::NativeBridgeError(format!("invalid base64 PNG: {e}")))
     }
 }
+
+/// Android-only: `wry`'s `cookies_for_url` is unimplemented on Android (always
+/// returns empty), so we read Android's app-wide `android.webkit.CookieManager`
+/// instead — see the doc comment on the top-level `get_webview_cookies` command.
+#[cfg(target_os = "android")]
+impl<R: Runtime> NativeBridge<R> {
+    pub fn get_webview_cookies_android(
+        &self,
+        payload: GetWebviewCookiesRequest,
+    ) -> crate::Result<GetWebviewCookiesResponse> {
+        self.0
+            .run_mobile_plugin("get_webview_cookies", payload)
+            .map_err(Into::into)
+    }
+}

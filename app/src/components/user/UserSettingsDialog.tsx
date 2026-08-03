@@ -14,6 +14,10 @@ import { PiUserCircle } from 'react-icons/pi';
 import { useTranslation } from '@/hooks/useTranslation';
 import { eventDispatcher } from '@/utils/event';
 import { useAuth } from '@/context/AuthContext';
+import { useEnv } from '@/context/EnvContext';
+import { isTauriAppPlatform } from '@/services/environment';
+import { useSettingsStore } from '@/store/settingsStore';
+import { setNasCookies } from '@/services/mybooks/nasCookieStore';
 import {
   getUserDetailInfo,
   updateUserSettings,
@@ -26,6 +30,8 @@ import { useMyBooksStatusStore, useMyBooksSyncAllowed } from '@/store/mybooksSta
 import { BoxedList, SettingsRow } from '@/components/settings/primitives';
 import Dialog from '@/components/Dialog';
 import UserAvatar from '@/components/UserAvatar';
+import NasRemoteWebview from '@/components/nas/NasRemoteWebview';
+import NasRemoteLoginIconButton from '@/components/nas/NasRemoteLoginIconButton';
 
 type RefreshStatus = 'idle' | 'loading' | 'error';
 
@@ -37,8 +43,12 @@ interface UserSettingsDialogProps {
 const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose }) => {
   const _ = useTranslation();
   const { logout } = useAuth();
+  const { envConfig } = useEnv();
+  const { settings, setSettings, saveSettings } = useSettingsStore();
   const isSyncAllowed = useMyBooksSyncAllowed();
   const sysInfo = useMyBooksStatusStore((state) => state.sysInfo);
+  const nasSettings = settings.nas;
+  const [showNasWebview, setShowNasWebview] = useState(false);
 
   const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>('loading');
   const [saving, setSaving] = useState(false);
@@ -162,6 +172,21 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
       setAvatarPreview(null);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleNasWebviewClose = async (cookieHeader: string | null) => {
+    setShowNasWebview(false);
+    if (!cookieHeader || !nasSettings?.loginUrl) return;
+    try {
+      setNasCookies(new URL(nasSettings.loginUrl).host, cookieHeader);
+    } catch (e) {
+      console.error('Invalid NAS login URL:', e);
+      return;
+    }
+    const latest = useSettingsStore.getState().settings;
+    const next = { ...latest, nas: { ...latest.nas, lastLoginAt: Date.now() } };
+    setSettings(next);
+    await saveSettings(envConfig, next);
   };
 
   const handleSignOut = async () => {
@@ -340,6 +365,17 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
                     {isSyncAllowed ? _('Enabled') : _('Disabled')}
                   </span>
                 </div>
+                {isTauriAppPlatform() && nasSettings?.enabled && nasSettings.loginUrl && (
+                  <div className='flex items-center gap-x-2'>
+                    <span className='text-end text-sm text-base-content/70'>
+                      {_('NAS Remote Device')}
+                    </span>
+                    <NasRemoteLoginIconButton
+                      onClick={() => setShowNasWebview(true)}
+                      title={_('Log in to NAS device')}
+                    />
+                  </div>
+                )}
               </div>
             </BoxedList>
 
@@ -437,6 +473,10 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
           </div>
         </div>
       </Dialog>
+
+      {showNasWebview && nasSettings?.loginUrl && (
+        <NasRemoteWebview url={nasSettings.loginUrl} onClose={handleNasWebviewClose} />
+      )}
     </>
   );
 };

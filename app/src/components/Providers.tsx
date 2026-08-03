@@ -38,6 +38,7 @@ import AppLockScreen from '@/components/AppLockScreen';
 import AppLockDialog from '@/components/settings/AppLockDialog';
 import TelemetryConsentDialog from '@/components/TelemetryConsentDialog';
 import LoginDialog from '@/components/user/LoginDialog';
+import NasSessionPrompt from '@/components/nas/NasSessionPrompt';
 import { useAppLockStore } from '@/store/appLockStore';
 
 const originalLog = console.log;
@@ -258,6 +259,7 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
               </div>
               <AppLockDialog />
               <LoginDialog />
+              <NasSessionPrompt />
               <TelemetryConsentDialog
                 open={showTelemetryConsent}
                 onClose={() => setShowTelemetryConsent(false)}

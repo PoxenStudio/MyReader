@@ -47,6 +47,22 @@ vi.mock('@/services/environment', () => ({
   isTauriAppPlatform: () => false,
 }));
 
+vi.mock('@/context/EnvContext', () => ({
+  useEnv: () => ({ envConfig: {} }),
+}));
+
+const settingsStoreState = {
+  settings: {},
+  setSettings: vi.fn(),
+  saveSettings: vi.fn(),
+};
+
+vi.mock('@/store/settingsStore', () => ({
+  useSettingsStore: Object.assign(() => settingsStoreState, {
+    getState: () => settingsStoreState,
+  }),
+}));
+
 vi.mock('@tauri-apps/plugin-http', () => ({
   fetch: vi.fn(),
 }));

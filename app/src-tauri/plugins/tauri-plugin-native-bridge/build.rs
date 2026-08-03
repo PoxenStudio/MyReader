@@ -41,6 +41,7 @@ const COMMANDS: &[&str] = &[
     "update_reading_widget",
     "capture_webview_region",
     "set_text_selection_suppressed",
+    "get_webview_cookies",
 ];
 
 fn main() {

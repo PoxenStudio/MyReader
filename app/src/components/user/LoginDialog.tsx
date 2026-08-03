@@ -4,9 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { MdClose } from 'react-icons/md';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuth } from '@/context/AuthContext';
+import { useEnv } from '@/context/EnvContext';
 import { User } from '@supabase/supabase-js';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
+import { useSettingsStore } from '@/store/settingsStore';
+import { setNasCookies } from '@/services/mybooks/nasCookieStore';
+import NasRemoteWebview from '@/components/nas/NasRemoteWebview';
+import NasRemoteLoginIconButton from '@/components/nas/NasRemoteLoginIconButton';
 import {
   MYBOOKS_PASSWORD_KEY,
   getStoredMyBooksPassword,
@@ -105,8 +110,12 @@ const fetchMyBooksUserInfo = async (host: string): Promise<MyBooksUserInfoRespon
 const LoginDialog: React.FC = () => {
   const _ = useTranslation();
   const { login, loginAsGuest } = useAuth();
+  const { envConfig } = useEnv();
+  const { settings, setSettings, saveSettings } = useSettingsStore();
   const isOpen = useAuthUIStore((state) => state.isLoginDialogOpen);
   const closeLoginDialog = useAuthUIStore((state) => state.closeLoginDialog);
+  const nasSettings = settings.nas;
+  const [showNasWebview, setShowNasWebview] = useState(false);
 
   const [host, setHost] = useState('');
   const [username, setUsername] = useState('');
@@ -171,6 +180,21 @@ const LoginDialog: React.FC = () => {
   const handleClose = () => {
     setError('');
     closeLoginDialog();
+  };
+
+  const handleNasWebviewClose = async (cookieHeader: string | null) => {
+    setShowNasWebview(false);
+    if (!cookieHeader || !nasSettings?.loginUrl) return;
+    try {
+      setNasCookies(new URL(nasSettings.loginUrl).host, cookieHeader);
+    } catch (e) {
+      console.error('Invalid NAS login URL:', e);
+      return;
+    }
+    const latest = useSettingsStore.getState().settings;
+    const next = { ...latest, nas: { ...latest.nas, lastLoginAt: Date.now() } };
+    setSettings(next);
+    await saveSettings(envConfig, next);
   };
 
   const handleLogin = async () => {
@@ -366,9 +390,17 @@ const LoginDialog: React.FC = () => {
           )}
 
           <div className='w-full mb-4'>
-            <label className='block text-sm font-medium text-base-content/75 mb-2'>
-              {_('Host Address')}
-            </label>
+            <div className='flex items-center justify-between mb-2'>
+              <label className='block text-sm font-medium text-base-content/75'>
+                {_('Host Address')}
+              </label>
+              {isTauriAppPlatform() && nasSettings?.enabled && nasSettings.loginUrl && (
+                <NasRemoteLoginIconButton
+                  onClick={() => setShowNasWebview(true)}
+                  title={_('Log in to NAS device')}
+                />
+              )}
+            </div>
             <input
               type='url'
               value={host}
@@ -514,6 +546,10 @@ const LoginDialog: React.FC = () => {
             handleLogin();
           }}
         />
+      )}
+
+      {showNasWebview && nasSettings?.loginUrl && (
+        <NasRemoteWebview url={nasSettings.loginUrl} onClose={handleNasWebviewClose} />
       )}
     </>
   );

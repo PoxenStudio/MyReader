@@ -312,3 +312,52 @@ pub(crate) async fn capture_webview_region<R: Runtime>(
         .capture_webview_region(&window, payload)?;
     Ok(tauri::ipc::Response::new(png))
 }
+
+/// Read cookies for `payload.url` out of the NAS remote-login child webview
+/// (`payload.label`), joined into a ready-to-send `Cookie` header value.
+///
+/// Desktop and iOS use `tauri::Webview::cookies_for_url`, which reads the
+/// per-webview WKWebView/WebView2/WebKitGTK cookie store directly. Android's
+/// `wry` cookie APIs are unimplemented (always empty), so there we go
+/// through the mobile plugin instead, which reads Android's app-wide
+/// `android.webkit.CookieManager` — the same store every system WebView
+/// (including this child one) writes to, so `label` isn't needed there.
+#[command]
+pub(crate) async fn get_webview_cookies<R: Runtime>(
+    app: AppHandle<R>,
+    window: tauri::Window<R>,
+    payload: GetWebviewCookiesRequest,
+) -> Result<GetWebviewCookiesResponse> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = window;
+        app.native_bridge().get_webview_cookies_android(payload)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        use tauri::Url;
+
+        let webview = window
+            .webviews()
+            .into_iter()
+            .find(|w| w.label() == payload.label)
+            .ok_or_else(|| {
+                crate::Error::NativeBridgeError(format!(
+                    "no webview with label '{}'",
+                    payload.label
+                ))
+            })?;
+        let url = Url::parse(&payload.url)
+            .map_err(|e| crate::Error::NativeBridgeError(format!("invalid url: {e}")))?;
+        let cookies = webview
+            .cookies_for_url(url)
+            .map_err(|e| crate::Error::NativeBridgeError(e.to_string()))?;
+        let cookie_header = cookies
+            .iter()
+            .map(|c| format!("{}={}", c.name(), c.value()))
+            .collect::<Vec<_>>()
+            .join("; ");
+        Ok(GetWebviewCookiesResponse { cookie_header })
+    }
+}

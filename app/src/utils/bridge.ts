@@ -407,6 +407,27 @@ export async function updateReadingWidget(request: UpdateReadingWidgetRequest): 
   await invoke('plugin:native-bridge|update_reading_widget', { payload: request });
 }
 
+// ── NAS remote-login webview cookies ──────────────────────────────────────
+// Reads cookies for `url` out of a child webview (see NasRemoteWebview),
+// used to capture the session cookies set by a NAS device's own login page.
+
+export interface GetWebviewCookiesRequest {
+  label: string;
+  url: string;
+}
+
+export interface GetWebviewCookiesResponse {
+  cookieHeader: string;
+}
+
+export async function getWebviewCookies(
+  request: GetWebviewCookiesRequest,
+): Promise<GetWebviewCookiesResponse> {
+  return invoke<GetWebviewCookiesResponse>('plugin:native-bridge|get_webview_cookies', {
+    payload: request,
+  });
+}
+
 // ── Nightly updater (main-app commands, no native-bridge prefix) ─────────
 // `verify_update_signature` gates the custom install flows (portable /
 // AppImage / Android); `install_nightly_update` drives the Tauri updater for

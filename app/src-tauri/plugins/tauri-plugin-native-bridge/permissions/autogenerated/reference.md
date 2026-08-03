@@ -49,6 +49,7 @@ Default permissions for the plugin
 - `allow-update-reading-widget`
 - `allow-capture-webview-region`
 - `allow-set-text-selection-suppressed`
+- `allow-get-webview-cookies`
 
 ## Permission Table
 
@@ -601,6 +602,32 @@ Enables the get_system_color_scheme command without any pre-configured scope.
 <td>
 
 Denies the get_system_color_scheme command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:allow-get-webview-cookies`
+
+</td>
+<td>
+
+Enables the get_webview_cookies command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-get-webview-cookies`
+
+</td>
+<td>
+
+Denies the get_webview_cookies command without any pre-configured scope.
 
 </td>
 </tr>

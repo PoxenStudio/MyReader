@@ -6,6 +6,10 @@
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
 import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { useNasDeviceStore } from '@/store/nasDeviceStore';
+import { getNasCookies } from '@/services/mybooks/nasCookieStore';
+import { shouldAutoPromptNasLogin } from '@/services/mybooks/nasSession';
 
 export interface MyBooksBook {
   id: number;
@@ -200,6 +204,25 @@ export async function fetchMyBooks<T>(
   const fetchOptions: RequestInit = { credentials: 'include', method };
   if (body) fetchOptions.body = body;
   if (contentType) fetchOptions.headers = { 'Content-Type': contentType };
+
+  // Tauri only: plugin-http's cookie jar is separate from the system
+  // WebView's, so cookies captured from the NAS login webview (a different
+  // engine — see nasCookieStore.ts) never reach plugin-http on their own.
+  // Attach them explicitly, and — if the NAS session looks expired — ask
+  // the root-mounted NasSessionPrompt to re-open the login webview. This
+  // doesn't block the in-flight request; it just arms the next one.
+  if (host && isTauriAppPlatform()) {
+    const nasSettings = useSettingsStore.getState().settings.nas;
+    if (nasSettings?.enabled) {
+      const nasCookie = getNasCookies(new URL(url).host);
+      if (nasCookie) {
+        fetchOptions.headers = { ...fetchOptions.headers, Cookie: nasCookie };
+      }
+      if (shouldAutoPromptNasLogin(nasSettings)) {
+        useNasDeviceStore.getState().requestPrompt();
+      }
+    }
+  }
 
   let result: MyBooksResponse<T>;
   try {

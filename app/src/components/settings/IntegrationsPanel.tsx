@@ -1,7 +1,8 @@
 import clsx from 'clsx';
 import React, { useEffect, useState } from 'react';
 import { MdChevronRight } from 'react-icons/md';
-import { RiRssLine, RiCloudLine } from 'react-icons/ri';
+import { RiRssLine, RiCloudLine, RiHardDrive2Line } from 'react-icons/ri';
+import { isTauriAppPlatform } from '@/services/environment';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -9,10 +10,11 @@ import { useCustomOPDSStore } from '@/store/customOPDSStore';
 import { useWebDAVSyncStore } from '@/store/webdavSyncStore';
 import { CatalogManager } from '@/app/opds/components/CatalogManager';
 import WebDAVForm from './integrations/WebDAVForm';
+import NasDeviceForm from './integrations/NasDeviceForm';
 import SubPageHeader from './SubPageHeader';
 import { SectionTitle, SettingLabel } from './primitives';
 
-type SubPage = 'webdav' | 'opds' | null;
+type SubPage = 'webdav' | 'opds' | 'nas' | null;
 
 /**
  * Integrations panel — single point of discovery for external service config:
@@ -57,7 +59,11 @@ const IntegrationsPanel: React.FC = () => {
   // stick to the next open. Recognised values match the SubPage union.
   useEffect(() => {
     if (!requestedSubPage) return;
-    if (requestedSubPage === 'webdav' || requestedSubPage === 'opds') {
+    if (
+      requestedSubPage === 'webdav' ||
+      requestedSubPage === 'opds' ||
+      requestedSubPage === 'nas'
+    ) {
       setSubPage(requestedSubPage);
     }
     setRequestedSubPage(null);
@@ -67,6 +73,12 @@ const IntegrationsPanel: React.FC = () => {
   // SubPageHeader's "Integrations" label lands at the exact same Y position
   // as the list-view's h2 — clicking a row reads as a navigation morph
   // rather than a layout shift.
+  if (subPage === 'nas')
+    return (
+      <div className='my-4 w-full'>
+        <NasDeviceForm onBack={() => setSubPage(null)} />
+      </div>
+    );
   if (subPage === 'webdav')
     return (
       <div className='my-4 w-full'>
@@ -95,14 +107,31 @@ const IntegrationsPanel: React.FC = () => {
       : _('Not connected');
   const opdsStatus =
     opdsCount > 0 ? _('{{count}} catalog', { count: opdsCount }) : _('No catalogs');
+  const nasStatus = settings.nas?.enabled ? _('Enabled') : _('Not configured');
 
   return (
     <div className='my-4 w-full space-y-6'>
       <div className='w-full px-4'>
         <h2 className='mb-1.5 text-lg font-semibold tracking-tight'>{_('Integrations')}</h2>
         <p className='text-base-content/70 text-sm leading-relaxed'>
-          {_('Connect MyReader to external services for sync and catalogs.')}
+          {_('Connect MyReader to external services for login, sync and catalogs.')}
         </p>
+      </div>
+
+      <div className='w-full' data-setting-id='settings.integrations.nas'>
+        <SectionTitle className='mb-2'>{_('Remote Login')}</SectionTitle>
+        <div className='card eink-bordered border-base-200 bg-base-100 overflow-hidden border'>
+          <div className='divide-base-200 divide-y'>
+            {isTauriAppPlatform() && (
+              <IntegrationRow
+                icon={RiHardDrive2Line}
+                title={_('NAS Device')}
+                status={nasStatus}
+                onClick={() => setSubPage('nas')}
+              />
+            )}
+          </div>
+        </div>
       </div>
 
       <div className='w-full' data-setting-id='settings.integrations.sync'>
