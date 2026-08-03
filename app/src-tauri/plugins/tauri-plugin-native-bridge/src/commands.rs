@@ -457,7 +457,6 @@ pub(crate) async fn create_nas_login_window<R: Runtime>(
         tauri::WebviewUrl::App(std::path::PathBuf::from(NAS_LOADING_PAGE_ASSET)),
     )
     .inner_size(payload.width, payload.height)
-    .center()
     .resizable(true)
     .title(format!("{base_title} (Loading...)"))
     .background_color(tauri::webview::Color(255, 255, 255, 255))
@@ -487,6 +486,12 @@ pub(crate) async fn create_nas_login_window<R: Runtime>(
             }
         }
     });
+    // `center()` only exists on desktop's `WebviewWindowBuilder` — mobile
+    // windows are always fullscreen, so there's nothing to center.
+    #[cfg(desktop)]
+    {
+        builder = builder.center();
+    }
     if let Some(user_agent) = &payload.user_agent {
         builder = builder.user_agent(user_agent);
     }
