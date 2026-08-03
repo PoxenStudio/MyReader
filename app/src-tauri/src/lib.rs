@@ -406,6 +406,25 @@ pub fn run() {
         ))
     });
 
+    // On Android, prefer writing logs directly to the shared Download
+    // folder when it's writable (i.e. "All files access" is granted), so
+    // users can find them without digging through the private sandbox and
+    // without a separate lifecycle-triggered copy step. Falls back to the
+    // private per-platform log dir otherwise.
+    #[cfg(target_os = "android")]
+    let log_target = match android::writable_shared_log_dir() {
+        Some(dir) => tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+            path: dir,
+            file_name: None,
+        }),
+        None => {
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None })
+        }
+    };
+    #[cfg(not(target_os = "android"))]
+    let log_target =
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None });
+
     let builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -414,9 +433,7 @@ pub fn run() {
                 .level_for("tantivy", log::LevelFilter::Warn)
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: None,
-                    }),
+                    log_target,
                 ])
                 .build(),
         )
