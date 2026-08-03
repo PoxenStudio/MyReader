@@ -143,9 +143,9 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
 }) => {
   const _ = useTranslation();
   const router = useAppRouter();
-  const { appService } = useEnv();
+  const { appService, envConfig } = useEnv();
   const { settings } = useSettingsStore();
-  const { getBookByHash } = useLibraryStore();
+  const { getBookByHash, updateBook } = useLibraryStore();
   const { isAdmin } = useAuth();
   const { openBook, makeBookAvailable } = useOpenBook({ setLoading, handleBookDownload });
 
@@ -193,11 +193,17 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
       const targetBook =
         getBookByHash(buildCloudBookHash(id, format)) ?? getFormatVariantBook(book, format);
       if (!targetBook) return;
-      if (await appService?.isBookAvailable(targetBook)) return;
-      handleBookDownload(targetBook, { queued: true });
+      if (await appService?.isBookAvailable(targetBook)) {
+        if (targetBook.deletedAt) {
+          targetBook.deletedAt = null;
+          await updateBook(envConfig, targetBook);
+        }
+        return;
+      }
+      handleBookDownload(targetBook, { queued: false });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [appService],
+    [appService, envConfig, updateBook],
   );
 
   const handleGroupClick = useCallback(
