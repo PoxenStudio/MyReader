@@ -18,6 +18,7 @@ import { useEnv } from '@/context/EnvContext';
 import { isTauriAppPlatform } from '@/services/environment';
 import { useSettingsStore } from '@/store/settingsStore';
 import { setNasCookies } from '@/services/mybooks/nasCookieStore';
+import { NasCookieEntry } from '@/utils/bridge';
 import {
   getUserDetailInfo,
   updateUserSettings,
@@ -174,11 +175,11 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleNasWebviewClose = async (cookieHeader: string | null) => {
+  const handleNasWebviewClose = async (cookies: NasCookieEntry[] | null) => {
     setShowNasWebview(false);
-    if (!cookieHeader || !nasSettings?.loginUrl) return;
+    if (!cookies || !nasSettings?.loginUrl) return;
     try {
-      setNasCookies(new URL(nasSettings.loginUrl).host, cookieHeader);
+      setNasCookies(new URL(nasSettings.loginUrl).host, cookies);
     } catch (e) {
       console.error('Invalid NAS login URL:', e);
       return;

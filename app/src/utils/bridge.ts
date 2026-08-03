@@ -433,8 +433,15 @@ export interface GetWebviewCookiesRequest {
   url: string;
 }
 
+export interface NasCookieEntry {
+  name: string;
+  value: string;
+  /** `null` for a host-only cookie; a domain string for a domain cookie. */
+  domain: string | null;
+}
+
 export interface GetWebviewCookiesResponse {
-  cookieHeader: string;
+  cookies: NasCookieEntry[];
 }
 
 export async function getWebviewCookies(

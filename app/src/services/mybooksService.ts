@@ -8,7 +8,7 @@ import { isTauriAppPlatform } from '@/services/environment';
 import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useNasDeviceStore } from '@/store/nasDeviceStore';
-import { getNasCookies } from '@/services/mybooks/nasCookieStore';
+import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
 import { shouldAutoPromptNasLogin } from '@/services/mybooks/nasSession';
 
 export interface MyBooksBook {
@@ -215,9 +215,11 @@ export async function fetchMyBooks<T>(
     const nasSettings = useSettingsStore.getState().settings.nas;
     if (nasSettings?.enabled) {
       const nasCookie = getNasCookies(new URL(url).host);
-      if (nasCookie) {
-        fetchOptions.headers = { ...fetchOptions.headers, Cookie: nasCookie };
-      }
+      fetchOptions.headers = {
+        ...fetchOptions.headers,
+        ...(nasCookie && { Cookie: nasCookie }),
+        'User-Agent': NAS_CHROME_USER_AGENT,
+      };
       if (shouldAutoPromptNasLogin(nasSettings)) {
         useNasDeviceStore.getState().requestPrompt();
       }

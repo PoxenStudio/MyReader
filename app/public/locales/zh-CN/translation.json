@@ -2116,5 +2116,6 @@
   "Remote Login": "远程登录",
   "Not configured": "未配置",
   "Log in to NAS device": "登录 NAS 设备",
-  "NAS Remote Device": "NAS 远程设备"
+  "NAS Remote Device": "NAS 远程设备",
+  "Access denied. Please log in to your NAS device first.": "禁止访问，请先登录 NAS 设备"
 }

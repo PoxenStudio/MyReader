@@ -350,12 +350,15 @@ pub(crate) async fn get_webview_cookies<R: Runtime>(
         let cookies = webview
             .cookies_for_url(url)
             .map_err(|e| crate::Error::NativeBridgeError(e.to_string()))?;
-        let cookie_header = cookies
+        let entries = cookies
             .iter()
-            .map(|c| format!("{}={}", c.name(), c.value()))
-            .collect::<Vec<_>>()
-            .join("; ");
-        Ok(GetWebviewCookiesResponse { cookie_header })
+            .map(|c| NasCookieEntry {
+                name: c.name().to_string(),
+                value: c.value().to_string(),
+                domain: c.domain().map(|d| d.trim_start_matches('.').to_string()),
+            })
+            .collect();
+        Ok(GetWebviewCookiesResponse { cookies: entries })
     }
 }
 

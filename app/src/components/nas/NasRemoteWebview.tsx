@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { type as osType } from '@tauri-apps/plugin-os';
-import { createNasLoginWindow, getWebviewCookies } from '@/utils/bridge';
+import { NasCookieEntry, createNasLoginWindow, getWebviewCookies } from '@/utils/bridge';
 
 const MAX_WIDTH = 800;
 const MAX_HEIGHT = 1024;
@@ -48,9 +48,10 @@ interface NasRemoteWebviewProps {
   url: string;
   /**
    * Called once the popup is closed (by the user or on unmount), with the
-   * `Cookie` header captured for `url`, or `null` if none could be read.
+   * cookies captured for `url` (each tagged with its domain scope — see
+   * `NasCookieEntry`), or `null` if none could be read.
    */
-  onClose: (cookieHeader: string | null) => void;
+  onClose: (cookies: NasCookieEntry[] | null) => void;
 }
 
 const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => {
@@ -62,11 +63,11 @@ const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => 
     closedRef.current = true;
     const win = windowRef.current;
     windowRef.current = null;
-    let cookieHeader: string | null = null;
+    let cookies: NasCookieEntry[] | null = null;
     if (win) {
       try {
         const result = await getWebviewCookies({ label: win.label, url });
-        cookieHeader = result.cookieHeader || null;
+        cookies = result.cookies.length ? result.cookies : null;
       } catch (e) {
         console.error('Failed to read NAS window cookies:', e);
       }
@@ -78,7 +79,7 @@ const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => 
         console.error('Failed to close NAS window:', e);
       }
     }
-    onClose(cookieHeader);
+    onClose(cookies);
   };
 
   useEffect(() => {

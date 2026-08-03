@@ -463,7 +463,7 @@ pub struct CaptureWebviewRegionResponse {
 /// Read back cookies captured by the NAS remote-login webview (a child
 /// `Webview` created directly from the frontend via `@tauri-apps/api/webview`,
 /// not tracked by `NativeBridge` itself — we look it up by label at call time).
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetWebviewCookiesRequest {
     /// Label of the child webview to read cookies from.
@@ -472,11 +472,32 @@ pub struct GetWebviewCookiesRequest {
     pub url: String,
 }
 
+/// A single captured cookie, with enough of its scope preserved to replay it
+/// correctly against a *different* host later (e.g. a dynamic NAS relay
+/// subdomain that differs from the login host).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NasCookieEntry {
+    pub name: String,
+    pub value: String,
+    /// `None` for a host-only cookie (RFC 6265: no `Domain` attribute set) —
+    /// send only to the exact host it was captured for. `Some(domain)` for a
+    /// domain cookie — send to `domain` and any of its subdomains.
+    pub domain: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetWebviewCookiesResponse {
-    /// Ready-to-send `Cookie` request-header value (`name=value; name2=value2`).
-    /// Empty string when no cookies are set for `url`.
+    pub cookies: Vec<NasCookieEntry>,
+}
+
+/// Raw shape returned by the Android plugin side (`CookieManager.getCookie`
+/// has no per-cookie `Domain` attribute API), before it's normalized into
+/// [`GetWebviewCookiesResponse`] by `get_webview_cookies_android`.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawCookieHeaderResponse {
     pub cookie_header: String,
 }
 

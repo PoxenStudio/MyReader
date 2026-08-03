@@ -403,8 +403,29 @@ impl<R: Runtime> NativeBridge<R> {
         &self,
         payload: GetWebviewCookiesRequest,
     ) -> crate::Result<GetWebviewCookiesResponse> {
-        self.0
-            .run_mobile_plugin("get_webview_cookies", payload)
-            .map_err(Into::into)
+        // `CookieManager.getCookie(url)` has no per-cookie `Domain` API, so
+        // we can't tell host-only cookies from domain cookies like desktop
+        // does. Tagging every entry with `domain: Some(login_host)` keeps
+        // the old (pre-domain-aware) behavior on this platform: replay to
+        // the login host and any of its subdomains, rather than risk
+        // dropping cookies a stricter host-only interpretation would exclude.
+        let login_host = tauri::Url::parse(&payload.url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string));
+        let raw: RawCookieHeaderResponse =
+            self.0.run_mobile_plugin("get_webview_cookies", payload)?;
+        let cookies = raw
+            .cookie_header
+            .split(';')
+            .filter_map(|pair| {
+                let (name, value) = pair.trim().split_once('=')?;
+                Some(NasCookieEntry {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                    domain: login_host.clone(),
+                })
+            })
+            .collect();
+        Ok(GetWebviewCookiesResponse { cookies })
     }
 }

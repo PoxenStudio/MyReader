@@ -4,6 +4,7 @@ import { useEnv } from '@/context/EnvContext';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useNasDeviceStore } from '@/store/nasDeviceStore';
 import { setNasCookies } from '@/services/mybooks/nasCookieStore';
+import { NasCookieEntry } from '@/utils/bridge';
 import NasRemoteWebview from './NasRemoteWebview';
 
 /**
@@ -22,11 +23,11 @@ const NasSessionPrompt: React.FC = () => {
 
   if (!promptOpen || !nasSettings?.enabled || !nasSettings.loginUrl) return null;
 
-  const handleClose = async (cookieHeader: string | null) => {
+  const handleClose = async (cookies: NasCookieEntry[] | null) => {
     closePrompt();
-    if (!cookieHeader) return;
+    if (!cookies) return;
     try {
-      setNasCookies(new URL(nasSettings.loginUrl).host, cookieHeader);
+      setNasCookies(new URL(nasSettings.loginUrl).host, cookies);
     } catch (e) {
       console.error('Invalid NAS login URL:', e);
       return;

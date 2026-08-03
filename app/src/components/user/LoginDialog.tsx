@@ -9,7 +9,12 @@ import { User } from '@supabase/supabase-js';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
 import { useSettingsStore } from '@/store/settingsStore';
-import { setNasCookies } from '@/services/mybooks/nasCookieStore';
+import {
+  NAS_CHROME_USER_AGENT,
+  getNasCookies,
+  setNasCookies,
+} from '@/services/mybooks/nasCookieStore';
+import { NasCookieEntry } from '@/utils/bridge';
 import NasRemoteWebview from '@/components/nas/NasRemoteWebview';
 import NasRemoteLoginIconButton from '@/components/nas/NasRemoteLoginIconButton';
 import {
@@ -182,11 +187,12 @@ const LoginDialog: React.FC = () => {
     closeLoginDialog();
   };
 
-  const handleNasWebviewClose = async (cookieHeader: string | null) => {
+  const handleNasWebviewClose = async (cookies: NasCookieEntry[] | null) => {
     setShowNasWebview(false);
-    if (!cookieHeader || !nasSettings?.loginUrl) return;
+    console.log(`[nas-webview] closed, cookies=${cookies ? cookies.length : 'null'}`);
+    if (!cookies || !nasSettings?.loginUrl) return;
     try {
-      setNasCookies(new URL(nasSettings.loginUrl).host, cookieHeader);
+      setNasCookies(new URL(nasSettings.loginUrl).host, cookies);
     } catch (e) {
       console.error('Invalid NAS login URL:', e);
       return;
@@ -213,11 +219,15 @@ const LoginDialog: React.FC = () => {
       const signInUrl = isTauri
         ? `${normalizedHost}/api/user/sign_in`
         : `/api/mybooks/proxy/user/sign_in?host=${encodeURIComponent(normalizedHost)}`;
+      const nasEnabled = isTauri && !!nasSettings?.enabled;
+      const nasCookie = nasEnabled ? getNasCookies(new URL(normalizedHost).host) : null;
       const response = await fetchFn(signInUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           Accept: 'application/json',
+          ...(nasCookie && { Cookie: nasCookie }),
+          ...(nasEnabled && { 'User-Agent': NAS_CHROME_USER_AGENT }),
         },
         body: new URLSearchParams({ username, password }).toString(),
         ...(!isTauri && { credentials: 'include' as RequestCredentials }),
@@ -225,6 +235,26 @@ const LoginDialog: React.FC = () => {
           danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
         }),
       });
+
+      if (response.status === 403) {
+        const bodyText = await response
+          .clone()
+          .text()
+          .catch(() => '<unreadable>');
+        console.error(
+          'Login blocked with 403:',
+          response.status,
+          response.statusText,
+          'url:',
+          response.url,
+          'nasCookie:',
+          nasCookie ?? '<none>',
+          'body:',
+          bodyText,
+        );
+        setError(_('Access denied. Please log in to your NAS device first.'));
+        return;
+      }
 
       let result: MyBooksLoginResponse;
       try {
