@@ -163,12 +163,15 @@ export class MyBooksApiError extends Error {}
 /**
  * 通用请求方法
  */
+const MYBOOKS_REQUEST_TIMEOUT_MS = 5000;
+
 export async function fetchMyBooks<T>(
   endpoint: string,
   params?: Record<string, string | number>,
   method: string = 'GET',
   body?: BodyInit | null,
   contentType?: string,
+  timeoutMs: number = MYBOOKS_REQUEST_TIMEOUT_MS,
 ): Promise<MyBooksResponse<T>> {
   const host = typeof window !== 'undefined' ? localStorage.getItem('mybooks_host') : null;
 
@@ -226,15 +229,21 @@ export async function fetchMyBooks<T>(
     }
   }
 
+  const controller = new AbortController();
+  fetchOptions.signal = controller.signal;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   let result: MyBooksResponse<T>;
   try {
     const response = await fetchFn(url.toString(), fetchOptions);
     result = await response.json();
   } catch (error) {
     // Couldn't reach the configured MyBooks host at all (network down, server
-    // unreachable, etc.) — surface this as "offline" rather than an error.
+    // unreachable, timed out, etc.) — surface this as "offline" rather than an error.
     if (host) useMyBooksStatusStore.getState().setOffline(true);
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
   if (host) useMyBooksStatusStore.getState().setOffline(false);
 
@@ -589,11 +598,30 @@ export interface MyBooksUserDetailResult {
   sys: MyBooksSysInfo | null;
 }
 
+const MYBOOKS_USER_DETAIL_CACHE_KEY = 'mybooks_user_detail_info';
+
+// Lets the settings dialog show the last known profile immediately on open
+// instead of blocking on a fresh request, then refresh in the background.
+export function getCachedUserDetailInfo(): MyBooksUserDetailResult | null {
+  if (typeof window === 'undefined') return null;
+  const cached = localStorage.getItem(MYBOOKS_USER_DETAIL_CACHE_KEY);
+  if (!cached) return null;
+  try {
+    return JSON.parse(cached) as MyBooksUserDetailResult;
+  } catch {
+    return null;
+  }
+}
+
 export async function getUserDetailInfo(): Promise<MyBooksUserDetailResult | null> {
   const response = await fetchMyBooks('/user/info', { detail: 1 });
   updateSysInfo(response.sys);
   if (!response.user?.is_login && !response.user?.is_guest) return null;
-  return { user: response.user as MyBooksUserDetailInfo, sys: response.sys ?? null };
+  const result = { user: response.user as MyBooksUserDetailInfo, sys: response.sys ?? null };
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(MYBOOKS_USER_DETAIL_CACHE_KEY, JSON.stringify(result));
+  }
+  return result;
 }
 
 export async function updateUserSettings(settings: MyBooksUpdateSettings): Promise<void> {

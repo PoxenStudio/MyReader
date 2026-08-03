@@ -21,6 +21,7 @@ import { setNasCookies } from '@/services/mybooks/nasCookieStore';
 import { NasCookieEntry } from '@/utils/bridge';
 import {
   getUserDetailInfo,
+  getCachedUserDetailInfo,
   updateUserSettings,
   uploadUserAvatar,
   getMyBooksAvatarUrl,
@@ -74,6 +75,12 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
 
   useEffect(() => {
     if (!isOpen) return;
+    const cached = getCachedUserDetailInfo();
+    if (cached) {
+      setUserInfo(cached.user);
+      setNickname(cached.user.nickname || '');
+      setPodcastToken(cached.user.podcast_token || '');
+    }
     setRefreshStatus('loading');
     getUserDetailInfo()
       .then((result) => {
