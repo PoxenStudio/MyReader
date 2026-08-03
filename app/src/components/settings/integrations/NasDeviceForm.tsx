@@ -131,7 +131,7 @@ const NasDeviceForm: React.FC<NasDeviceFormProps> = ({ onBack }) => {
                   onChange={(e) => setVendor(e.target.value as NasVendorType)}
                   ariaLabel={_('Vendor')}
                   options={[
-                    { value: 'feiniu', label: _('Feiniu') },
+                    { value: 'fnos', label: _('fnOS') },
                     { value: 'ugreen', label: _('UGREEN') },
                     { value: 'synology', label: _('Synology') },
                     { value: 'other', label: _('Other') },

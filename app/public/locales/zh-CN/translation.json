@@ -2106,7 +2106,7 @@
   "Log in to a NAS device before MyReader can reach the server it hosts.": "登录 NAS 设备后，MyReader 才能访问其上部署的服务器。",
   "Support remote NAS device access": "支持 NAS 设备远程访问",
   "Vendor": "厂商",
-  "Feiniu": "飞牛",
+  "fnOS": "飞牛",
   "UGREEN": "绿联",
   "Synology": "群晖",
   "Other": "其它",

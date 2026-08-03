@@ -240,7 +240,7 @@ export const WEBDAV_SYNC_LOG_LIMIT = 10;
 export type NasVendorType = 'feiniu' | 'ugreen' | 'synology' | 'other';
 
 /** Minimum allowed value for {@link NasDeviceSettings.expiryMinutes}. */
-export const NAS_MIN_EXPIRY_MINUTES = 5;
+export const NAS_MIN_EXPIRY_MINUTES = 10;
 
 /**
  * NAS remote-access settings. Some NAS setups require logging into the NAS
