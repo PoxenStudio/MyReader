@@ -507,6 +507,48 @@ describe('cloudService', () => {
       );
     });
 
+    test('clears a stale deletedAt tombstone on a successful re-download', async () => {
+      // A soft-deleted book (deletedAt set by the 'both'/'purge' delete flow)
+      // is hidden from the shelf by useLibraryStore's visibleLibrary filter
+      // (`!b.deletedAt`). Re-downloading it must clear the tombstone —
+      // otherwise the file and library.json record come back but the book
+      // stays permanently invisible. uploadBook already does this
+      // (cloudService.ts:125); downloadMyBooksBook must match.
+      const book = createMockBook({
+        hash: 'cloud-123-pdf',
+        format: 'PDF' as BookFormat,
+        deletedAt: 1700000000000,
+        files: [{ format: 'PDF' as BookFormat, size: 2, href: '/api/book/123.pdf' }],
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(book.deletedAt).toBeNull();
+    });
+
+    test('falls back to book.bookId when the local hash is not cloud-<id> formatted', async () => {
+      // A book the user uploaded from their own library keeps its original
+      // content hash (not `cloud-<id>`) and has no `files` catalog metadata —
+      // only `bookId`, set by uploadBook. Re-downloading it (e.g. after local
+      // deletion) must resolve the MyBooks id from `book.bookId`, not by
+      // parsing the hash.
+      const book = createMockBook({
+        hash: 'abc123',
+        bookId: 456,
+        format: 'EPUB' as BookFormat,
+        files: undefined,
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(webDownloadMock).toHaveBeenCalledWith(
+        expect.stringContaining(encodeURIComponent('/api/book/456.epub')),
+        undefined,
+        undefined,
+        'include',
+      );
+    });
+
     test('converts a TXT-format cloud download to EPUB before writing to disk', async () => {
       const book = createMockBook({
         hash: 'cloud-123-txt',

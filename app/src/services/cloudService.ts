@@ -11,7 +11,7 @@ import { ProgressHandler } from '@/utils/transfer';
 import { isBookFileContentSource, resolveBookContentSource } from './bookContent';
 import { EXTS } from '@/libs/document';
 import { isTauriAppPlatform } from '@/services/environment';
-import { getCloudBookId } from '@/utils/bookConverter';
+import { getCloudBookId, getMyBooksId } from '@/utils/bookConverter';
 import { uploadBookToMyBooks, deleteBookFromMyBooks } from '@/services/mybooksService';
 
 export async function deleteBook(
@@ -142,7 +142,7 @@ export async function downloadMyBooksBook(
   onProgress?: ProgressHandler,
 ): Promise<void> {
   // Extract MyReader book ID from hash (format: 'cloud-<id>' or 'cloud-<id>-<format>')
-  const bookId = String(getCloudBookId(book.hash));
+  const bookId = String(getMyBooksId(book));
   const host = typeof window !== 'undefined' ? localStorage.getItem('mybooks_host') : null;
 
   console.log('MyReader host:', host);
@@ -200,6 +200,7 @@ export async function downloadMyBooksBook(
   const bookDownloaded = await fs.exists(lfp, 'Books');
   if (bookDownloaded) {
     book.downloadedAt = Date.now();
+    book.deletedAt = null;
   } else {
     throw new Error('Failed to download file');
   }

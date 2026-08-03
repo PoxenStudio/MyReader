@@ -1113,8 +1113,8 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
             }),
           });
           return true;
-        } catch {
-          console.log('Failed to download book');
+        } catch (error) {
+          console.error('[handleBookDownload] Failed to download book:', book.hash, error);
           eventDispatcher.dispatch('toast', {
             message: _('Failed to download book: {{title}}', {
               title: book.title,
@@ -1125,7 +1125,6 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         }
       }
 
-      console.log('handlebookdownload #2');
       // Use transfer queue for normal downloads - priority 1 for manual downloads
       const transferId = transferManager.queueDownload(book, 1);
       if (transferId) {

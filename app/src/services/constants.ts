@@ -92,6 +92,7 @@ export const DEFAULT_WEBDAV_SETTINGS = {
 export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   keepLogin: true,
   autoUpload: false,
+  autoSetReadState: true,
   alwaysOnTop: false,
   openBookInNewWindow: true,
   alwaysShowStatusBar: false,

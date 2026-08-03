@@ -195,6 +195,7 @@ describe('services/constants', () => {
     it('has boolean flags', () => {
       expect(typeof DEFAULT_SYSTEM_SETTINGS.keepLogin).toBe('boolean');
       expect(typeof DEFAULT_SYSTEM_SETTINGS.autoUpload).toBe('boolean');
+      expect(DEFAULT_SYSTEM_SETTINGS.autoSetReadState).toBe(false);
       expect(typeof DEFAULT_SYSTEM_SETTINGS.alwaysOnTop).toBe('boolean');
       expect(typeof DEFAULT_SYSTEM_SETTINGS.openBookInNewWindow).toBe('boolean');
       expect(typeof DEFAULT_SYSTEM_SETTINGS.alwaysShowStatusBar).toBe('boolean');

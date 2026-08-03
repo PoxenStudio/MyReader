@@ -5,6 +5,7 @@ import { BOOK_UNGROUPED_NAME } from '@/services/constants';
 import { md5Fingerprint } from '@/utils/md5';
 import { updateReadState } from '@/services/mybooksService';
 import { getMyBooksId } from '@/utils/bookConverter';
+import { useSettingsStore } from '@/store/settingsStore';
 
 // MyBooks read state: 0=unread, 1=reading, 2=finished. Books without an
 // explicit status (e.g. actively being read but never tagged 'finished'
@@ -20,9 +21,11 @@ function toMyBooksReadState(status: ReadingStatus | undefined): 0 | 1 | 2 {
 // the local update.
 function syncReadingStatusToMyBooks(book: Book, prevStatus: ReadingStatus | undefined): void {
   if (book.readingStatus === prevStatus) return;
+  const status = toMyBooksReadState(book.readingStatus);
+  if (!useSettingsStore.getState().settings.autoSetReadState && status != 1) return;
   const bookId = getMyBooksId(book);
   if (!bookId) return;
-  updateReadState(bookId, toMyBooksReadState(book.readingStatus)).catch((error) => {
+  updateReadState(bookId, status).catch((error) => {
     console.log('[libraryStore] Failed to sync reading status to MyBooks:', error);
   });
 }

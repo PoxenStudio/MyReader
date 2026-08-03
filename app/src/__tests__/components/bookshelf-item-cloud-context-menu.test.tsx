@@ -25,15 +25,22 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'test-user' } }),
 }));
 
+const isBookAvailableMock = vi.hoisted(() => vi.fn().mockResolvedValue(false));
+
 vi.mock('@/context/EnvContext', () => ({
   useEnv: () => ({
     envConfig: {},
-    appService: { hasContextMenu: true, isBookAvailable: async () => true },
+    appService: {
+      hasContextMenu: true,
+      isBookAvailable: (...args: unknown[]) => isBookAvailableMock(...args),
+    },
   }),
 }));
 
+const updateBookMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
 vi.mock('@/store/libraryStore', () => ({
-  useLibraryStore: () => ({ updateBook: vi.fn(), getBookByHash: vi.fn() }),
+  useLibraryStore: () => ({ updateBook: updateBookMock, getBookByHash: vi.fn() }),
 }));
 
 vi.mock('@/store/settingsStore', () => ({
@@ -49,12 +56,17 @@ vi.mock('@/hooks/useTranslation', () => ({
 }));
 
 const appendedTexts: string[] = vi.hoisted(() => []);
+type AppendedMenuItem = { text: string; action?: () => unknown; items?: AppendedMenuItem[] };
+const appendedItems: AppendedMenuItem[] = vi.hoisted(() => []);
 const popupMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/menu', () => ({
   Menu: {
     new: vi.fn().mockResolvedValue({
-      append: (item: { text: string }) => appendedTexts.push(item.text),
+      append: (item: AppendedMenuItem) => {
+        appendedTexts.push(item.text);
+        appendedItems.push(item);
+      },
       popup: popupMock,
     }),
   },
@@ -102,7 +114,10 @@ describe('BookshelfItem context menu in the cloud bookshelf', () => {
   beforeEach(() => {
     capturedOnContextMenu = null;
     appendedTexts.length = 0;
+    appendedItems.length = 0;
     popupMock.mockClear();
+    isBookAvailableMock.mockReset().mockResolvedValue(false);
+    updateBookMock.mockClear();
   });
 
   afterEach(() => {
@@ -178,6 +193,134 @@ describe('BookshelfItem context menu in the cloud bookshelf', () => {
     expect(appendedTexts).toContain('Delete');
     expect(Object.values(FILE_REVEAL_LABELS).some((label) => appendedTexts.includes(label))).toBe(
       true,
+    );
+  });
+
+  it('downloads a "Download in Format" pick via the direct path, not the transfer queue', async () => {
+    // Picking a format the local library has never seen builds a synthetic
+    // Book (getFormatVariantBook) that was never added to useLibraryStore.
+    // transferManager.queueDownload's execute step looks the book up by hash
+    // in the store and fails with "Book not found in library" for it, so
+    // this action must go through the direct (queued: false) download path —
+    // the same one `handleReadInFormat`/makeBookAvailable already use.
+    const handleBookDownload = vi.fn().mockResolvedValue(true);
+    const multiFormatBook: Book = {
+      hash: 'cloud-123',
+      format: 'EPUB',
+      title: 'Cloud Book',
+      author: 'Someone',
+      tags: [],
+      createdAt: 0,
+      updatedAt: 0,
+      storageType: 'cloud',
+      files: [
+        { format: 'EPUB', size: 1, href: '/api/book/123.EPUB' },
+        { format: 'PDF', size: 2, href: '/api/book/123.PDF' },
+      ],
+    } as unknown as Book;
+
+    render(
+      <BookshelfItem
+        mode='grid'
+        item={multiFormatBook}
+        coverFit='crop'
+        isSelectMode={false}
+        itemSelected={false}
+        transferProgress={null}
+        setLoading={vi.fn()}
+        toggleSelection={vi.fn()}
+        handleGroupBooks={vi.fn()}
+        handleBookDownload={handleBookDownload}
+        handleBookUpload={vi.fn()}
+        handleBookDelete={vi.fn()}
+        handleSetSelectMode={vi.fn()}
+        handleShowDetailsBook={vi.fn()}
+        handleLibraryNavigation={vi.fn()}
+        handleUpdateReadingStatus={vi.fn()}
+        isCloudLibrary={true}
+      />,
+    );
+
+    expect(capturedOnContextMenu).not.toBeNull();
+    capturedOnContextMenu!({ clientX: 0, clientY: 0 });
+
+    await waitFor(() => expect(popupMock).toHaveBeenCalled());
+
+    const downloadSubmenu = appendedItems.find((item) => item.text === 'Download in Format');
+    expect(downloadSubmenu?.items).toBeDefined();
+    const pdfItem = downloadSubmenu!.items!.find((item) => item.text === 'PDF');
+    expect(pdfItem?.action).toBeDefined();
+
+    await pdfItem!.action!();
+
+    expect(handleBookDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ hash: 'cloud-123-pdf' }),
+      { queued: false },
+    );
+  });
+
+  it('clears a stale deletedAt tombstone when the picked format is already on disk', async () => {
+    // isBookAvailable returning true means the file already exists, so
+    // handleDownloadInFormat returns early without downloading — but a
+    // soft-deleted (tombstoned) book only gets deletedAt cleared by an
+    // actual download (cloudService.downloadMyBooksBook), which never runs
+    // here. Without an explicit reset, the book stays hidden from the
+    // shelf (useLibraryStore's visibleLibrary filters out `deletedAt`)
+    // forever despite the file being present.
+    isBookAvailableMock.mockResolvedValue(true);
+    const handleBookDownload = vi.fn();
+    const multiFormatBook: Book = {
+      hash: 'cloud-123',
+      format: 'EPUB',
+      title: 'Cloud Book',
+      author: 'Someone',
+      tags: [],
+      createdAt: 0,
+      updatedAt: 0,
+      storageType: 'cloud',
+      deletedAt: 1700000000000,
+      files: [
+        { format: 'EPUB', size: 1, href: '/api/book/123.EPUB' },
+        { format: 'PDF', size: 2, href: '/api/book/123.PDF' },
+      ],
+    } as unknown as Book;
+
+    render(
+      <BookshelfItem
+        mode='grid'
+        item={multiFormatBook}
+        coverFit='crop'
+        isSelectMode={false}
+        itemSelected={false}
+        transferProgress={null}
+        setLoading={vi.fn()}
+        toggleSelection={vi.fn()}
+        handleGroupBooks={vi.fn()}
+        handleBookDownload={handleBookDownload}
+        handleBookUpload={vi.fn()}
+        handleBookDelete={vi.fn()}
+        handleSetSelectMode={vi.fn()}
+        handleShowDetailsBook={vi.fn()}
+        handleLibraryNavigation={vi.fn()}
+        handleUpdateReadingStatus={vi.fn()}
+        isCloudLibrary={true}
+      />,
+    );
+
+    expect(capturedOnContextMenu).not.toBeNull();
+    capturedOnContextMenu!({ clientX: 0, clientY: 0 });
+
+    await waitFor(() => expect(popupMock).toHaveBeenCalled());
+
+    const downloadSubmenu = appendedItems.find((item) => item.text === 'Download in Format');
+    const pdfItem = downloadSubmenu!.items!.find((item) => item.text === 'PDF');
+
+    await pdfItem!.action!();
+
+    expect(handleBookDownload).not.toHaveBeenCalled();
+    expect(updateBookMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ hash: 'cloud-123-pdf', deletedAt: null }),
     );
   });
 });

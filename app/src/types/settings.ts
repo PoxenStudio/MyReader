@@ -320,6 +320,7 @@ export interface SystemSettings {
 
   keepLogin: boolean;
   autoUpload: boolean;
+  autoSetReadState: boolean;
   alwaysOnTop: boolean;
   openBookInNewWindow: boolean;
   autoCheckUpdates: boolean;

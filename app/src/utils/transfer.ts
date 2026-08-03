@@ -125,6 +125,21 @@ export const webDownload = async (
     credentials: credentials,
   });
   if (!response.ok) {
+    let bodySnippet = '';
+    try {
+      bodySnippet = (await response.text()).slice(0, 500);
+    } catch {
+      // response body may already be consumed/unavailable — ignore
+    }
+    console.error(
+      '[webDownload] request failed:',
+      downloadUrl,
+      'status:',
+      response.status,
+      response.statusText,
+      'body:',
+      bodySnippet,
+    );
     if (response.status === 401 || response.status === 403) {
       throw new Error(UploadFileError.Unauthorized);
     }
