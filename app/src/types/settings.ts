@@ -346,6 +346,8 @@ export interface SystemSettings {
   keepLogin: boolean;
   autoUpload: boolean;
   autoSetReadState: boolean;
+  /** Whether books can be deleted from the cloud (MyBooks) shelf. Admin-only action, gated separately by `isAdmin`. */
+  allowDelCloudBook: boolean;
   alwaysOnTop: boolean;
   openBookInNewWindow: boolean;
   autoCheckUpdates: boolean;

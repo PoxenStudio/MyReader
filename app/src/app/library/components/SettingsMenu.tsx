@@ -46,6 +46,7 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
   const { settings, setSettingsDialogOpen } = useSettingsStore();
   const [isAutoCheckUpdates, setIsAutoCheckUpdates] = useState(settings.autoCheckUpdates);
   const [isAutoSetReadState, setIsAutoSetReadState] = useState(settings.autoSetReadState);
+  const [isAllowDelCloudBook, setIsAllowDelCloudBook] = useState(settings.allowDelCloudBook);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(settings.alwaysOnTop);
   const [isAlwaysShowStatusBar, setIsAlwaysShowStatusBar] = useState(settings.alwaysShowStatusBar);
   const [isOpenLastBooks, setIsOpenLastBooks] = useState(settings.openLastBooks);
@@ -145,6 +146,12 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
     const newValue = !settings.autoSetReadState;
     saveSysSettings(envConfig, 'autoSetReadState', newValue);
     setIsAutoSetReadState(newValue);
+  };
+
+  const toggleAllowDelCloudBook = () => {
+    const newValue = !settings.allowDelCloudBook;
+    saveSysSettings(envConfig, 'allowDelCloudBook', newValue);
+    setIsAllowDelCloudBook(newValue);
   };
 
   const toggleAutoImportBooksOnOpen = () => {
@@ -266,6 +273,14 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
           label={_('Auto Set Read State')}
           toggled={isAutoSetReadState}
           onClick={toggleAutoSetReadState}
+        />
+      )}
+
+      {user && (
+        <MenuItem
+          label={_('Allow Delete Cloud Books')}
+          toggled={isAllowDelCloudBook}
+          onClick={toggleAllowDelCloudBook}
         />
       )}
 

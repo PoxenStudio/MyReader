@@ -370,7 +370,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
     if (getMyBooksId(book)) {
       menu.append(sendToDeviceMenuItem);
     }
-    if (!isCloudLibrary || isAdmin) {
+    if (!isCloudLibrary || (isAdmin && settings.allowDelCloudBook)) {
       menu.append(deleteBookMenuItem);
     }
 
@@ -441,7 +441,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
       cachedMenuRef.current = null;
       cached?.then((menu) => menu.close()).catch(() => {});
     };
-  }, [item, itemSelected, isSelectMode, settings.localBooksDir, _]);
+  }, [item, itemSelected, isSelectMode, settings.localBooksDir, settings.allowDelCloudBook, _]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleSelectItem = useCallback(
