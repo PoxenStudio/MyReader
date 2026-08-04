@@ -957,7 +957,10 @@ const Bookshelf: React.FC<BookshelfProps> = ({
       <div ref={osRootRef} data-overlayscrollbars-initialize='' className='h-full'>
         {hasItems && isGridMode && (
           <VirtuosoGrid<unknown, BookshelfListContext>
-            overscan={200}
+            // Keeps rows mounted through a typical Android fling so BookCover
+            // doesn't unmount/remount (and flash back to the fallback cover)
+            // mid-gesture; 200px was crossed easily by momentum scrolling.
+            overscan={600}
             totalCount={gridTotalCount}
             components={GRID_VIRTUOSO_COMPONENTS}
             context={listContext}
@@ -968,7 +971,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
         )}
         {hasItems && !isGridMode && (
           <Virtuoso<unknown, BookshelfListContext>
-            overscan={200}
+            overscan={600}
             totalCount={listTotalCount}
             components={LIST_VIRTUOSO_COMPONENTS}
             context={listContext}

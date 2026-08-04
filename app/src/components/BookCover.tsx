@@ -7,6 +7,8 @@ import { Book } from '@/types/book';
 import { LibraryCoverFitType, LibraryViewModeType } from '@/types/settings';
 import { formatAuthors, formatTitle } from '@/utils/book';
 import { isTauriAppPlatform } from '@/services/environment';
+import { isRemoteImageUrl } from '@/utils/image';
+import { getOrCreateCoverObjectUrl, peekCachedCoverObjectUrl } from '@/utils/coverObjectUrlCache';
 
 const COVER_CACHE_NAME = 'myreader-book-covers-v1';
 
@@ -27,6 +29,70 @@ async function cacheCover(url: string, response: Response): Promise<void> {
     const cache = await caches.open(COVER_CACHE_NAME);
     await cache.put(url, response.clone());
   } catch {}
+}
+
+function resolveCoverUrl(book: Book): string | null {
+  return book.metadata?.coverImageUrl || book.coverImageUrl || null;
+}
+
+/** True for a cover that needs the async fetch/cache-api path below. */
+function isRemoteCoverUrl(coverUrl: string): boolean {
+  return isTauriAppPlatform() && isRemoteImageUrl(coverUrl);
+}
+
+/**
+ * Fetches a remote cover (via the Cache API first, then the network) and
+ * returns a blob object URL for it. Callers should route this through
+ * `getOrCreateCoverObjectUrl` so concurrent/repeat mounts for the same cover
+ * share one object URL instead of re-decoding the image each time.
+ */
+async function fetchRemoteCoverObjectUrl(
+  coverUrl: string,
+  title: string,
+  hash: string,
+): Promise<string> {
+  const cachedResponse = await getCachedCover(coverUrl);
+  if (cachedResponse) {
+    info(`[BookCover] Using cached cover for book: ${title} (${hash})`).catch(() => {});
+    const blob = await cachedResponse.blob();
+    return URL.createObjectURL(blob);
+  }
+
+  info(`[BookCover] Fetching remote cover for book: ${title} (${hash})`).catch(() => {});
+  info(`[BookCover] Cover URL: ${coverUrl}`).catch(() => {});
+
+  const response = await (tauriFetch as unknown as typeof fetch)(coverUrl, {
+    method: 'GET',
+    headers: {
+      Accept: 'image/*',
+    },
+  });
+
+  if (!response.ok) {
+    const errorMsg = `[BookCover] Remote cover request failed with status ${response.status}: ${coverUrl}`;
+    console.error(errorMsg);
+    tauriError(errorMsg).catch(() => {});
+    throw new Error(`Cover request failed with status ${response.status}`);
+  }
+
+  const contentType = response.headers.get('Content-Type') ?? '';
+  if (!contentType.startsWith('image/')) {
+    const errorMsg = `[BookCover] Remote cover response was not an image (Content-Type: ${contentType}): ${coverUrl}`;
+    console.error(errorMsg);
+    tauriError(errorMsg).catch(() => {});
+    throw new Error(`Cover response was not an image (Content-Type: ${contentType})`);
+  }
+
+  await cacheCover(coverUrl, response);
+
+  const blob = await response.blob();
+  info(`[BookCover] Remote cover blob size: ${blob.size} bytes, type: ${contentType}`).catch(
+    () => {},
+  );
+
+  const objectUrl = URL.createObjectURL(blob);
+  info(`[BookCover] Remote cover loaded and cached for book: ${title} (${hash})`).catch(() => {});
+  return objectUrl;
 }
 
 interface BookCoverProps {
@@ -54,21 +120,23 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     onAspectRatioChange,
   }) => {
     const coverRef = useRef<HTMLDivElement>(null);
-    const objectUrlRef = useRef<string | null>(null);
     const [imageLoaded, setImageLoaded] = useState(false);
     const [imageError, setImageError] = useState(false);
-    const [displayImageUrl, setDisplayImageUrl] = useState<string | null>(null);
+    // Lazily resolved so a book whose cover is already known synchronously
+    // (a local asset URL, or a remote cover already decoded by an earlier
+    // mount) paints with its real cover on the very first render instead of
+    // a null -> fallback -> real-cover sequence. That sequence is what
+    // caused the flicker: Virtuoso unmounts/remounts BookCover on every
+    // Android fling that crosses its overscan window, so covers were
+    // re-running that sequence dozens of times per scroll gesture.
+    const [displayImageUrl, setDisplayImageUrl] = useState<string | null>(() => {
+      const coverUrl = resolveCoverUrl(book);
+      if (!coverUrl) return null;
+      if (!isRemoteCoverUrl(coverUrl)) return coverUrl;
+      return peekCachedCoverObjectUrl(coverUrl) ?? null;
+    });
 
     const shouldShowSpine = showSpine && imageLoaded && !imageError;
-
-    useEffect(() => {
-      return () => {
-        if (objectUrlRef.current) {
-          URL.revokeObjectURL(objectUrlRef.current);
-          objectUrlRef.current = null;
-        }
-      };
-    }, []);
 
     const toggleImageVisibility = (showImage: boolean) => {
       if (coverRef.current) {
@@ -101,88 +169,45 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     };
 
     useEffect(() => {
-      const coverUrl = book.metadata?.coverImageUrl || book.coverImageUrl;
+      const coverUrl = resolveCoverUrl(book);
       if (!coverUrl) {
         toggleImageVisibility(false);
         return;
       }
 
-      const isLocalAssetUrl =
-        coverUrl.startsWith('asset://') || coverUrl.includes('asset.localhost');
-      const isRemoteUrl =
-        !isLocalAssetUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://'));
-
-      if (!isTauriAppPlatform() || !isRemoteUrl) {
+      if (!isRemoteCoverUrl(coverUrl)) {
         setDisplayImageUrl(coverUrl);
         toggleImageVisibility(true);
         return;
       }
 
-      const fetchCover = async () => {
-        try {
-          const cachedResponse = await getCachedCover(coverUrl);
-          if (cachedResponse) {
-            info(`[BookCover] Using cached cover for book: ${book.title} (${book.hash})`).catch(
-              () => {},
-            );
-            const blob = await cachedResponse.blob();
-            const objectUrl = URL.createObjectURL(blob);
-            objectUrlRef.current = objectUrl;
-            setDisplayImageUrl(objectUrl);
-            toggleImageVisibility(true);
-            return;
-          }
+      const cached = peekCachedCoverObjectUrl(coverUrl);
+      if (cached) {
+        setDisplayImageUrl(cached);
+        toggleImageVisibility(true);
+        return;
+      }
 
-          info(`[BookCover] Fetching remote cover for book: ${book.title} (${book.hash})`).catch(
-            () => {},
-          );
-          info(`[BookCover] Cover URL: ${coverUrl}`).catch(() => {});
+      let cancelled = false;
+      const { title, hash } = book;
 
-          const response = await (tauriFetch as unknown as typeof fetch)(coverUrl, {
-            method: 'GET',
-            headers: {
-              Accept: 'image/*',
-            },
-          });
-
-          if (!response.ok) {
-            const errorMsg = `[BookCover] Remote cover request failed with status ${response.status}: ${coverUrl}`;
-            console.error(errorMsg);
-            tauriError(errorMsg).catch(() => {});
-            throw new Error(`Cover request failed with status ${response.status}`);
-          }
-
-          const contentType = response.headers.get('Content-Type') ?? '';
-          if (!contentType.startsWith('image/')) {
-            const errorMsg = `[BookCover] Remote cover response was not an image (Content-Type: ${contentType}): ${coverUrl}`;
-            console.error(errorMsg);
-            tauriError(errorMsg).catch(() => {});
-            throw new Error(`Cover response was not an image (Content-Type: ${contentType})`);
-          }
-
-          await cacheCover(coverUrl, response);
-
-          const blob = await response.blob();
-          info(
-            `[BookCover] Remote cover blob size: ${blob.size} bytes, type: ${contentType}`,
-          ).catch(() => {});
-
-          const objectUrl = URL.createObjectURL(blob);
-          objectUrlRef.current = objectUrl;
+      getOrCreateCoverObjectUrl(coverUrl, () => fetchRemoteCoverObjectUrl(coverUrl, title, hash))
+        .then((objectUrl) => {
+          if (cancelled) return;
           setDisplayImageUrl(objectUrl);
           toggleImageVisibility(true);
-          info(
-            `[BookCover] Remote cover loaded and cached for book: ${book.title} (${book.hash})`,
-          ).catch(() => {});
-        } catch (error) {
-          const errorMsg = `[BookCover] Failed to fetch remote cover for book: ${book.title} (${book.hash}): ${error}`;
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          const errorMsg = `[BookCover] Failed to fetch remote cover for book: ${title} (${hash}): ${error}`;
           console.error(errorMsg);
           tauriError(errorMsg).catch(() => {});
           toggleImageVisibility(false);
-        }
-      };
+        });
 
-      fetchCover();
+      return () => {
+        cancelled = true;
+      };
     }, [book.metadata?.coverImageUrl, book.coverImageUrl, book.hash, book.title]);
 
     const hasDisplayUrl = !!displayImageUrl;

@@ -297,7 +297,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
                   <Dropdown
                     label={_('Import Books')}
                     className={clsx(
-                      'exclude-title-bar-mousedown dropdown-bottom dropdown-center cursor-pointer',
+                      'exclude-title-bar-mousedown dropdown-bottom dropdown-end cursor-pointer',
                     )}
                     buttonClassName='p-0 h-6 min-h-6 w-6 flex touch-target items-center justify-center !bg-transparent'
                     toggleButton={<PiPlus role='none' className='m-0.5 h-5 w-5' />}
@@ -511,7 +511,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
             {!isCloudLibrary && (
               <Dropdown
                 label={_('Import Books')}
-                className='exclude-title-bar-mousedown dropdown-bottom dropdown-center cursor-pointer'
+                className='exclude-title-bar-mousedown dropdown-bottom dropdown-end cursor-pointer'
                 buttonClassName='p-0 h-6 min-h-6 w-6 flex touch-target items-center justify-center !bg-transparent'
                 toggleButton={<PiPlus role='none' className='m-0.5 h-5 w-5' />}
               >

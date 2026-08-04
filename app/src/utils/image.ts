@@ -68,7 +68,7 @@ export function galleryFileName(filename: string, now = Date.now()): string {
  * locally by the WebView itself, so `tauriFetch` — Tauri's native Rust HTTP
  * client — has no handler for them and fails outright.
  */
-function isRemoteImageUrl(url: string): boolean {
+export function isRemoteImageUrl(url: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);

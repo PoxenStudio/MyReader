@@ -1,8 +1,11 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, cleanup, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { render, cleanup, fireEvent, waitFor } from '@testing-library/react';
 
 import BookCover from '@/components/BookCover';
 import { Book } from '@/types/book';
+import { __resetCoverObjectUrlCacheForTests } from '@/utils/coverObjectUrlCache';
+import { isTauriAppPlatform } from '@/services/environment';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 
 vi.mock('next/image', () => ({
   __esModule: true,
@@ -10,6 +13,13 @@ vi.mock('next/image', () => ({
     // biome-ignore lint/a11y/useAltText: test mock; alt comes from spread props
     return <img {...props} />;
   },
+}));
+
+vi.mock('@/services/environment', () => ({
+  isTauriAppPlatform: vi.fn(() => false),
+}));
+vi.mock('@tauri-apps/plugin-http', () => ({
+  fetch: vi.fn(),
 }));
 
 afterEach(cleanup);
@@ -63,5 +73,65 @@ describe('BookCover', () => {
     const { container } = render(<BookCover book={book} coverFit='crop' />);
     const fallback = container.querySelector('.fallback-cover');
     expect(fallback?.textContent).toContain('Edited Author');
+  });
+});
+
+// Regression coverage for the Android bookshelf scroll flicker: Virtuoso
+// unmounts/remounts BookCover as items cross its overscan window during a
+// fling, so a remote cover must not re-fetch and re-decode on every remount.
+describe('BookCover remote covers on Tauri', () => {
+  const remoteUrl = 'https://nas.example.com/covers/1.jpg';
+  const objectUrl = `blob:${remoteUrl}`;
+
+  beforeEach(() => {
+    __resetCoverObjectUrlCacheForTests();
+    vi.clearAllMocks();
+    (isTauriAppPlatform as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    vi.stubGlobal('caches', {
+      open: vi.fn().mockResolvedValue({
+        match: vi.fn().mockResolvedValue(undefined),
+        put: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue(objectUrl);
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    (tauriFetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'image/jpeg' },
+      blob: vi.fn().mockResolvedValue(new Blob()),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    (isTauriAppPlatform as ReturnType<typeof vi.fn>).mockReturnValue(false);
+  });
+
+  it('shows the fetched cover once the async fetch resolves', async () => {
+    const book = makeBook({ coverImageUrl: remoteUrl, hash: 'remote-1' });
+    const { container } = render(<BookCover book={book} coverFit='crop' />);
+
+    await waitFor(() => {
+      expect(container.querySelector('img.cover-image')?.getAttribute('src')).toBe(objectUrl);
+    });
+    expect(tauriFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the cached object URL on remount instead of re-fetching', async () => {
+    const book = makeBook({ coverImageUrl: remoteUrl, hash: 'remote-1' });
+    const first = render(<BookCover book={book} coverFit='crop' />);
+    await waitFor(() => {
+      expect(first.container.querySelector('img.cover-image')?.getAttribute('src')).toBe(objectUrl);
+    });
+    first.unmount();
+
+    // Simulates Virtuoso remounting the same item after a fling crosses its
+    // overscan window: the real cover must be present on the very first
+    // render, with no fetch and no blank/fallback frame in between.
+    const second = render(<BookCover book={book} coverFit='crop' />);
+    expect(second.container.querySelector('img.cover-image')?.getAttribute('src')).toBe(objectUrl);
+    expect(second.container.querySelector('.fallback-cover')?.classList).toContain('invisible');
+    expect(tauriFetch).toHaveBeenCalledTimes(1);
   });
 });
