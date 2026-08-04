@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { useTransferStore, TransferItem, TransferStatus } from '@/store/transferStore';
 
 const initialState = {
@@ -42,6 +42,71 @@ describe('transferStore', () => {
       const id1 = useTransferStore.getState().addTransfer('h1', 'B1', 'upload');
       const id2 = useTransferStore.getState().addTransfer('h2', 'B2', 'download');
       expect(id1).not.toBe(id2);
+    });
+  });
+
+  // ── addTransfers (batch) ─────────────────────────────────────────
+  describe('addTransfers', () => {
+    test('adds every item with correct defaults', () => {
+      const ids = useTransferStore.getState().addTransfers([
+        { bookHash: 'h1', bookTitle: 'B1', type: 'download' },
+        { bookHash: 'h2', bookTitle: 'B2', type: 'download' },
+      ]);
+      expect(ids).toHaveLength(2);
+      ids.forEach((id) => {
+        const t = useTransferStore.getState().transfers[id]!;
+        expect(t.status).toBe('pending');
+        expect(t.priority).toBe(10);
+        expect(t.isBackground).toBe(false);
+      });
+    });
+
+    test('returns unique ids for every item', () => {
+      const ids = useTransferStore.getState().addTransfers([
+        { bookHash: 'h1', bookTitle: 'B1', type: 'download' },
+        { bookHash: 'h2', bookTitle: 'B2', type: 'download' },
+        { bookHash: 'h3', bookTitle: 'B3', type: 'download' },
+      ]);
+      expect(new Set(ids).size).toBe(3);
+    });
+
+    test('honors per-item priority and isBackground', () => {
+      const [id] = useTransferStore
+        .getState()
+        .addTransfers([
+          { bookHash: 'h1', bookTitle: 'B1', type: 'download', priority: 1, isBackground: true },
+        ]);
+      const t = useTransferStore.getState().transfers[id!]!;
+      expect(t.priority).toBe(1);
+      expect(t.isBackground).toBe(true);
+    });
+
+    test('does not clobber transfers already in the store', () => {
+      const existingId = useTransferStore.getState().addTransfer('existing', 'Existing', 'upload');
+      useTransferStore
+        .getState()
+        .addTransfers([{ bookHash: 'h1', bookTitle: 'B1', type: 'download' }]);
+      expect(useTransferStore.getState().transfers[existingId]).toBeDefined();
+    });
+
+    test('applies the whole batch in a single state update', () => {
+      const listener = vi.fn();
+      const unsub = useTransferStore.subscribe(listener);
+      useTransferStore.getState().addTransfers([
+        { bookHash: 'h1', bookTitle: 'B1', type: 'download' },
+        { bookHash: 'h2', bookTitle: 'B2', type: 'download' },
+        { bookHash: 'h3', bookTitle: 'B3', type: 'download' },
+      ]);
+      unsub();
+      // A loop of individual addTransfer() calls would notify subscribers once
+      // per item; batching must notify exactly once for the whole group so a
+      // large sync doesn't trigger N re-renders (the Android freeze this fixes).
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    test('returns an empty array for an empty batch', () => {
+      const ids = useTransferStore.getState().addTransfers([]);
+      expect(ids).toEqual([]);
     });
   });
 

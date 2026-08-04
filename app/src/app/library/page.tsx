@@ -1880,7 +1880,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                               ? handleImportBooksFromDirectory
                               : undefined
                           }
-                          onSyncReadingBooks={syncReadingBooks}
+                          onSyncReadingBooks={() => syncReadingBooks(true)}
                           source={source as 'local' | 'cloud'}
                         />
                       </div>

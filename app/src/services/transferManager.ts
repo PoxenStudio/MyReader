@@ -18,6 +18,12 @@ const PROGRESS_THROTTLE_MS = 100;
 // Quota failures in a batch import arrive one per book as transfers drain;
 // collapse them into one summary toast per burst instead of N identical toasts.
 const QUOTA_TOAST_FLUSH_MS = 1500;
+// persistQueue() re-serializes and writes the whole transfers record on every
+// call. Completed transfers are kept for history but never pruned during the
+// session, so a long-lived app would make every future persist progressively
+// more expensive. Cap what gets written to the most recently completed N —
+// the in-memory store (and thus the UI history list) is untouched.
+const MAX_PERSISTED_COMPLETED = 50;
 
 interface PersistedQueueData {
   schemaVersion?: number;
@@ -26,6 +32,28 @@ interface PersistedQueueData {
 }
 
 const QUEUE_SCHEMA_VERSION = 1;
+
+/**
+ * Keeps every non-completed transfer as-is; trims completed ones down to the
+ * most recently finished MAX_PERSISTED_COMPLETED, dropping the oldest first.
+ * Below the cap this is a no-op (returns the same object) so the common case
+ * pays no extra allocation.
+ */
+function capCompletedForPersistence(
+  transfers: Record<string, TransferItem>,
+): Record<string, TransferItem> {
+  const completed = Object.values(transfers).filter((t) => t.status === 'completed');
+  if (completed.length <= MAX_PERSISTED_COMPLETED) return transfers;
+
+  completed.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+  const dropIds = new Set(completed.slice(MAX_PERSISTED_COMPLETED).map((t) => t.id));
+
+  const result: Record<string, TransferItem> = {};
+  for (const [id, transfer] of Object.entries(transfers)) {
+    if (!dropIds.has(id)) result[id] = transfer;
+  }
+  return result;
+}
 
 class TransferManager {
   private static instance: TransferManager;
@@ -186,6 +214,52 @@ class TransferManager {
     this.persistQueue();
     this.processQueue();
     return transferId;
+  }
+
+  /**
+   * Batch counterpart to queueDownload(). A caller looping queueDownload()
+   * over many books (e.g. auto-syncing 100 "reading" books from the cloud)
+   * paid for one store `set()` + one full localStorage persist per book —
+   * an O(n^2) synchronous main-thread burst that froze the app on Android.
+   * This enqueues the whole batch in a single store update and a single
+   * persist/process pass.
+   */
+  queueDownloads(books: Book[], priority: number = 10, isBackground: boolean = false): string[] {
+    if (!this.isReady()) {
+      console.warn('TransferManager not initialized');
+      return [];
+    }
+    if (books.length === 0) return [];
+
+    const store = useTransferStore.getState();
+    const ids: string[] = [];
+    const toQueue: Book[] = [];
+
+    for (const book of books) {
+      const existing = store.getTransferByBookHash(book.hash, 'download');
+      if (existing) {
+        ids.push(existing.id);
+      } else {
+        toQueue.push(book);
+      }
+    }
+
+    if (toQueue.length > 0) {
+      const newIds = store.addTransfers(
+        toQueue.map((book) => ({
+          bookHash: book.hash,
+          bookTitle: book.title,
+          type: 'download' as const,
+          priority,
+          isBackground,
+        })),
+      );
+      ids.push(...newIds);
+      this.persistQueue();
+      this.processQueue();
+    }
+
+    return ids;
   }
 
   queueBatchUploads(books: Book[], priority: number = 10): string[] {
@@ -482,10 +556,12 @@ class TransferManager {
 
       const store = useTransferStore.getState();
 
-      // Persist all transfers including completed (for history)
+      // Persist all transfers including completed (for history), but cap
+      // completed history to the most recent MAX_PERSISTED_COMPLETED so a
+      // long-lived session doesn't make every persist bigger than the last.
       const data: PersistedQueueData = {
         schemaVersion: QUEUE_SCHEMA_VERSION,
-        transfers: store.transfers,
+        transfers: capCompletedForPersistence(store.transfers),
         isQueuePaused: store.isQueuePaused,
       };
 

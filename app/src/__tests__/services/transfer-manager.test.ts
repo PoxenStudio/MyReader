@@ -311,6 +311,99 @@ describe('TransferManager', () => {
     });
   });
 
+  // ── queueDownloads (batch) ───────────────────────────────────────
+  describe('queueDownloads', () => {
+    test('returns empty array when not initialized', () => {
+      const result = transferManager.queueDownloads([makeBook()]);
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array for an empty batch', async () => {
+      const appService = makeAppService();
+      await transferManager.initialize(appService as never, () => [], vi.fn(), translationFn);
+      expect(transferManager.queueDownloads([])).toEqual([]);
+    });
+
+    test('queues every book and returns one id per book', async () => {
+      const book1 = makeBook({ hash: 'h1', title: 'B1' });
+      const book2 = makeBook({ hash: 'h2', title: 'B2' });
+      const book3 = makeBook({ hash: 'h3', title: 'B3' });
+      const appService = makeAppService();
+      await transferManager.initialize(
+        appService as never,
+        () => [book1, book2, book3],
+        vi.fn(),
+        translationFn,
+      );
+
+      // Pause so this only asserts on enqueueing, not on the (unrelated)
+      // maxConcurrent processing that would otherwise flip some to in_progress.
+      transferManager.pauseQueue();
+      const ids = transferManager.queueDownloads([book1, book2, book3]);
+      expect(ids).toHaveLength(3);
+      ids.forEach((id) => {
+        const transfer = useTransferStore.getState().transfers[id]!;
+        expect(transfer.type).toBe('download');
+        expect(transfer.status).toBe('pending');
+      });
+    });
+
+    test('dedups against an already-queued download', async () => {
+      const book1 = makeBook({ hash: 'h1', title: 'B1' });
+      const book2 = makeBook({ hash: 'h2', title: 'B2' });
+      const appService = makeAppService();
+      await transferManager.initialize(
+        appService as never,
+        () => [book1, book2],
+        vi.fn(),
+        translationFn,
+      );
+
+      const existingId = transferManager.queueDownload(book1);
+      const ids = transferManager.queueDownloads([book1, book2]);
+      expect(ids).toContain(existingId);
+      expect(ids).toHaveLength(2);
+      // book1 must not have been re-queued as a second transfer.
+      const downloadTransfers = Object.values(useTransferStore.getState().transfers).filter(
+        (t) => t.bookHash === 'h1' && t.type === 'download',
+      );
+      expect(downloadTransfers).toHaveLength(1);
+    });
+
+    test('marks every queued item isBackground when requested', async () => {
+      const book1 = makeBook({ hash: 'h1', title: 'B1' });
+      const book2 = makeBook({ hash: 'h2', title: 'B2' });
+      const appService = makeAppService();
+      await transferManager.initialize(
+        appService as never,
+        () => [book1, book2],
+        vi.fn(),
+        translationFn,
+      );
+
+      const ids = transferManager.queueDownloads([book1, book2], 10, true);
+      ids.forEach((id) => {
+        expect(useTransferStore.getState().transfers[id]!.isBackground).toBe(true);
+      });
+    });
+
+    test('persists the queue exactly once for the whole batch', async () => {
+      const books = Array.from({ length: 20 }, (_, i) =>
+        makeBook({ hash: `h${i}`, title: `B${i}` }),
+      );
+      const appService = makeAppService();
+      await transferManager.initialize(appService as never, () => books, vi.fn(), translationFn);
+
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+      transferManager.queueDownloads(books);
+      // One localStorage write for the entire batch, not one per book — a
+      // per-item write of the whole (growing) transfers record is exactly
+      // the O(n^2) main-thread burst that froze the app on Android.
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+      setItemSpy.mockRestore();
+    });
+  });
+
   // ── queueBatchUploads ────────────────────────────────────────────
   describe('queueBatchUploads', () => {
     test('returns empty array when not initialized', () => {
@@ -734,6 +827,58 @@ describe('TransferManager', () => {
       expect(stored).toBeTruthy();
       const data = JSON.parse(stored!);
       expect(Object.keys(data.transfers).length).toBeGreaterThan(0);
+    });
+
+    test('caps persisted completed history to the most recent entries', async () => {
+      const appService = makeAppService();
+      await transferManager.initialize(appService as never, () => [], vi.fn(), translationFn);
+
+      // 60 completed transfers accumulated over the app's lifetime — without
+      // capping, every future persistQueue() call re-serializes all of them,
+      // making the "single write per batch" fix from queueDownloads() still
+      // expensive once history has piled up.
+      const now = Date.now();
+      const transfers: Record<string, TransferItem> = {};
+      for (let i = 0; i < 60; i++) {
+        transfers[`c${i}`] = makeTransferItem({
+          id: `c${i}`,
+          status: 'completed',
+          completedAt: now + i,
+        });
+      }
+      useTransferStore.setState({ transfers });
+
+      // Any public method that calls persistQueue() works as the trigger.
+      transferManager.pauseQueue();
+
+      const stored = JSON.parse(localStorage.getItem('readest_transfer_queue')!);
+      const persistedIds = Object.keys(stored.transfers);
+      expect(persistedIds.length).toBeLessThanOrEqual(50);
+      // Keeps the most recently completed, drops the oldest.
+      expect(stored.transfers['c59']).toBeDefined();
+      expect(stored.transfers['c0']).toBeUndefined();
+    });
+
+    test('never caps pending/active/failed transfers, only completed', async () => {
+      const appService = makeAppService();
+      await transferManager.initialize(appService as never, () => [], vi.fn(), translationFn);
+
+      const now = Date.now();
+      const transfers: Record<string, TransferItem> = {};
+      for (let i = 0; i < 60; i++) {
+        transfers[`c${i}`] = makeTransferItem({
+          id: `c${i}`,
+          status: 'completed',
+          completedAt: now + i,
+        });
+      }
+      transfers['pending1'] = makeTransferItem({ id: 'pending1', status: 'pending' });
+      useTransferStore.setState({ transfers });
+
+      transferManager.pauseQueue();
+
+      const stored = JSON.parse(localStorage.getItem('readest_transfer_queue')!);
+      expect(stored.transfers['pending1']).toBeDefined();
     });
 
     test('handles missing localStorage gracefully', async () => {

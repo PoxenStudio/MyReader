@@ -20,53 +20,66 @@ export function useAutoSyncReadingBooks() {
   const { libraryLoaded } = useLibraryStore();
   const isSyncingRef = useRef(false);
 
-  const syncReadingBooks = useCallback(async () => {
-    if (!appService || !libraryLoaded || !user) return;
-    if (isSyncingRef.current) return;
+  // `force` lets a manual "sync now" action (e.g. the "Sync Reading Books
+  // from Library" button in LibraryEmptyState, which only renders when
+  // autoSyncReadingBooks is OFF) bypass the setting gate below. Without it,
+  // clicking that button would immediately hit the same early return the
+  // passive auto-trigger respects and silently do nothing.
+  const syncReadingBooks = useCallback(
+    async (force = false) => {
+      if (!appService || !libraryLoaded || !user) return;
+      if (isSyncingRef.current) return;
 
-    const { settings } = useSettingsStore.getState();
-    if (!settings.autoSyncReadingBooks) return;
-
-    isSyncingRef.current = true;
-    try {
-      const { books: cloudReadingBooks } = await getBooksByType('reading', 1, 100);
-      if (cloudReadingBooks.length === 0) return;
-
-      const readingBooks = convertMyBooksToLocalBooks(cloudReadingBooks);
-      const currentLibrary = useLibraryStore.getState().library;
-      const existingByHash = new Map(currentLibrary.map((b) => [b.hash, b]));
-
-      const booksToAdd: Book[] = [];
-      const booksToDownload: Book[] = [];
-      for (const book of readingBooks) {
-        const existing = existingByHash.get(book.hash);
-        if (existing) {
-          if (!existing.downloadedAt) booksToDownload.push(book);
-        } else if (!hasLocalCopy(book, currentLibrary)) {
-          booksToAdd.push(book);
-          booksToDownload.push(book);
-        }
+      if (!force) {
+        const { settings } = useSettingsStore.getState();
+        if (!settings.autoSyncReadingBooks) return;
       }
 
-      if (booksToAdd.length > 0) {
-        const merged = [...booksToAdd, ...currentLibrary];
-        useLibraryStore.getState().setLibrary(merged);
-        appService.saveLibraryBooks(merged);
-      }
+      isSyncingRef.current = true;
+      try {
+        const { books: cloudReadingBooks } = await getBooksByType('reading', 1, 100);
+        if (cloudReadingBooks.length === 0) return;
 
-      if (booksToDownload.length > 0) {
-        setTimeout(() => {
-          for (const book of booksToDownload) {
-            transferManager.queueDownload(book);
+        const readingBooks = convertMyBooksToLocalBooks(cloudReadingBooks);
+        const currentLibrary = useLibraryStore.getState().library;
+        const existingByHash = new Map(currentLibrary.map((b) => [b.hash, b]));
+
+        const booksToAdd: Book[] = [];
+        const booksToDownload: Book[] = [];
+        for (const book of readingBooks) {
+          const existing = existingByHash.get(book.hash);
+          if (existing) {
+            if (!existing.downloadedAt) booksToDownload.push(book);
+          } else if (!hasLocalCopy(book, currentLibrary)) {
+            booksToAdd.push(book);
+            booksToDownload.push(book);
           }
-        }, QUEUE_DOWNLOAD_DELAY_MS);
+        }
+
+        if (booksToAdd.length > 0) {
+          const merged = [...booksToAdd, ...currentLibrary];
+          useLibraryStore.getState().setLibrary(merged);
+          appService.saveLibraryBooks(merged);
+        }
+
+        if (booksToDownload.length > 0) {
+          setTimeout(() => {
+            // Batched: a loop of individual queueDownload() calls each did a
+            // full store update + a synchronous localStorage persist, which
+            // for ~100 reading books froze the UI (worst on Android). Queued
+            // as isBackground so this silent sync doesn't fire a success toast
+            // per book. See transferManager.queueDownloads.
+            transferManager.queueDownloads(booksToDownload, 10, true);
+          }, QUEUE_DOWNLOAD_DELAY_MS);
+        }
+      } catch (error) {
+        console.error('Auto sync reading books error:', error);
+      } finally {
+        isSyncingRef.current = false;
       }
-    } catch (error) {
-      console.error('Auto sync reading books error:', error);
-    } finally {
-      isSyncingRef.current = false;
-    }
-  }, [appService, libraryLoaded, user]);
+    },
+    [appService, libraryLoaded, user],
+  );
 
   // Auto-trigger on startup once the library is loaded, and again whenever
   // `user` changes (e.g. right after login) since a fresh login is exactly

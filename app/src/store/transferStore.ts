@@ -53,6 +53,15 @@ interface TransferState {
     priority?: number,
     isBackground?: boolean,
   ) => string;
+  addTransfers: (
+    items: Array<{
+      bookHash: string;
+      bookTitle: string;
+      type: TransferType;
+      priority?: number;
+      isBackground?: boolean;
+    }>,
+  ) => string[];
   removeTransfer: (transferId: string) => void;
   updateTransferProgress: (
     transferId: string,
@@ -147,6 +156,48 @@ export const useTransferStore = create<TransferState>((set, get) => ({
     }));
 
     return id;
+  },
+
+  // Enqueues a whole batch in a single `set()` (one subscriber notification,
+  // one new `transfers` object) instead of looping `addTransfer()` per item —
+  // that loop spread the entire transfers record and re-rendered every
+  // subscriber (SettingsMenu, LibraryHeader, TransferQueueWindow) once per
+  // book, which turned a ~100-book auto-sync into an O(n^2) main-thread burst
+  // that froze the UI on Android.
+  addTransfers: (items) => {
+    if (items.length === 0) return [];
+
+    const now = Date.now();
+    const ids: string[] = [];
+    const newTransfers: Record<string, TransferItem> = {};
+
+    items.forEach(({ bookHash, bookTitle, type, priority = 10, isBackground = false }) => {
+      const id = generateTransferId();
+      ids.push(id);
+      newTransfers[id] = {
+        id,
+        kind: 'book',
+        bookHash,
+        bookTitle,
+        type,
+        status: 'pending',
+        progress: 0,
+        totalBytes: 0,
+        transferredBytes: 0,
+        transferSpeed: 0,
+        retryCount: 0,
+        maxRetries: 3,
+        createdAt: now,
+        priority,
+        isBackground,
+      };
+    });
+
+    set((state) => ({
+      transfers: { ...state.transfers, ...newTransfers },
+    }));
+
+    return ids;
   },
 
   removeTransfer: (transferId) => {
