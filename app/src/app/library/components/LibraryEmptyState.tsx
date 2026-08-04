@@ -1,30 +1,47 @@
 import * as React from 'react';
 import clsx from 'clsx';
-import { PiBooks } from 'react-icons/pi';
+import Image from 'next/image';
 
 import { useEnv } from '@/context/EnvContext';
 import { useAuth } from '@/context/AuthContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAppRouter } from '@/hooks/useAppRouter';
+import { useSettingsStore } from '@/store/settingsStore';
 import { navigateToLogin } from '@/utils/nav';
 
 interface LibraryEmptyStateProps {
   onImport: () => void;
+  onImportBooksFromDirectory?: () => void;
+  onSyncReadingBooks?: () => void;
   source?: 'local' | 'cloud';
 }
 
-const LibraryEmptyState: React.FC<LibraryEmptyStateProps> = ({ onImport, source = 'local' }) => {
+const LibraryEmptyState: React.FC<LibraryEmptyStateProps> = ({
+  onImport,
+  onImportBooksFromDirectory,
+  onSyncReadingBooks,
+  source = 'local',
+}) => {
   const _ = useTranslation();
   const { appService } = useEnv();
   const { user } = useAuth();
+  const { settings } = useSettingsStore();
   const router = useAppRouter();
   const isMobile = appService?.isMobile ?? false;
   const isCloud = source === 'cloud';
+  const showSyncReadingBooks = !!user && !settings.autoSyncReadingBooks && !!onSyncReadingBooks;
 
   return (
     <div className='hero-content text-neutral-content text-center'>
       <div className='flex max-w-md flex-col items-center'>
-        <PiBooks aria-hidden className='text-base-content/60 mb-10 size-16' />
+        <Image
+          src='/images/bookshelf_icon.png'
+          alt=''
+          aria-hidden
+          width={128}
+          height={128}
+          className='mb-10'
+        />
         <h1 className='mb-5 text-balance text-4xl font-semibold leading-tight tracking-tight'>
           {isCloud ? _('Nothing here yet') : _('Start your library')}
         </h1>
@@ -43,6 +60,24 @@ const LibraryEmptyState: React.FC<LibraryEmptyStateProps> = ({ onImport, source 
               >
                 {_('Import Books')}
               </button>
+              {onImportBooksFromDirectory && (
+                <button
+                  type='button'
+                  className='btn btn-primary h-11 min-h-11 rounded-lg'
+                  onClick={onImportBooksFromDirectory}
+                >
+                  {_('From Directory')}
+                </button>
+              )}
+              {showSyncReadingBooks && (
+                <button
+                  type='button'
+                  className='btn btn-primary h-11 min-h-11 rounded-lg'
+                  onClick={onSyncReadingBooks}
+                >
+                  {_('Sync Reading Books from Library')}
+                </button>
+              )}
               {/* TODO: add a 'Browse free catalogs' secondary action that opens the
                   OPDS dialog (handleShowOPDSDialog) once we settle on placement. */}
               {!user && (

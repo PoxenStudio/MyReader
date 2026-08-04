@@ -1695,6 +1695,7 @@
   "Search Category": "搜索分类",
   "Search Books": "搜索书籍",
   "Auto Sync Reading Books": "自动同步在读书籍",
+  "Sync Reading Books from Library": "从书库同步在读书籍",
   "Require a PIN (and biometrics, if available) to open MyReader": "需要 PIN 码（以及生物识别，如果可用）才能打开 MyReader",
   "Unlock MyReader": "解锁 MyReader",
   "Missing or invalid book id": "书籍 ID 丢失或无效",

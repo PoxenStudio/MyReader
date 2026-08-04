@@ -315,7 +315,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   useTransferQueue(libraryLoaded);
 
   const { checkOPDSSubscriptions } = useOPDSSubscriptions();
-  useAutoSyncReadingBooks();
+  const { syncReadingBooks } = useAutoSyncReadingBooks();
   const { isDragging } = useDragDropImport();
 
   usePullToRefresh(
@@ -1875,6 +1875,12 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                       <div className='flex-1 flex items-center justify-center'>
                         <LibraryEmptyState
                           onImport={handleImportBooksFromFiles}
+                          onImportBooksFromDirectory={
+                            appService?.canReadExternalDir
+                              ? handleImportBooksFromDirectory
+                              : undefined
+                          }
+                          onSyncReadingBooks={syncReadingBooks}
                           source={source as 'local' | 'cloud'}
                         />
                       </div>

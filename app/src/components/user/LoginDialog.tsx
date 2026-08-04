@@ -30,7 +30,6 @@ import {
   addMyBooksUsernameToHistory,
 } from '@/utils/mybooksHistory';
 import { debounce } from '@/utils/debounce';
-import { saveSysSettings } from '@/helpers/settings';
 import { RegisterDialog } from '@/components/user/RegisterDialog';
 import { AccessCodeDialog } from '@/components/user/AccessCodeDialog';
 import Dialog from '@/components/Dialog';
@@ -337,7 +336,9 @@ const LoginDialog: React.FC = () => {
 
   const handleToggleAutoSyncReadingBooks = (checked: boolean) => {
     setAutoSyncReadingBooks(checked);
-    saveSysSettings(envConfig, 'autoSyncReadingBooks', checked);
+    const nextSettings = { ...settings, autoSyncReadingBooks: checked };
+    setSettings(nextSettings);
+    saveSettings(envConfig, nextSettings);
   };
 
   const handleContinueAsGuest = () => {
