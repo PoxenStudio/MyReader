@@ -5,6 +5,7 @@ import { PiUserCircle, PiUserCircleCheck, PiGear } from 'react-icons/pi';
 import { PiSun, PiMoon } from 'react-icons/pi';
 import { TbSunMoon } from 'react-icons/tb';
 import { MdCloudSync, MdOutlineNoAccounts } from 'react-icons/md';
+import { IoFileTray } from 'react-icons/io5';
 import { isTauriAppPlatform, isWebAppPlatform } from '@/services/environment';
 import { DOWNLOAD_MYBOOKS_URL } from '@/services/constants';
 import { setBackupDialogVisible } from '@/app/library/components/BackupWindow';
@@ -36,9 +37,13 @@ import { type AppLockDialogMode, useAppLockStore } from '@/store/appLockStore';
 
 interface SettingsMenuProps {
   setIsDropdownOpen?: (isOpen: boolean) => void;
+  onImportBooksFromDirectory?: () => void;
 }
 
-const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
+const SettingsMenu: React.FC<SettingsMenuProps> = ({
+  setIsDropdownOpen,
+  onImportBooksFromDirectory,
+}) => {
   const _ = useTranslation();
   const router = useRouter();
   const { envConfig, appService } = useEnv();
@@ -179,6 +184,11 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
     setIsOpenLastBooks(newValue);
   };
 
+  const handleImportFromDirectory = () => {
+    onImportBooksFromDirectory?.();
+    setIsDropdownOpen?.(false);
+  };
+
   const handleSetRootDir = () => {
     setMigrateDataDirDialogVisible(true);
     setIsDropdownOpen?.(false);
@@ -279,6 +289,14 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
         </MenuItem>
       ) : (
         <MenuItem label={_('Sign In')} Icon={PiUserCircle} onClick={handleUserLogin}></MenuItem>
+      )}
+
+      {onImportBooksFromDirectory && (
+        <MenuItem
+          label={_('From Directory')}
+          Icon={<IoFileTray className='h-5 w-5' />}
+          onClick={handleImportFromDirectory}
+        />
       )}
 
       {user && (

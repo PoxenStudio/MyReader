@@ -1,7 +1,7 @@
 'use client';
 import clsx from 'clsx';
 import { useCallback, useEffect, useState } from 'react';
-import { MdClose } from 'react-icons/md';
+import { MdClose, MdVisibility, MdVisibilityOff } from 'react-icons/md';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuth } from '@/context/AuthContext';
 import { useEnv } from '@/context/EnvContext';
@@ -30,6 +30,7 @@ import {
   addMyBooksUsernameToHistory,
 } from '@/utils/mybooksHistory';
 import { debounce } from '@/utils/debounce';
+import { saveSysSettings } from '@/helpers/settings';
 import { RegisterDialog } from '@/components/user/RegisterDialog';
 import { AccessCodeDialog } from '@/components/user/AccessCodeDialog';
 import Dialog from '@/components/Dialog';
@@ -127,7 +128,9 @@ const LoginDialog: React.FC = () => {
   const [hostHistory, setHostHistory] = useState<string[]>([]);
   const [usernameHistory, setUsernameHistory] = useState<string[]>([]);
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [rememberCredentials, setRememberCredentials] = useState(false);
+  const [autoSyncReadingBooks, setAutoSyncReadingBooks] = useState(settings.autoSyncReadingBooks);
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingRegister, setIsCheckingRegister] = useState(false);
   const [error, setError] = useState('');
@@ -142,8 +145,10 @@ const LoginDialog: React.FC = () => {
   useEffect(() => {
     if (!isOpen) return;
     setError('');
+    setShowPassword(false);
     setHostHistory(getMyBooksHostHistory());
     setUsernameHistory(getMyBooksUsernameHistory());
+    setAutoSyncReadingBooks(useSettingsStore.getState().settings.autoSyncReadingBooks);
 
     const savedHost = localStorage.getItem(MYBOOKS_HOST_KEY);
     const savedUsername = localStorage.getItem(MYBOOKS_USERNAME_KEY);
@@ -330,6 +335,11 @@ const LoginDialog: React.FC = () => {
     }
   };
 
+  const handleToggleAutoSyncReadingBooks = (checked: boolean) => {
+    setAutoSyncReadingBooks(checked);
+    saveSysSettings(envConfig, 'autoSyncReadingBooks', checked);
+  };
+
   const handleContinueAsGuest = () => {
     if (!host) {
       setError(_('Please enter the host address'));
@@ -474,23 +484,45 @@ const LoginDialog: React.FC = () => {
             <label className='block text-sm font-medium text-base-content/75 mb-2'>
               {_('Password')}
             </label>
-            <input
-              type='password'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete='new-password'
-              placeholder={_('Your password')}
-              className={inputClass}
-              disabled={isLoading}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleLogin();
-                }
-              }}
-            />
+            <div className='relative'>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete='new-password'
+                placeholder={_('Your password')}
+                className={clsx(inputClass, 'pe-11')}
+                disabled={isLoading}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleLogin();
+                  }
+                }}
+              />
+              <button
+                type='button'
+                onClick={() => setShowPassword((v) => !v)}
+                className={clsx(
+                  'absolute end-2 top-1/2 -translate-y-1/2',
+                  'flex h-8 w-8 items-center justify-center rounded',
+                  'text-base-content/60 hover:text-base-content',
+                  'hover:bg-base-200/60 transition-colors duration-150',
+                  'focus-visible:ring-base-content/15 focus-visible:outline-none focus-visible:ring-2',
+                )}
+                aria-label={showPassword ? _('Hide password') : _('Show password')}
+                title={showPassword ? _('Hide password') : _('Show password')}
+                tabIndex={-1}
+              >
+                {showPassword ? (
+                  <MdVisibilityOff className='h-4 w-4' />
+                ) : (
+                  <MdVisibility className='h-4 w-4' />
+                )}
+              </button>
+            </div>
           </div>
 
-          <div className='w-full mb-6 flex items-center gap-2'>
+          <div className='w-full mb-2 flex items-center gap-2'>
             <input
               id='remember-credentials'
               type='checkbox'
@@ -511,6 +543,23 @@ const LoginDialog: React.FC = () => {
               className='text-sm text-base-content/75 cursor-pointer select-none'
             >
               {_('Remember Credentials')}
+            </label>
+          </div>
+
+          <div className='w-full mb-6 flex items-center gap-2'>
+            <input
+              id='auto-sync-reading-books'
+              type='checkbox'
+              checked={autoSyncReadingBooks}
+              onChange={(e) => handleToggleAutoSyncReadingBooks(e.target.checked)}
+              className='checkbox checkbox-sm checkbox-primary'
+              disabled={isLoading}
+            />
+            <label
+              htmlFor='auto-sync-reading-books'
+              className='text-sm text-base-content/75 cursor-pointer select-none'
+            >
+              {_('Auto Sync Reading Books')}
             </label>
           </div>
 

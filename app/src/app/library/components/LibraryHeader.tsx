@@ -432,7 +432,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
               buttonClassName='btn btn-ghost h-8 min-h-8 w-8 p-0'
               toggleButton={<MdOutlineMenu role='none' size={iconSize18} />}
             >
-              <SettingsMenu />
+              <SettingsMenu onImportBooksFromDirectory={onImportBooksFromDirectory} />
             </Dropdown>
             {appService?.hasWindowBar && (
               <WindowButtons
