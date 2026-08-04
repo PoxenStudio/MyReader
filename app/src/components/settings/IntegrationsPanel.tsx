@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { MdChevronRight } from 'react-icons/md';
 import { RiRssLine, RiCloudLine, RiHardDrive2Line } from 'react-icons/ri';
 import { isTauriAppPlatform } from '@/services/environment';
+import { useEnv } from '@/context/EnvContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -30,6 +31,7 @@ type SubPage = 'webdav' | 'opds' | 'nas' | null;
  */
 const IntegrationsPanel: React.FC = () => {
   const _ = useTranslation();
+  const { appService } = useEnv();
   const { settings, requestedSubPage, setRequestedSubPage } = useSettingsStore();
   const opdsCatalogs = useCustomOPDSStore((s) => s.catalogs);
   const opdsCount = opdsCatalogs.filter((c) => !c.deletedAt).length;
@@ -118,21 +120,21 @@ const IntegrationsPanel: React.FC = () => {
         </p>
       </div>
 
-      <div className='w-full' data-setting-id='settings.integrations.nas'>
-        <SectionTitle className='mb-2'>{_('Remote Login')}</SectionTitle>
-        <div className='card eink-bordered border-base-200 bg-base-100 overflow-hidden border'>
-          <div className='divide-base-200 divide-y'>
-            {isTauriAppPlatform() && (
+      {isTauriAppPlatform() && !appService?.isMobileApp && (
+        <div className='w-full' data-setting-id='settings.integrations.nas'>
+          <SectionTitle className='mb-2'>{_('Remote Login')}</SectionTitle>
+          <div className='card eink-bordered border-base-200 bg-base-100 overflow-hidden border'>
+            <div className='divide-base-200 divide-y'>
               <IntegrationRow
                 icon={RiHardDrive2Line}
                 title={_('NAS Device')}
                 status={nasStatus}
                 onClick={() => setSubPage('nas')}
               />
-            )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className='w-full' data-setting-id='settings.integrations.sync'>
         <SectionTitle className='mb-2'>{_('Reading Sync')}</SectionTitle>

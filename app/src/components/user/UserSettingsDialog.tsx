@@ -45,7 +45,7 @@ interface UserSettingsDialogProps {
 const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose }) => {
   const _ = useTranslation();
   const { logout } = useAuth();
-  const { envConfig } = useEnv();
+  const { envConfig, appService } = useEnv();
   const { settings, setSettings, saveSettings } = useSettingsStore();
   const isSyncAllowed = useMyBooksSyncAllowed();
   const sysInfo = useMyBooksStatusStore((state) => state.sysInfo);
@@ -373,17 +373,20 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
                     {isSyncAllowed ? _('Enabled') : _('Disabled')}
                   </span>
                 </div>
-                {isTauriAppPlatform() && nasSettings?.enabled && nasSettings.loginUrl && (
-                  <div className='flex items-center gap-x-2'>
-                    <span className='text-end text-sm text-base-content/70'>
-                      {_('NAS Remote Device')}
-                    </span>
-                    <NasRemoteLoginIconButton
-                      onClick={() => setShowNasWebview(true)}
-                      title={_('Log in to NAS device')}
-                    />
-                  </div>
-                )}
+                {isTauriAppPlatform() &&
+                  !appService?.isMobileApp &&
+                  nasSettings?.enabled &&
+                  nasSettings.loginUrl && (
+                    <div className='flex items-center gap-x-2'>
+                      <span className='text-end text-sm text-base-content/70'>
+                        {_('NAS Remote Device')}
+                      </span>
+                      <NasRemoteLoginIconButton
+                        onClick={() => setShowNasWebview(true)}
+                        title={_('Log in to NAS device')}
+                      />
+                    </div>
+                  )}
               </div>
             </BoxedList>
 

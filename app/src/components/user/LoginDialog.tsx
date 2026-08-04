@@ -115,7 +115,7 @@ const fetchMyBooksUserInfo = async (host: string): Promise<MyBooksUserInfoRespon
 const LoginDialog: React.FC = () => {
   const _ = useTranslation();
   const { login, loginAsGuest } = useAuth();
-  const { envConfig } = useEnv();
+  const { envConfig, appService } = useEnv();
   const { settings, setSettings, saveSettings } = useSettingsStore();
   const isOpen = useAuthUIStore((state) => state.isLoginDialogOpen);
   const closeLoginDialog = useAuthUIStore((state) => state.closeLoginDialog);
@@ -433,12 +433,15 @@ const LoginDialog: React.FC = () => {
                 className={inputClass}
                 disabled={isLoading}
               />
-              {isTauriAppPlatform() && nasSettings?.enabled && nasSettings.loginUrl && (
-                <NasRemoteLoginIconButton
-                  onClick={() => setShowNasWebview(true)}
-                  title={_('Log in to NAS device')}
-                />
-              )}
+              {isTauriAppPlatform() &&
+                !appService?.isMobileApp &&
+                nasSettings?.enabled &&
+                nasSettings.loginUrl && (
+                  <NasRemoteLoginIconButton
+                    onClick={() => setShowNasWebview(true)}
+                    title={_('Log in to NAS device')}
+                  />
+                )}
             </div>
             <datalist id='mybooks-host-history'>
               {hostHistory.map((entry) => (

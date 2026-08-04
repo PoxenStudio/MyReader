@@ -15,12 +15,17 @@ import NasRemoteWebview from './NasRemoteWebview';
  * LoginDialog / UserSettingsDialog manual triggers do.
  */
 const NasSessionPrompt: React.FC = () => {
-  const { envConfig } = useEnv();
+  const { envConfig, appService } = useEnv();
   const { settings, setSettings, saveSettings } = useSettingsStore();
   const promptOpen = useNasDeviceStore((s) => s.promptOpen);
   const closePrompt = useNasDeviceStore((s) => s.closePrompt);
   const nasSettings = settings.nas;
 
+  // Mobile has no supported entry point to enable this (see IntegrationsPanel/
+  // LoginDialog/UserSettingsDialog), but `nasSettings.enabled` can still be
+  // `true` here if it was turned on from a synced desktop session — guard
+  // explicitly so the auto re-login prompt can't fire on Android/iOS.
+  if (appService?.isMobileApp) return null;
   if (!promptOpen || !nasSettings?.enabled || !nasSettings.loginUrl) return null;
 
   const handleClose = async (cookies: NasCookieEntry[] | null) => {
