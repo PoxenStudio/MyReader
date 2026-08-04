@@ -1,3 +1,6 @@
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { isTauriAppPlatform } from '@/services/environment';
+
 export interface ParsedDataUrl {
   bytes: Uint8Array;
   mimeType: string;
@@ -57,6 +60,27 @@ export function galleryFileName(filename: string, now = Date.now()): string {
   return `myreader-${date}-${time}-${pad(d.getMilliseconds(), 3)}${ext}`;
 }
 
+/**
+ * True only for a genuine external http(s) resource — the kind a NAS/MyBooks
+ * host serves without CORS headers. Tauri's own asset protocol (`asset:`,
+ * and its `asset.localhost`/`tauri.localhost` virtual hosts on platforms
+ * that route it over http/https) and relative/blob/data URLs are all served
+ * locally by the WebView itself, so `tauriFetch` — Tauri's native Rust HTTP
+ * client — has no handler for them and fails outright.
+ */
+function isRemoteImageUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return false;
+  }
+  return parsed.hostname !== 'asset.localhost' && parsed.hostname !== 'tauri.localhost';
+}
+
 export async function fetchImageAsBase64(
   url: string,
   options: {
@@ -68,7 +92,20 @@ export async function fetchImageAsBase64(
   const { targetWidth = 256, format = 'image/jpeg', quality = 0.85 } = options;
 
   try {
-    const response = await fetch(url);
+    // Plain `fetch` is subject to the WebView's CORS enforcement — a NAS/
+    // MyBooks host's image endpoint (e.g. `/get/thumb_*`) typically has no
+    // `Access-Control-Allow-Origin` header, so a cross-origin request from
+    // the `tauri://localhost`/`http://tauri.localhost` origin is blocked
+    // outright (seen on Android: "blocked by CORS policy"). `tauriFetch`
+    // goes through Tauri's native Rust HTTP client instead, which isn't
+    // subject to the WebView's CORS layer at all — but that native client
+    // also can't serve local asset-protocol URLs (see isRemoteImageUrl), so
+    // it's only used for genuine remote covers.
+    const fetchFn =
+      isTauriAppPlatform() && isRemoteImageUrl(url)
+        ? (tauriFetch as unknown as typeof fetch)
+        : fetch;
+    const response = await fetchFn(url);
     if (!response.ok) {
       throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
     }

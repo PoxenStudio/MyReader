@@ -474,6 +474,7 @@ describe('cloudService', () => {
   describe('downloadMyBooksBook', () => {
     const mockAppService = {
       writeFile: vi.fn().mockResolvedValue(undefined),
+      generateCoverImageUrl: vi.fn().mockResolvedValue('local-cover-url'),
     } as unknown as AppService;
 
     beforeEach(() => {
@@ -576,6 +577,41 @@ describe('cloudService', () => {
         'None',
         epubBytes,
       );
+    });
+
+    test('repoints coverImageUrl at the local copy once the cover downloads', async () => {
+      // Leaving coverImageUrl on the remote host URL after a successful local
+      // cover download meant every reader/TTS UI that renders it directly
+      // (TTSMiniPlayer, TTSPlayerSheet, NowPlayingBar, fetchImageAsBase64 for
+      // the Android media-session artwork) kept hitting the network — and on
+      // Android, CORS-blocked — instead of the file that's now on disk.
+      const book = createMockBook({
+        hash: 'cloud-123-epub',
+        format: 'EPUB' as BookFormat,
+        files: [{ format: 'EPUB' as BookFormat, size: 1, href: '/api/book/123.epub' }],
+        originCoverUrl: 'https://mybooks.example.com/get/thumb_240_320/123.jpg',
+        coverImageUrl: 'https://mybooks.example.com/get/thumb_240_320/123.jpg',
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(mockAppService.generateCoverImageUrl).toHaveBeenCalledWith(book);
+      expect(book.coverImageUrl).toBe('local-cover-url');
+    });
+
+    test('leaves coverImageUrl untouched when there is no cover to download', async () => {
+      const book = createMockBook({
+        hash: 'cloud-123-epub',
+        format: 'EPUB' as BookFormat,
+        files: [{ format: 'EPUB' as BookFormat, size: 1, href: '/api/book/123.epub' }],
+        originCoverUrl: undefined,
+        coverImageUrl: null,
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(mockAppService.generateCoverImageUrl).not.toHaveBeenCalled();
+      expect(book.coverImageUrl).toBeNull();
     });
   });
 });

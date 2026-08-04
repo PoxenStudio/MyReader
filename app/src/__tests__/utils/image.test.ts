@@ -83,12 +83,14 @@ vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
 // Patch global Image
 vi.stubGlobal('Image', MockImage);
 
-// Patch URL methods
-vi.stubGlobal('URL', {
-  ...URL,
-  createObjectURL: vi.fn().mockReturnValue('blob:http://localhost/fake-blob'),
-  revokeObjectURL: vi.fn(),
-});
+// Patch URL.createObjectURL/revokeObjectURL (not provided by jsdom) while
+// keeping `URL` a real constructor — fetchImageAsBase64 calls `new URL(...)`
+// to classify remote vs. local image URLs, which a plain object stub breaks.
+class MockURL extends URL {
+  static createObjectURL = vi.fn().mockReturnValue('blob:http://localhost/fake-blob');
+  static revokeObjectURL = vi.fn();
+}
+vi.stubGlobal('URL', MockURL);
 
 // Mock fetch
 const mockFetchResponse = {
@@ -99,7 +101,20 @@ const mockFetchResponse = {
 };
 vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockFetchResponse));
 
+// Tauri platform + HTTP plugin mocks — a plain `fetch` to a NAS/MyBooks host
+// gets blocked by the WebView's CORS enforcement (no `Access-Control-Allow-
+// Origin` on those image endpoints), so Tauri builds must route through
+// `tauriFetch` (Tauri's native Rust HTTP client) instead, same as BookCover.
+vi.mock('@/services/environment', () => ({
+  isTauriAppPlatform: vi.fn(() => false),
+}));
+vi.mock('@tauri-apps/plugin-http', () => ({
+  fetch: vi.fn(),
+}));
+
 // Import after mocks
+import { isTauriAppPlatform } from '@/services/environment';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { fetchImageAsBase64 } from '@/utils/image';
 
 beforeEach(() => {
@@ -109,6 +124,8 @@ beforeEach(() => {
   mockFetchResponse.status = 200;
   mockFetchResponse.statusText = 'OK';
   mockFetchResponse.blob.mockResolvedValue(new Blob(['fake-image-data'], { type: 'image/jpeg' }));
+  (isTauriAppPlatform as ReturnType<typeof vi.fn>).mockReturnValue(false);
+  (tauriFetch as ReturnType<typeof vi.fn>).mockResolvedValue(mockFetchResponse);
   // Re-apply document.createElement mock (restoreAllMocks clears it)
   vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
     if (tag === 'canvas') {
@@ -182,5 +199,56 @@ describe('fetchImageAsBase64', () => {
 
     expect(URL.createObjectURL).toHaveBeenCalled();
     expect(URL.revokeObjectURL).toHaveBeenCalled();
+  });
+
+  test('uses global fetch on web (not the Tauri HTTP client)', async () => {
+    (isTauriAppPlatform as ReturnType<typeof vi.fn>).mockReturnValue(false);
+
+    await fetchImageAsBase64('http://192.168.31.102:8082/get/thumb_240_320/33622.jpg');
+
+    expect(fetch).toHaveBeenCalledWith('http://192.168.31.102:8082/get/thumb_240_320/33622.jpg');
+    expect(tauriFetch).not.toHaveBeenCalled();
+  });
+
+  test('routes through tauriFetch on Tauri, bypassing WebView CORS enforcement', async () => {
+    (isTauriAppPlatform as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    // The plain global `fetch` would be rejected by the WebView with a CORS
+    // error for a cross-origin NAS image endpoint (no Access-Control-Allow-
+    // Origin header) — asserted below via `fetch` never being called at all.
+
+    const result = await fetchImageAsBase64(
+      'http://192.168.31.102:8082/get/thumb_240_320/33622.jpg',
+    );
+
+    expect(tauriFetch).toHaveBeenCalledWith(
+      'http://192.168.31.102:8082/get/thumb_240_320/33622.jpg',
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result).toBe('data:image/jpeg;base64,AABBCC');
+  });
+
+  // tauriFetch is Tauri's native Rust HTTP client (reqwest) — it has no
+  // handler for the WebView-only asset-protocol virtual hosts below, so
+  // routing local covers through it makes every request fail outright
+  // (surfaced as the TTS media-session notification losing its book cover
+  // and falling back to the app icon). Local URLs must stay on plain
+  // `fetch`, which the WebView's own asset-protocol interceptor serves.
+  test.each([
+    ['asset:// scheme (desktop/mobile asset protocol)', 'asset://localhost/Books/cover.png'],
+    [
+      'http://asset.localhost virtual host (Android convertFileSrc)',
+      'http://asset.localhost/Books/cover.png',
+    ],
+    ['https://asset.localhost virtual host', 'https://asset.localhost/Books/cover.png'],
+    ['relative app-bundled path', '/icon.png'],
+    ['blob: object URL', 'blob:http://localhost/fake-blob'],
+  ])('uses plain fetch on Tauri for local URLs — %s', async (_label, url) => {
+    (isTauriAppPlatform as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    const result = await fetchImageAsBase64(url);
+
+    expect(fetch).toHaveBeenCalledWith(url);
+    expect(tauriFetch).not.toHaveBeenCalled();
+    expect(result).toBe('data:image/jpeg;base64,AABBCC');
   });
 });

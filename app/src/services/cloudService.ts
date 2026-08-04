@@ -226,6 +226,12 @@ export async function downloadMyBooksBook(
       const coverDownloaded = await fs.exists(coverLfp, 'Books');
       if (coverDownloaded) {
         book.coverDownloadedAt = Date.now();
+        // Repoint coverImageUrl at the just-downloaded local copy — left as
+        // the remote host URL, an <img>/fetch reader/TTS UI renders directly
+        // fails without network access (or CORS-blocked cross-origin fetches
+        // like fetchImageAsBase64's media-session artwork), even though the
+        // cover is now sitting on disk right next to the book file.
+        book.coverImageUrl = await appService.generateCoverImageUrl(book);
         console.log('Cover downloaded successfully');
       }
     } catch (error) {

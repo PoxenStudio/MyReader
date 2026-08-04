@@ -44,9 +44,21 @@ export const useOpenBook = ({ setLoading, handleBookDownload }: UseOpenBookOptio
       // be moved or deleted behind our back. Probe, and re-fetch from the cloud
       // when it's really gone, instead of opening a reader that cannot load.
       if (await appService?.isBookAvailable(book)) {
+        let dirty = false;
         if (!book.downloadedAt || !book.coverDownloadedAt) {
           book.downloadedAt = Date.now();
           book.coverDownloadedAt = Date.now();
+          dirty = true;
+        }
+        // Self-heal cloud books downloaded before covers were repointed to
+        // their local copy on download (see downloadMyBooksBook) — every
+        // open is a chance to migrate off the stale remote coverImageUrl
+        // instead of leaving it broken until a re-download.
+        if (appService && book.coverDownloadedAt && book.coverImageUrl?.startsWith('http')) {
+          book.coverImageUrl = await appService.generateCoverImageUrl(book);
+          dirty = true;
+        }
+        if (dirty) {
           await updateBook(envConfig, book);
         }
         return true;
