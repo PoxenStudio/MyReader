@@ -517,3 +517,17 @@ pub struct CreateNasLoginWindowRequest {
     pub height: f64,
     pub user_agent: Option<String>,
 }
+
+/// Android-only: attach a floating native close button over the NAS popup.
+/// Mobile `WebviewWindow`s have no OS-level title bar/close affordance (see
+/// the `#[cfg(desktop)] center()` note in `create_nas_login_window`), and
+/// injecting a close control into the popup's own DOM isn't reliable —
+/// NAS vendor portals vary too much in layout/CSS for a script-injected
+/// button to avoid clashing with the page. The button is a native
+/// `android.view.View` layered above the content root instead, so it can't
+/// be affected by the page's own styles.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachNasCloseButtonRequest {
+    pub label: String,
+}

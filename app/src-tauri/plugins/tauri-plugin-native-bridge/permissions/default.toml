@@ -48,4 +48,6 @@ permissions = [
   "allow-set-text-selection-suppressed",
   "allow-get-webview-cookies",
   "allow-create-nas-login-window",
+  "allow-attach-nas-close-button",
+  "allow-detach-nas-close-button",
 ]

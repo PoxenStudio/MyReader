@@ -15,14 +15,19 @@ import android.os.Environment
 import android.provider.Settings
 import android.provider.DocumentsContract
 import android.view.View
+import android.view.ViewGroup
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.WindowInsetsController
+import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -34,6 +39,7 @@ import android.content.pm.PackageManager
 import android.graphics.fonts.SystemFonts
 import android.graphics.fonts.Font
 import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
 import androidx.core.content.ContextCompat
@@ -119,6 +125,11 @@ class GetWebviewCookiesRequestArgs {
 }
 
 @InvokeArg
+class AttachNasCloseButtonArgs {
+    lateinit var label: String
+}
+
+@InvokeArg
 class FetchProductsRequestArgs {
     val productIds: List<String>? = null
 }
@@ -193,6 +204,9 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     private var redirectScheme = "readest"
     private var redirectHost = "auth-callback"
     private var webViewRef: WebView? = null
+    // Floating close button for the NAS remote-login popup — see
+    // attach_nas_close_button/detach_nas_close_button.
+    private var nasCloseButton: View? = null
     private val billingManager by lazy {
         BillingManager(activity)
     }
@@ -204,6 +218,7 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
 
     override fun onDestroy() {
         pluginScope.cancel()
+        detachNasCloseButtonInternal()
         instance = null
     }
 
@@ -519,6 +534,73 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         val r = JSObject()
         r.put("cookieHeader", CookieManager.getInstance().getCookie(args.url ?: "") ?: "")
         invoke.resolve(r)
+    }
+
+    /**
+     * Float a native close button over the NAS remote-login popup. Mobile
+     * `WebviewWindow`s have no OS title bar/close affordance, and the popup
+     * is just another WebView layered on this same Activity's content root
+     * (Android has no concept of a second OS window here) — so the button
+     * is added as a sibling view above `android.R.id.content` rather than
+     * injected into the popup's own DOM, where wildly different NAS vendor
+     * page layouts would make a script-injected button unreliable.
+     *
+     * Clicking it doesn't call into the popup `WebviewWindow` directly —
+     * there's no such handle on this side. Instead it fires a plugin event
+     * the frontend already listens for, which runs the exact same
+     * cookie-capture-then-close path as the desktop title bar's close button
+     * (see `NasRemoteWebview.tsx`'s `onCloseRequested` handler).
+     */
+    @Command
+    fun attach_nas_close_button(invoke: Invoke) {
+        val args = invoke.parseArgs(AttachNasCloseButtonArgs::class.java)
+        activity.runOnUiThread {
+            detachNasCloseButtonInternal()
+
+            val density = activity.resources.displayMetrics.density
+            val size = (36 * density).toInt()
+            val margin = (12 * density).toInt()
+
+            val button = ImageButton(activity).apply {
+                setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                setColorFilter(Color.WHITE)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.argb(160, 0, 0, 0))
+                }
+                contentDescription = "Close"
+                elevation = 8 * density
+                setOnClickListener {
+                    trigger("nasLoginClose", JSObject().put("label", args.label))
+                }
+            }
+
+            val rootView = activity.findViewById<ViewGroup>(android.R.id.content)
+            val statusBarInset = ViewCompat.getRootWindowInsets(rootView)
+                ?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+            val params = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END).apply {
+                topMargin = statusBarInset + margin
+                rightMargin = margin
+            }
+            rootView.addView(button, params)
+            nasCloseButton = button
+        }
+        invoke.resolve()
+    }
+
+    @Command
+    fun detach_nas_close_button(invoke: Invoke) {
+        activity.runOnUiThread {
+            detachNasCloseButtonInternal()
+        }
+        invoke.resolve()
+    }
+
+    private fun detachNasCloseButtonInternal() {
+        nasCloseButton?.let { button ->
+            (button.parent as? ViewGroup)?.removeView(button)
+        }
+        nasCloseButton = null
     }
 
     @Command

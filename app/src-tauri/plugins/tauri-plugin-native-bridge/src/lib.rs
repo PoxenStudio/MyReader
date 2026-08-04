@@ -94,6 +94,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::set_text_selection_suppressed,
             commands::get_webview_cookies,
             commands::create_nas_login_window,
+            commands::attach_nas_close_button,
+            commands::detach_nas_close_button,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

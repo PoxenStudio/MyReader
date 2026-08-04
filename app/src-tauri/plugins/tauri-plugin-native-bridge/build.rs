@@ -43,6 +43,8 @@ const COMMANDS: &[&str] = &[
     "set_text_selection_suppressed",
     "get_webview_cookies",
     "create_nas_login_window",
+    "attach_nas_close_button",
+    "detach_nas_close_button",
 ];
 
 fn main() {

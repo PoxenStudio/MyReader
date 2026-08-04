@@ -51,6 +51,8 @@ Default permissions for the plugin
 - `allow-set-text-selection-suppressed`
 - `allow-get-webview-cookies`
 - `allow-create-nas-login-window`
+- `allow-attach-nas-close-button`
+- `allow-detach-nas-close-button`
 
 ## Permission Table
 
@@ -60,6 +62,32 @@ Default permissions for the plugin
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`native-bridge:allow-attach-nas-close-button`
+
+</td>
+<td>
+
+Enables the attach_nas_close_button command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-attach-nas-close-button`
+
+</td>
+<td>
+
+Denies the attach_nas_close_button command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>
@@ -369,6 +397,32 @@ Enables the create_nas_login_window command without any pre-configured scope.
 <td>
 
 Denies the create_nas_login_window command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:allow-detach-nas-close-button`
+
+</td>
+<td>
+
+Enables the detach_nas_close_button command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-detach-nas-close-button`
+
+</td>
+<td>
+
+Denies the detach_nas_close_button command without any pre-configured scope.
 
 </td>
 </tr>

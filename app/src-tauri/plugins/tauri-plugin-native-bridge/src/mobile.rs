@@ -394,6 +394,23 @@ impl<R: Runtime> NativeBridge<R> {
     }
 }
 
+/// Android-only: attach/detach the NAS popup's floating native close button
+/// — see the doc comment on `AttachNasCloseButtonRequest`.
+#[cfg(target_os = "android")]
+impl<R: Runtime> NativeBridge<R> {
+    pub fn attach_nas_close_button(&self, payload: AttachNasCloseButtonRequest) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin("attach_nas_close_button", payload)
+            .map_err(Into::into)
+    }
+
+    pub fn detach_nas_close_button(&self) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin("detach_nas_close_button", ())
+            .map_err(Into::into)
+    }
+}
+
 /// Android-only: `wry`'s `cookies_for_url` is unimplemented on Android (always
 /// returns empty), so we read Android's app-wide `android.webkit.CookieManager`
 /// instead — see the doc comment on the top-level `get_webview_cookies` command.

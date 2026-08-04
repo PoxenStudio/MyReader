@@ -452,6 +452,26 @@ export async function getWebviewCookies(
   });
 }
 
+// Android has no OS-level title bar/close button on the popup, so a native
+// floating close button is layered over it instead (injecting one into the
+// popup's own DOM isn't reliable across wildly different NAS vendor page
+// layouts). No-op on other platforms. See NativeBridgePlugin.kt's
+// `attach_nas_close_button` for how the button is attached, and the
+// `nasLoginClose` plugin event (listened for via `addPluginListener` in
+// NasRemoteWebview) for how its click reaches back to JS.
+
+export interface AttachNasCloseButtonRequest {
+  label: string;
+}
+
+export async function attachNasCloseButton(request: AttachNasCloseButtonRequest): Promise<void> {
+  await invoke('plugin:native-bridge|attach_nas_close_button', { payload: request });
+}
+
+export async function detachNasCloseButton(): Promise<void> {
+  await invoke('plugin:native-bridge|detach_nas_close_button');
+}
+
 // ── Nightly updater (main-app commands, no native-bridge prefix) ─────────
 // `verify_update_signature` gates the custom install flows (portable /
 // AppImage / Android); `install_nightly_update` drives the Tauri updater for

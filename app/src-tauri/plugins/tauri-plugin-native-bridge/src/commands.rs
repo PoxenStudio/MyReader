@@ -500,3 +500,37 @@ pub(crate) async fn create_nas_login_window<R: Runtime>(
         .map_err(|e| crate::Error::NativeBridgeError(e.to_string()))?;
     Ok(())
 }
+
+/// Attach a floating native close button over the NAS popup (Android only —
+/// see `AttachNasCloseButtonRequest`). No-op elsewhere: desktop already has
+/// a native title bar close button, and iOS is out of scope for this fix.
+#[command]
+pub(crate) async fn attach_nas_close_button<R: Runtime>(
+    app: AppHandle<R>,
+    payload: AttachNasCloseButtonRequest,
+) -> Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        app.native_bridge().attach_nas_close_button(payload)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, payload);
+        Ok(())
+    }
+}
+
+/// Remove the floating close button added by `attach_nas_close_button`, if
+/// any. Safe to call even when none is attached (e.g. non-Android).
+#[command]
+pub(crate) async fn detach_nas_close_button<R: Runtime>(app: AppHandle<R>) -> Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        app.native_bridge().detach_nas_close_button()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(())
+    }
+}

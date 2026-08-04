@@ -3,8 +3,15 @@
 import { useEffect, useRef } from 'react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { addPluginListener, PluginListener } from '@tauri-apps/api/core';
 import { type as osType } from '@tauri-apps/plugin-os';
-import { NasCookieEntry, createNasLoginWindow, getWebviewCookies } from '@/utils/bridge';
+import {
+  NasCookieEntry,
+  createNasLoginWindow,
+  getWebviewCookies,
+  attachNasCloseButton,
+  detachNasCloseButton,
+} from '@/utils/bridge';
 
 const MAX_WIDTH = 800;
 const MAX_HEIGHT = 1024;
@@ -57,12 +64,20 @@ interface NasRemoteWebviewProps {
 const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => {
   const windowRef = useRef<WebviewWindow | null>(null);
   const closedRef = useRef(false);
+  // Android has no OS-level title bar/close button on the popup (mobile
+  // `WebviewWindow`s are always fullscreen with no decorations), so a native
+  // floating close button is attached instead — see attachNasCloseButton.
+  // This listens for its click, forwarded as a plugin event since there's no
+  // native window handle to call back into from the native-bridge side.
+  const closeListenerRef = useRef<PluginListener | null>(null);
 
   const captureAndClose = async () => {
     if (closedRef.current) return;
     closedRef.current = true;
     const win = windowRef.current;
     windowRef.current = null;
+    const closeListener = closeListenerRef.current;
+    closeListenerRef.current = null;
     let cookies: NasCookieEntry[] | null = null;
     if (win) {
       try {
@@ -71,12 +86,26 @@ const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => 
       } catch (e) {
         console.error('Failed to read NAS window cookies:', e);
       }
+      if (osType() === 'android') {
+        try {
+          await detachNasCloseButton();
+        } catch (e) {
+          console.error('Failed to detach NAS close button:', e);
+        }
+      }
       try {
         // destroy(), not close() — close() re-emits closeRequested (which
         // we already handle below), destroy() forces it without looping.
         await win.destroy();
       } catch (e) {
         console.error('Failed to close NAS window:', e);
+      }
+    }
+    if (closeListener) {
+      try {
+        await closeListener.unregister();
+      } catch (e) {
+        console.error('Failed to unregister NAS close button listener:', e);
       }
     }
     onClose(cookies);
@@ -134,6 +163,23 @@ const NasRemoteWebview: React.FC<NasRemoteWebviewProps> = ({ url, onClose }) => 
         event.preventDefault();
         await captureAndClose();
       });
+
+      if (osType() === 'android') {
+        try {
+          // Register the listener before attaching the button so a click
+          // can never race ahead of us being ready to hear it.
+          closeListenerRef.current = await addPluginListener(
+            'native-bridge',
+            'nasLoginClose',
+            (event: { label: string }) => {
+              if (event.label === label) captureAndClose();
+            },
+          );
+          await attachNasCloseButton({ label });
+        } catch (e) {
+          console.error('Failed to attach NAS close button:', e);
+        }
+      }
     };
 
     create();
