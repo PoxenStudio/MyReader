@@ -1,8 +1,8 @@
-Readest E2E Sample
+MyReader E2E Sample
 
 Chapter One
 
-This is a synthetic plain-text book used by the Readest web end-to-end
+This is a synthetic plain-text book used by the MyReader web end-to-end
 test suite. It exists only so that import and reading flows have a small,
 deterministic file to exercise. It is not a real publication.
 
