@@ -134,6 +134,47 @@ export async function uploadBook(
   return bookId;
 }
 
+/**
+ * Streams `url` straight to `dst` instead of buffering the whole response
+ * through the webview fetch + JS memory.
+ *
+ * On Tauri this routes through the native Rust downloader (`download_file`,
+ * already used for OPDS and gloss-pack downloads) which writes each chunk
+ * directly to disk and only sends small progress updates over the IPC
+ * channel. Going through the webview's `fetch` polyfill instead (as this
+ * used to) shuttles every chunk through IPC as a JSON array of bytes, and
+ * `webDownload()` then re-copies the whole thing through a chunk array +
+ * Blob + arrayBuffer — for a ~76MB book that easily blew past Android's
+ * ~256MB heap growth limit with a single 264MB allocation and crashed with
+ * an OOM during the auto "reading books" sync.
+ *
+ * The native downloader's reqwest client doesn't share the webview's cookie
+ * jar, though, so the MyBooks session cookie has to be passed explicitly as
+ * a header — the same trick `tauriCookieStore.ts` already uses for the
+ * WebSocket sync channel, which has the identical problem.
+ */
+async function downloadMyBooksUrl(
+  appService: AppService,
+  url: string,
+  dst: string,
+  onProgress?: ProgressHandler,
+): Promise<void> {
+  const { downloadFile } = await import('@/libs/storage');
+  if (isTauriAppPlatform()) {
+    const { getTauriMyBooksCookie } = await import('@/services/mybooks/tauriCookieStore');
+    const cookie = getTauriMyBooksCookie();
+    await downloadFile({
+      appService,
+      dst,
+      url,
+      headers: cookie ? { Cookie: cookie } : undefined,
+      onProgress,
+    });
+  } else {
+    await downloadFile({ appService, dst, url, credentials: 'include', onProgress });
+  }
+}
+
 export async function downloadMyBooksBook(
   appService: AppService,
   fs: FileSystem,
@@ -179,23 +220,24 @@ export async function downloadMyBooksBook(
   const dst = `${localBooksDir}/${lfp}`;
   console.log(`Downloading MyReader book from: ${downloadUrl} to ${dst}`);
 
-  // Always use fetch (with credentials: 'include') for MyReader downloads so that
-  // session cookies set by the MyReader server are sent correctly. Tauri's Rust-side
-  // downloader (reqwest) does not share the webview cookie store and would get a 401.
-  const { webDownload } = await import('@/utils/transfer');
-  const { blob } = await webDownload(downloadUrl, onProgress, undefined, 'include');
-  let bookArrayBuffer = await blob.arrayBuffer();
   if (book.format === 'TXT') {
     // DocumentLoader has no TXT parser (it only sniffs EPUB/PDF/MOBI/FB2 by magic bytes),
     // so local TXT imports are converted to EPUB before being persisted (see importBook in
     // bookService.ts). Cloud TXT downloads must go through the same conversion, otherwise
     // DocumentLoader.open() returns a null bookDoc when the reader tries to open the file.
+    // This still needs the full bytes in JS memory (unlike downloadMyBooksUrl below), but
+    // TXT sources are plain text and small next to an EPUB with embedded images/fonts, so
+    // the memory tradeoff is fine here.
+    const { webDownload } = await import('@/utils/transfer');
+    const { blob } = await webDownload(downloadUrl, onProgress, undefined, 'include');
+    const bookArrayBuffer = await blob.arrayBuffer();
     const { TxtToEpubConverter } = await import('@/utils/txt');
     const txtFile = new File([bookArrayBuffer], `${book.sourceTitle || book.title}.txt`);
     const { file: epubFile } = await new TxtToEpubConverter().convert({ file: txtFile });
-    bookArrayBuffer = await epubFile.arrayBuffer();
+    await appService.writeFile(dst, 'None', await epubFile.arrayBuffer());
+  } else {
+    await downloadMyBooksUrl(appService, downloadUrl, dst, onProgress);
   }
-  await appService.writeFile(dst, 'None', bookArrayBuffer);
 
   const bookDownloaded = await fs.exists(lfp, 'Books');
   if (bookDownloaded) {
@@ -213,15 +255,9 @@ export async function downloadMyBooksBook(
       const coverDownloadUrl = isTauriAppPlatform()
         ? coverUrl
         : `/api/mybooks/download?url=${encodeURIComponent(coverUrl)}`;
-      const { blob: coverBlob } = await webDownload(
-        coverDownloadUrl,
-        undefined,
-        undefined,
-        'include',
-      );
       const coverLfp = getCoverFilename(book);
       const coverDst = `${localBooksDir}/${coverLfp}`;
-      await appService.writeFile(coverDst, 'None', await coverBlob.arrayBuffer());
+      await downloadMyBooksUrl(appService, coverDownloadUrl, coverDst);
 
       const coverDownloaded = await fs.exists(coverLfp, 'Books');
       if (coverDownloaded) {

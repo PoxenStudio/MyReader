@@ -1,5 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { deleteBook, downloadMyBooksBook, uploadBook } from '@/services/cloudService';
+import { isTauriAppPlatform } from '@/services/environment';
 import { Book, BookFormat } from '@/types/book';
 import { AppService, FileSystem } from '@/types/system';
 
@@ -14,6 +15,16 @@ vi.mock('@/services/environment', async (importOriginal) => {
 const webDownloadMock = vi.fn();
 vi.mock('@/utils/transfer', () => ({
   webDownload: (...args: unknown[]) => webDownloadMock(...args),
+}));
+
+const downloadFileMock = vi.fn();
+vi.mock('@/libs/storage', () => ({
+  downloadFile: (...args: unknown[]) => downloadFileMock(...args),
+}));
+
+const getTauriMyBooksCookieMock = vi.fn();
+vi.mock('@/services/mybooks/tauriCookieStore', () => ({
+  getTauriMyBooksCookie: () => getTauriMyBooksCookieMock(),
 }));
 
 const txtConvertMock = vi.fn();
@@ -31,10 +42,6 @@ vi.mock('@/utils/book', () => ({
   getLocalBookFilename: vi.fn((book: Book) => `${book.hash}/${book.title}.epub`),
   getRemoteBookFilename: vi.fn((book: Book) => `${book.hash}/${book.hash}.epub`),
   getCoverFilename: vi.fn((book: Book) => `${book.hash}/cover.png`),
-}));
-
-vi.mock('@/libs/storage', () => ({
-  downloadFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 const uploadBookToMyBooksMock = vi.fn().mockResolvedValue(123);
@@ -480,15 +487,24 @@ describe('cloudService', () => {
     beforeEach(() => {
       webDownloadMock.mockReset();
       webDownloadMock.mockResolvedValue({ blob: new Blob(['content']) });
+      downloadFileMock.mockReset();
+      downloadFileMock.mockResolvedValue(undefined);
+      getTauriMyBooksCookieMock.mockReset();
+      getTauriMyBooksCookieMock.mockReturnValue(null);
       txtConvertMock.mockReset();
       localStorage.setItem('mybooks_host', 'https://mybooks.example.com');
     });
 
     afterEach(() => {
       localStorage.removeItem('mybooks_host');
+      vi.mocked(isTauriAppPlatform).mockReturnValue(false);
     });
 
-    test('downloads the file matching book.format, not files[0]', async () => {
+    test('downloads the file matching book.format, not files[0], via the streaming downloader', async () => {
+      // Non-TXT downloads must stream straight to disk (downloadMyBooksUrl ->
+      // downloadFile) instead of buffering the whole response through
+      // webDownload()/JS memory — see the Android OOM writeup: a 76MB book
+      // blew a single ~264MB allocation past the ~256MB heap growth limit.
       const book = createMockBook({
         hash: 'cloud-123-pdf',
         format: 'PDF' as BookFormat,
@@ -500,11 +516,53 @@ describe('cloudService', () => {
 
       await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
 
-      expect(webDownloadMock).toHaveBeenCalledWith(
-        expect.stringContaining(encodeURIComponent('/api/book/123.pdf')),
-        undefined,
-        undefined,
-        'include',
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appService: mockAppService,
+          url: expect.stringContaining(encodeURIComponent('/api/book/123.pdf')),
+          credentials: 'include',
+        }),
+      );
+      expect(webDownloadMock).not.toHaveBeenCalled();
+    });
+
+    test('on Tauri, passes the stored MyBooks session cookie as an explicit header', async () => {
+      // The native Rust downloader's reqwest client doesn't share the
+      // webview's cookie jar, so the session cookie captured at login
+      // (tauriCookieStore.ts) has to be forwarded explicitly.
+      vi.mocked(isTauriAppPlatform).mockReturnValue(true);
+      getTauriMyBooksCookieMock.mockReturnValue('session=abc123');
+      const book = createMockBook({
+        hash: 'cloud-123-pdf',
+        format: 'PDF' as BookFormat,
+        files: [{ format: 'PDF' as BookFormat, size: 2, href: '/api/book/123.pdf' }],
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: { Cookie: 'session=abc123' },
+        }),
+      );
+      expect(downloadFileMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ credentials: expect.anything() }),
+      );
+    });
+
+    test('on Tauri, omits the Cookie header when no session cookie was captured', async () => {
+      vi.mocked(isTauriAppPlatform).mockReturnValue(true);
+      getTauriMyBooksCookieMock.mockReturnValue(null);
+      const book = createMockBook({
+        hash: 'cloud-123-pdf',
+        format: 'PDF' as BookFormat,
+        files: [{ format: 'PDF' as BookFormat, size: 2, href: '/api/book/123.pdf' }],
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({ headers: undefined }),
       );
     });
 
@@ -542,11 +600,10 @@ describe('cloudService', () => {
 
       await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
 
-      expect(webDownloadMock).toHaveBeenCalledWith(
-        expect.stringContaining(encodeURIComponent('/api/book/456.epub')),
-        undefined,
-        undefined,
-        'include',
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: expect.stringContaining(encodeURIComponent('/api/book/456.epub')),
+        }),
       );
     });
 
