@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import Image from 'next/image';
 
@@ -30,6 +31,16 @@ const LibraryEmptyState: React.FC<LibraryEmptyStateProps> = ({
   const isMobile = appService?.isMobile ?? false;
   const isCloud = source === 'cloud';
   const showSyncReadingBooks = !!user && !settings.autoSyncReadingBooks && !!onSyncReadingBooks;
+  const [isSyncingReadingBooks, setIsSyncingReadingBooks] = useState(false);
+
+  const handleSyncReadingBooks = () => {
+    // One-shot: once triggered, stay disabled rather than re-enabling when
+    // the sync settles — the queued downloads keep running in the
+    // background regardless, and re-clicking would just re-run the same
+    // diff against the cloud "reading" list for no benefit.
+    setIsSyncingReadingBooks(true);
+    onSyncReadingBooks?.();
+  };
 
   return (
     <div className='hero-content text-neutral-content text-center'>
@@ -72,10 +83,14 @@ const LibraryEmptyState: React.FC<LibraryEmptyStateProps> = ({
               {showSyncReadingBooks && (
                 <button
                   type='button'
-                  className='btn btn-primary h-11 min-h-11 rounded-lg'
-                  onClick={onSyncReadingBooks}
+                  className={clsx(
+                    'btn btn-primary h-11 min-h-11 rounded-lg',
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
+                  )}
+                  disabled={isSyncingReadingBooks}
+                  onClick={handleSyncReadingBooks}
                 >
-                  {_('Sync Reading Books from Library')}
+                  {isSyncingReadingBooks ? _('Syncing…') : _('Sync Reading Books from Library')}
                 </button>
               )}
               {/* TODO: add a 'Browse free catalogs' secondary action that opens the

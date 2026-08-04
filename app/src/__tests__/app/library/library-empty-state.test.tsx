@@ -76,4 +76,23 @@ describe('LibraryEmptyState', () => {
 
     expect(handleImport).toHaveBeenCalledTimes(1);
   });
+
+  it('disables the sync button after it is clicked and does not call the handler again', () => {
+    useEnvMock.mockReturnValue({ appService: { isMobile: false } });
+    useAuthMock.mockReturnValue({ user: { id: 'stub-user' } });
+    const handleSync = vi.fn();
+    render(<LibraryEmptyState onImport={vi.fn()} onSyncReadingBooks={handleSync} />);
+
+    const button = screen.getByRole('button', { name: 'Sync Reading Books from Library' });
+    fireEvent.click(button);
+
+    expect(handleSync).toHaveBeenCalledTimes(1);
+    const disabledButton = screen.getByRole('button', { name: 'Syncing…' });
+    expect(disabledButton.hasAttribute('disabled')).toBe(true);
+
+    // A second click must not be possible / must not re-invoke the handler —
+    // this is a one-shot action once the sync has been kicked off.
+    fireEvent.click(disabledButton);
+    expect(handleSync).toHaveBeenCalledTimes(1);
+  });
 });
