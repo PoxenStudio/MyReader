@@ -406,27 +406,14 @@ pub fn run() {
         ))
     });
 
-    // On Android release builds, prefer writing logs directly to the shared
-    // Download folder when it's writable (i.e. "All files access" is
-    // granted), so users can find them without digging through the private
-    // sandbox and without a separate lifecycle-triggered copy step. Debug
-    // builds (`tauri android dev`) always use the private per-app log dir
-    // instead — a freshly sideloaded debug install typically doesn't have
-    // that permission yet, and the write probe in `writable_shared_log_dir`
-    // hitting `EACCES` on some OEM skins (observed on MIUI) can otherwise
-    // take the log plugin's `setup()` down at startup before the app is
-    // even in a state to prompt for the permission.
-    #[cfg(all(target_os = "android", not(debug_assertions)))]
-    let log_target = match android::writable_shared_log_dir() {
-        Some(dir) => tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
-            path: dir,
-            file_name: None,
-        }),
-        None => {
-            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None })
-        }
-    };
-    #[cfg(any(not(target_os = "android"), debug_assertions))]
+    // Writing logs to shared storage (e.g. Download) would need
+    // `MANAGE_EXTERNAL_STORAGE`, which has no ordinary runtime prompt — only
+    // a Settings-screen redirect (see `request_manage_storage_permission` in
+    // the native-bridge plugin, used for the custom library folder feature)
+    // — and log-target selection happens at startup, before the app has any
+    // UI to drive that redirect from. Attempting the write anyway without
+    // that permission silently fails with `EACCES` on many OEM skins
+    // (observed on MIUI), so logs always go to the private per-app dir.
     let log_target =
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None });
 
