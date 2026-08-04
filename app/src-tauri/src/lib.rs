@@ -406,12 +406,17 @@ pub fn run() {
         ))
     });
 
-    // On Android, prefer writing logs directly to the shared Download
-    // folder when it's writable (i.e. "All files access" is granted), so
-    // users can find them without digging through the private sandbox and
-    // without a separate lifecycle-triggered copy step. Falls back to the
-    // private per-platform log dir otherwise.
-    #[cfg(target_os = "android")]
+    // On Android release builds, prefer writing logs directly to the shared
+    // Download folder when it's writable (i.e. "All files access" is
+    // granted), so users can find them without digging through the private
+    // sandbox and without a separate lifecycle-triggered copy step. Debug
+    // builds (`tauri android dev`) always use the private per-app log dir
+    // instead — a freshly sideloaded debug install typically doesn't have
+    // that permission yet, and the write probe in `writable_shared_log_dir`
+    // hitting `EACCES` on some OEM skins (observed on MIUI) can otherwise
+    // take the log plugin's `setup()` down at startup before the app is
+    // even in a state to prompt for the permission.
+    #[cfg(all(target_os = "android", not(debug_assertions)))]
     let log_target = match android::writable_shared_log_dir() {
         Some(dir) => tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
             path: dir,
@@ -421,7 +426,7 @@ pub fn run() {
             tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None })
         }
     };
-    #[cfg(not(target_os = "android"))]
+    #[cfg(any(not(target_os = "android"), debug_assertions))]
     let log_target =
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None });
 

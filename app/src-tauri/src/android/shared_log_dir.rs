@@ -16,6 +16,9 @@ const LOG_SUBPATH: &str = "Download/MyReader/Logs";
 /// Called once at startup, before the log plugin is configured, so the
 /// result decides where the logger writes for the rest of the process
 /// lifetime — no later re-check or copy step is needed.
+///
+/// Only called from release builds — see the call site in `lib.rs`.
+#[cfg_attr(debug_assertions, allow(dead_code))]
 pub fn writable_shared_log_dir() -> Option<PathBuf> {
     let root = std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/storage/emulated/0".into());
     let dir = PathBuf::from(root).join(LOG_SUBPATH);
