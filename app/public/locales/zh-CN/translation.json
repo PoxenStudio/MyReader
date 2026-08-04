@@ -231,6 +231,7 @@
   "Next Page": "下一页",
   "Previous Page": "上一页",
   "Are you sure to delete {{count}} selected book(s)?_other": "您确定要删除 {{count}} 本选中的书籍吗？",
+  "Are you sure to delete {{count}} selected book(s) from MyBooks?_other": "您确定要从MyBooks书库中删除 {{count}} 本选中的书籍吗？",
   "Deselect": "取消选择",
   "Select All": "全选",
   "No translation available.": "暂无可用的翻译",

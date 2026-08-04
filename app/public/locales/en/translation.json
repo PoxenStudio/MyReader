@@ -8,6 +8,8 @@
   "KingHwa_OldSong": "KingHwa Song",
   "Are you sure to delete {{count}} selected book(s)?_one": "Are you sure to delete {{count}} selected book?",
   "Are you sure to delete {{count}} selected book(s)?_other": "Are you sure to delete {{count}} selected books?",
+  "Are you sure to delete {{count}} selected book(s) from MyBooks?_one": "Are you sure to delete {{count}} selected book from MyBooks?",
+  "Are you sure to delete {{count}} selected book(s) from MyBooks?_other": "Are you sure to delete {{count}} selected books from MyBooks?",
   "Search in {{count}} Book(s)..._one": "Search in {{count}} book...",
   "Search in {{count}} Book(s)..._other": "Search in {{count}} books...",
   "{{count}} pages left in chapter_one": "<0>{{count}}</0><1> page left in chapter</1>",

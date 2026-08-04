@@ -1031,9 +1031,12 @@ const Bookshelf: React.FC<BookshelfProps> = ({
         <ModalPortal>
           <DeleteConfirmAlert
             title={_('Confirm Deletion')}
-            message={_('Are you sure to delete {{count}} selected book(s)?', {
-              count: getBooksToDelete().length,
-            })}
+            message={_(
+              isCloudLibrary
+                ? 'Are you sure to delete {{count}} selected book(s) from MyBooks?'
+                : 'Are you sure to delete {{count}} selected book(s)?',
+              { count: getBooksToDelete().length },
+            )}
             showPurgeToggle
             onCancel={() => {
               abortDeletionRef.current = true;

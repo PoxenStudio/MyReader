@@ -230,6 +230,7 @@
   "Next Page": "下一頁",
   "Previous Page": "上一頁",
   "Are you sure to delete {{count}} selected book(s)?_other": "確定要刪除已選擇的 {{count}} 本書嗎？",
+  "Are you sure to delete {{count}} selected book(s) from MyBooks?_other": "您確定要從MyBooks書庫中刪除已選擇的 {{count}} 本書嗎？",
   "Deselect": "取消選取",
   "Select All": "全選",
   "No translation available.": "暫無翻譯",
