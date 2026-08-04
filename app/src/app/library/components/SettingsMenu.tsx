@@ -22,6 +22,7 @@ import { setAboutDialogVisible } from '@/components/AboutWindow';
 import { setMigrateDataDirDialogVisible } from '@/app/library/components/MigrateDataWindow';
 import { requestStoragePermission } from '@/utils/permission';
 import { saveSysSettings } from '@/helpers/settings';
+import { eventDispatcher } from '@/utils/event';
 import {
   getBiometricStatus,
   getBiometryLabelKey,
@@ -47,6 +48,9 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
   const [isAutoCheckUpdates, setIsAutoCheckUpdates] = useState(settings.autoCheckUpdates);
   const [isAutoSetReadState, setIsAutoSetReadState] = useState(settings.autoSetReadState);
   const [isAllowDelCloudBook, setIsAllowDelCloudBook] = useState(settings.allowDelCloudBook);
+  const [isAutoSyncReadingBooks, setIsAutoSyncReadingBooks] = useState(
+    settings.autoSyncReadingBooks,
+  );
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(settings.alwaysOnTop);
   const [isAlwaysShowStatusBar, setIsAlwaysShowStatusBar] = useState(settings.alwaysShowStatusBar);
   const [isOpenLastBooks, setIsOpenLastBooks] = useState(settings.openLastBooks);
@@ -152,6 +156,15 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
     const newValue = !settings.allowDelCloudBook;
     saveSysSettings(envConfig, 'allowDelCloudBook', newValue);
     setIsAllowDelCloudBook(newValue);
+  };
+
+  const toggleAutoSyncReadingBooks = () => {
+    const newValue = !settings.autoSyncReadingBooks;
+    saveSysSettings(envConfig, 'autoSyncReadingBooks', newValue);
+    setIsAutoSyncReadingBooks(newValue);
+    if (newValue && user) {
+      eventDispatcher.dispatch('check-reading-books-sync');
+    }
   };
 
   const toggleAutoImportBooksOnOpen = () => {
@@ -281,6 +294,14 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ setIsDropdownOpen }) => {
           label={_('Allow Delete Cloud Books')}
           toggled={isAllowDelCloudBook}
           onClick={toggleAllowDelCloudBook}
+        />
+      )}
+
+      {user && (
+        <MenuItem
+          label={_('Auto Sync Reading Books')}
+          toggled={isAutoSyncReadingBooks}
+          onClick={toggleAutoSyncReadingBooks}
         />
       )}
 

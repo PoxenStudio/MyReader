@@ -42,6 +42,7 @@ import { useUICSS } from '@/hooks/useUICSS';
 import { useDemoBooks } from './hooks/useDemoBooks';
 import { useAutoImportFolders } from './hooks/useAutoImportFolders';
 import { useOPDSSubscriptions } from '@/hooks/useOPDSSubscriptions';
+import { useAutoSyncReadingBooks } from '@/hooks/useAutoSyncReadingBooks';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useTransferStore } from '@/store/transferStore';
 import { useBackgroundTexture } from '@/hooks/useBackgroundTexture';
@@ -314,6 +315,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   useTransferQueue(libraryLoaded);
 
   const { checkOPDSSubscriptions } = useOPDSSubscriptions();
+  useAutoSyncReadingBooks();
   const { isDragging } = useDragDropImport();
 
   usePullToRefresh(

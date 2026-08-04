@@ -348,6 +348,8 @@ export interface SystemSettings {
   autoSetReadState: boolean;
   /** Whether books can be deleted from the cloud (MyBooks) shelf. Admin-only action, gated separately by `isAdmin`. */
   allowDelCloudBook: boolean;
+  /** Whether to auto-download reading books from MyBooks that aren't in the local library on app open. */
+  autoSyncReadingBooks: boolean;
   alwaysOnTop: boolean;
   openBookInNewWindow: boolean;
   autoCheckUpdates: boolean;
