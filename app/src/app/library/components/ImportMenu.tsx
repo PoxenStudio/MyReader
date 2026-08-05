@@ -6,6 +6,7 @@ import { useEnv } from '@/context/EnvContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import MenuItem from '@/components/MenuItem';
 import Menu from '@/components/Menu';
+import { RiImportLine } from 'react-icons/ri';
 
 interface ImportMenuProps {
   setIsDropdownOpen?: (open: boolean) => void;
@@ -59,7 +60,7 @@ const ImportMenu: React.FC<ImportMenuProps> = ({
     >
       <MenuItem
         label={_('From Local File')}
-        Icon={<IoFileTray className='h-5 w-5' />}
+        Icon={<RiImportLine className='h-5 w-5' />}
         onClick={handleImportFromFiles}
       />
       {onImportBooksFromDirectory && (
