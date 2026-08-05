@@ -136,6 +136,25 @@ export interface MyBooksSysInfo {
   };
 }
 
+export interface MyBooksReadingStatsTotals {
+  total_reading_seconds: number;
+  download_count: number;
+  push_count: number;
+}
+
+export interface MyBooksReadingStatsWeek {
+  week_start: string;
+  reading_seconds: number;
+  download_count: number;
+  push_count: number;
+}
+
+export interface MyBooksReadingStatsBookStatus {
+  reading: number;
+  to_read: number;
+  finished: number;
+}
+
 export interface MyBooksResponse<T = unknown> {
   err: string;
   msg?: string;
@@ -153,6 +172,11 @@ export interface MyBooksResponse<T = unknown> {
   avatar_url?: string;
   book_id?: number;
   devices?: MyBooksDevice[];
+  // /user/reading_stats — document/MyBooks_WebAPI.md §2.10
+  enabled?: boolean;
+  totals?: MyBooksReadingStatsTotals;
+  weekly?: MyBooksReadingStatsWeek[];
+  book_status?: MyBooksReadingStatsBookStatus;
 }
 
 // Thrown when MyReader responded but reported a logical error (e.g. not logged
@@ -632,6 +656,28 @@ export async function updateUserSettings(settings: MyBooksUpdateSettings): Promi
     JSON.stringify(settings),
     'application/json',
   );
+}
+
+export interface MyBooksReadingStats {
+  totals: MyBooksReadingStatsTotals;
+  weekly: MyBooksReadingStatsWeek[];
+  book_status: MyBooksReadingStatsBookStatus;
+}
+
+/**
+ * 获取阅读统计（首页“阅读统计”Banner 的数据源）
+ * 参见 document/MyBooks_WebAPI.md 2.10 首页阅读统计
+ *
+ * Returns null when the feature is off server-side (`enabled: false`) —
+ * callers should hide the stats UI silently rather than showing an error,
+ * same as MyBooks' own ReadingStatsBanner.
+ */
+export async function getReadingStats(uid?: number): Promise<MyBooksReadingStats | null> {
+  const response = await fetchMyBooks('/user/reading_stats', uid ? { uid } : undefined);
+  if (!response.enabled || !response.totals || !response.weekly || !response.book_status) {
+    return null;
+  }
+  return { totals: response.totals, weekly: response.weekly, book_status: response.book_status };
 }
 
 /**

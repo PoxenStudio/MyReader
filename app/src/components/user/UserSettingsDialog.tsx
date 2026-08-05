@@ -34,6 +34,7 @@ import Dialog from '@/components/Dialog';
 import UserAvatar from '@/components/UserAvatar';
 import NasRemoteWebview from '@/components/nas/NasRemoteWebview';
 import NasRemoteLoginIconButton from '@/components/nas/NasRemoteLoginIconButton';
+import ReadingStatsCard from '@/components/user/ReadingStatsCard';
 
 type RefreshStatus = 'idle' | 'loading' | 'error';
 
@@ -256,6 +257,9 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
                 </div>
               </SettingsRow>
             </BoxedList>
+
+            {/* Reading stats */}
+            <ReadingStatsCard isOpen={isOpen} />
 
             {/* Account info */}
             <BoxedList title={_('Account')}>
