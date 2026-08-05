@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Backs the `manageStorage` permission alias declared on
+         NativeBridgePlugin's @TauriPlugin(permissions = [...]) — that
+         annotation only wires up the plugin's own JS-facing
+         checkPermissions/requestPermissions commands, it does NOT emit
+         a manifest entry. Without this <uses-permission>, Android 11+'s
+         per-app "Allow access to manage all files" screen (opened via
+         ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION in
+         request_manage_storage_permission) shows the toggle disabled —
+         the OS won't let the user grant a permission the app never
+         declared wanting. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
     <!-- Make dictionary / text-processing apps (Eudic, 欧路词典, GoldenDict,
          Pleco, etc.) visible to queryIntentActivities under Android 11+
          package-visibility filtering. Without this declaration only the
