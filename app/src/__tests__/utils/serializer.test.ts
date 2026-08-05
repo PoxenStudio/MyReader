@@ -179,6 +179,20 @@ describe('BookConfig serialization', () => {
     expect(sc.matchWholeWords).toBe(false);
   });
 
+  it('defaults updatedAt to 0 (never-synced sentinel) for a config with no timestamp', () => {
+    // Reproduces a real report: a cloud book that was only ever
+    // auto-downloaded in the background (never opened on this device) has
+    // no config file, so bookService.loadBookConfig calls this with '{}'.
+    // If the fallback stamps "now" instead of the "never edited" sentinel,
+    // the freshly-downloaded (but never-read) local config looks newer
+    // than the server's real progress from hours/days earlier, so
+    // useNativeSync's pullNow LWW compare picks the empty local config and
+    // the user's actual reading position is silently never applied.
+    const config = deserializeConfig('{}', globalViewSettings, defaultSearchConfig);
+
+    expect(config.updatedAt).toBe(0);
+  });
+
   it('does not migrate annotations when schemaVersion is already 2', () => {
     const config = deserializeConfig(
       JSON.stringify({

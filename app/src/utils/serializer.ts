@@ -88,7 +88,17 @@ export const deserializeConfig = (
     config.booknotes = unifyAnnotations(config.booknotes);
   }
   config.schemaVersion ??= BOOK_CONFIG_SCHEMA_VERSION;
-  config.updatedAt ??= Date.now();
+  // 0, not Date.now(): a config with no `updatedAt` has never actually been
+  // edited on this device (most commonly a freshly-downloaded cloud book
+  // that was never opened locally — bookService.loadBookConfig calls this
+  // with '{}' when no config file exists yet). Stamping "now" here made an
+  // empty/never-read local config look newer than genuine, older server
+  // progress, so useNativeSync's LWW pull-merge always kept the empty local
+  // state and silently discarded the server's real reading position. 0
+  // mirrors the "never synced" sentinel WebDAVSync already uses for the
+  // same case (see the merge note above), so any remote update with a real
+  // timestamp wins on first sync.
+  config.updatedAt ??= 0;
   return config;
 };
 

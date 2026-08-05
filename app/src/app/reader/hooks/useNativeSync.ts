@@ -12,6 +12,7 @@ import { getBookHash } from '@/utils/book';
 import { BookConfig, BookNote } from '@/types/book';
 import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
+import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
 import { useWindowActiveChanged } from './useWindowActiveChanged';
 import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvents';
 
@@ -55,14 +56,25 @@ export const useNativeSync = (bookKey: string) => {
     // Never push before the initial pull-on-open has resolved: pushing local
     // progress before the pull's remote merge lands would overwrite whatever
     // newer progress the server holds.
-    if (!initialPullDoneRef.current) return;
-    if (useReaderStore.getState().getViewState(bookKey)?.previewMode) return;
+    if (!initialPullDoneRef.current) {
+      syncLog(bookKey, 'push:skip', { reason: 'initial-pull-not-settled-yet' });
+      return;
+    }
+    if (useReaderStore.getState().getViewState(bookKey)?.previewMode) {
+      syncLog(bookKey, 'push:skip', { reason: 'preview-mode' });
+      return;
+    }
 
     const config = getConfig(bookKey);
     const book = getBookData(bookKey)?.book;
     if (!config || !book) return;
 
     const now = Date.now();
+    syncLog(bookKey, 'push:start', {
+      location: config.location,
+      progress: config.progress,
+      localUpdatedAt: config.updatedAt ?? 0,
+    });
     try {
       await pushSync({
         configs: [
@@ -87,6 +99,7 @@ export const useNativeSync = (bookKey: string) => {
         })),
       });
       dirtyRef.current = false;
+      syncLog(bookKey, 'push:done', { elapsedMs: Date.now() - now });
 
       const latest = getConfig(bookKey);
       if (latest) {
@@ -100,11 +113,13 @@ export const useNativeSync = (bookKey: string) => {
       }
     } catch (e) {
       if (e instanceof SyncApiError) {
+        syncWarn(bookKey, 'push:error', { message: e.message });
         eventDispatcher.dispatch('toast', {
           type: 'error',
           message: _('Sync failed: {{message}}', { message: e.message }),
         });
       } else {
+        syncWarn(bookKey, 'push:error', { error: String(e) });
         console.warn('Native sync push failed', e);
       }
     }
@@ -116,10 +131,18 @@ export const useNativeSync = (bookKey: string) => {
     const config = getConfig(bookKey);
     if (!book || !config) return false;
 
+    const requestStartedAt = Date.now();
+    syncLog(bookKey, 'pull:request', {
+      bookHash: book.hash,
+      localLocation: config.location,
+      localUpdatedAt: config.updatedAt ?? 0,
+    });
+
     try {
       const result = await pullSync(0, { book: book.hash });
       lastPulledAtRef.current = Date.now();
       const now = Date.now();
+      const elapsedMs = now - requestStartedAt;
 
       const remoteConfig = result.configs?.[0];
       const remoteNotes = result.notes ?? [];
@@ -127,6 +150,34 @@ export const useNativeSync = (bookKey: string) => {
       const localUpdatedAt = config.updatedAt ?? 0;
       const remoteUpdatedAt = remoteConfig?.updatedAt ?? remoteConfig?.updated_at ?? 0;
       const remoteWins = !!remoteConfig && remoteUpdatedAt > localUpdatedAt;
+
+      // The comparison above (and everything derived from it) is computed
+      // against `config`, a snapshot taken *before* the network await. If a
+      // local write landed on this book while the request was in flight,
+      // that write is invisible here — and the wholesale `setConfig` below
+      // still overwrites the (now fresher) live config with a value built
+      // on top of this stale snapshot, silently reverting it.
+      const liveConfigNow = getConfig(bookKey);
+      const localChangedDuringFlight =
+        !!liveConfigNow && liveConfigNow.location !== config.location;
+
+      syncLog(bookKey, 'pull:response', {
+        elapsedMs,
+        hasRemoteConfig: !!remoteConfig,
+        remoteLocation: remoteConfig?.location,
+        remoteUpdatedAt,
+        localUpdatedAt,
+        remoteWins,
+        remoteNotesCount: remoteNotes.length,
+      });
+      if (localChangedDuringFlight) {
+        syncWarn(bookKey, 'pull:local-drifted-during-flight', {
+          snapshotLocation: config.location,
+          liveLocationNow: liveConfigNow?.location,
+          elapsedMs,
+        });
+      }
+
       const mergedConfig: BookConfig = remoteWins
         ? {
             ...config,
@@ -153,20 +204,43 @@ export const useNativeSync = (bookKey: string) => {
       const latest = getConfig(bookKey);
       if (latest) await saveConfig(envConfig, bookKey, latest, settings);
 
+      // saveConfig unconditionally re-stamps updatedAt to Date.now() (see
+      // bookDataStore.saveConfig) instead of preserving remoteUpdatedAt when
+      // remoteWins. Log the divergence so it's visible: this device's local
+      // "freshness" clock just jumped to "now" even though the content is
+      // only as fresh as remoteUpdatedAt, which can make this device
+      // wrongly out-rank a genuinely newer push from another device on the
+      // very next comparison.
+      const savedUpdatedAt = getConfig(bookKey)?.updatedAt ?? 0;
+      if (remoteWins && savedUpdatedAt !== remoteUpdatedAt) {
+        syncWarn(bookKey, 'pull:updatedAt-restamped-past-remote', {
+          remoteUpdatedAt,
+          savedUpdatedAt,
+          driftMs: savedUpdatedAt - remoteUpdatedAt,
+        });
+      }
+
       // The remote config landing here doesn't otherwise reach the already-
       // rendered view (it only opens at `config.location` once, at mount),
       // so without this the pulled position is silently ignored on screen.
       if (remoteWins && mergedConfig.location && mergedConfig.location !== config.location) {
+        syncLog(bookKey, 'pull:goTo', { from: config.location, to: mergedConfig.location });
         useReaderStore.getState().getView(bookKey)?.goTo(mergedConfig.location);
+      } else if (remoteWins) {
+        syncLog(bookKey, 'pull:goTo-skipped', {
+          reason: !mergedConfig.location ? 'no-location' : 'same-as-local',
+        });
       }
       return true;
     } catch (e) {
       if (e instanceof SyncApiError) {
+        syncWarn(bookKey, 'pull:error', { message: e.message });
         eventDispatcher.dispatch('toast', {
           type: 'error',
           message: _('Sync failed: {{message}}', { message: e.message }),
         });
       } else {
+        syncWarn(bookKey, 'pull:error', { error: String(e) });
         console.warn('Native sync pull failed', e);
       }
       return false;
@@ -181,7 +255,11 @@ export const useNativeSync = (bookKey: string) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const debouncedPush = useCallback(
     debounce(() => {
-      if (!dirtyRef.current) return;
+      if (!dirtyRef.current) {
+        syncLog(bookKey, 'push:debounce-fired', { dirty: false });
+        return;
+      }
+      syncLog(bookKey, 'push:debounce-fired', { dirty: true });
       syncRefs.current.pushNow();
     }, PUSH_DEBOUNCE_MS),
     [],
@@ -194,12 +272,20 @@ export const useNativeSync = (bookKey: string) => {
 
   // Pull once on book open.
   useEffect(() => {
-    if (!isReady) return;
-    if (!progress?.location) return;
+    if (!isReady) {
+      syncLog(bookKey, 'open:pull-once-skip', { reason: 'not-ready' });
+      return;
+    }
+    if (!progress?.location) {
+      syncLog(bookKey, 'open:pull-once-skip', { reason: 'no-local-progress-yet' });
+      return;
+    }
     if (hasPulledOnce.current) return;
     hasPulledOnce.current = true;
+    syncLog(bookKey, 'open:pull-once-fire', { progressLocation: progress.location });
     void syncRefs.current.pullNow().finally(() => {
       initialPullDoneRef.current = true;
+      syncLog(bookKey, 'open:initial-pull-settled');
     });
   }, [isReady, progress?.location]);
 
@@ -207,6 +293,7 @@ export const useNativeSync = (bookKey: string) => {
   useEffect(() => {
     if (!isReady) return;
     if (!progress?.location) return;
+    syncLog(bookKey, 'push:progress-changed', { location: progress.location });
     markDirtyAndSchedule();
   }, [isReady, progress?.location, markDirtyAndSchedule]);
 
