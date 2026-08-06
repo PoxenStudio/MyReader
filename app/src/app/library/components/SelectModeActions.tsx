@@ -12,9 +12,12 @@ import { IoShareSocialOutline } from 'react-icons/io5';
 import { LuFolderPlus } from 'react-icons/lu';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
 import { useTranslation } from '@/hooks/useTranslation';
-import { isMd5 } from '@/utils/md5';
 
 interface SelectModeActionsProps {
+  // Already-resolved book hashes (any hash format — plain-MD5 local books and
+  // `cloud-<id>-<format>` cloud-synced books alike), not raw selection ids:
+  // the caller expands any selected group tiles into their member books
+  // before handing the list down, so no id-shape validation happens here.
   selectedBooks: string[];
   safeAreaBottom: number;
   // When false (Linux desktop, Windows desktop, web) the Send button is
@@ -60,7 +63,6 @@ const SelectModeActions: React.FC<SelectModeActionsProps> = ({
   const _ = useTranslation();
 
   const hasSelection = selectedBooks.length > 0;
-  const hasValidBooks = selectedBooks.every((id) => isMd5(id));
   const hasSingleSelection = selectedBooks.length === 1;
   const rootRef = useRef<HTMLDivElement | null>(null);
   useKeyDownActions({ onCancel, elementRef: rootRef });
@@ -103,7 +105,7 @@ const SelectModeActions: React.FC<SelectModeActionsProps> = ({
           onClick={onOpen}
           className={clsx(
             'flex flex-col items-center justify-center gap-1',
-            (!hasSelection || !hasValidBooks) && 'btn-disabled opacity-50',
+            !hasSelection && 'btn-disabled opacity-50',
           )}
         >
           <MdOpenInNew />
@@ -123,7 +125,7 @@ const SelectModeActions: React.FC<SelectModeActionsProps> = ({
           onClick={onStatus}
           className={clsx(
             'flex flex-col items-center justify-center gap-1',
-            (!hasSelection || !hasValidBooks) && 'btn-disabled opacity-50',
+            !hasSelection && 'btn-disabled opacity-50',
           )}
         >
           <MdCheckCircleOutline />
@@ -133,7 +135,7 @@ const SelectModeActions: React.FC<SelectModeActionsProps> = ({
           onClick={onDetails}
           className={clsx(
             'flex flex-col items-center justify-center gap-1',
-            (!hasSingleSelection || !hasValidBooks) && 'btn-disabled opacity-50',
+            !hasSingleSelection && 'btn-disabled opacity-50',
           )}
         >
           <MdInfoOutline />
@@ -146,7 +148,7 @@ const SelectModeActions: React.FC<SelectModeActionsProps> = ({
               'flex flex-col items-center justify-center gap-1',
               // Wraps to the start of the second row on narrow viewports.
               'max-[500px]:col-start-1',
-              (!hasSingleSelection || !hasValidBooks) && 'btn-disabled opacity-50',
+              !hasSingleSelection && 'btn-disabled opacity-50',
             )}
           >
             <IoShareSocialOutline />

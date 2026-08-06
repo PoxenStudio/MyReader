@@ -191,10 +191,10 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
     }
   };
 
-  const handleRedownload = async () => {
+  const handleDownload = async () => {
     handleClose();
     if (handleBookDownload) {
-      handleBookDownload(book, { redownload: true, queued: false });
+      handleBookDownload(book, { queued: false });
     }
   };
 
@@ -257,7 +257,7 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
                   handleBookDeleteCloudBackup ? handleDeleteCloudBackup : undefined
                 }
                 onDeleteLocalCopy={handleBookDeleteLocalCopy ? handleDeleteLocalCopy : undefined}
-                onDownload={handleBookDownload ? handleRedownload : undefined}
+                onDownload={handleBookDownload ? handleDownload : undefined}
                 onUpload={handleBookUpload ? handleReupload : undefined}
                 onExport={handleBookExport}
               />

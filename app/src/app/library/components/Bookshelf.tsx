@@ -408,20 +408,29 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     [toggleSelectedBook],
   );
 
+  // The selection popup can hold a mix of book hashes and group ids (a
+  // selected series/author/folder tile). Open/Status/Details/Send all act on
+  // actual books, so — mirroring Delete/Upload below — resolve the selection
+  // through `expandBookshelfSelection` before using it instead of assuming
+  // every selected id is already a book hash.
+  const getExpandedSelectedBooks = () =>
+    expandBookshelfSelection(getSelectedBooks(), sortedBookshelfItems);
+
   const openSelectedBooks = () => {
     handleSetSelectMode(false);
+    const bookHashes = getExpandedSelectedBooks();
     if (appService?.hasWindow && settings.openBookInNewWindow) {
-      showReaderWindow(appService, getSelectedBooks());
+      showReaderWindow(appService, bookHashes);
     } else {
       setTimeout(() => setLoading(true), 200);
-      navigateToReader(router, getSelectedBooks());
+      navigateToReader(router, bookHashes);
     }
   };
 
   const openBookDetails = () => {
     handleSetSelectMode(false);
-    const selectedBooks = getSelectedBooks();
-    const book = libraryBooks.find((book) => book.hash === selectedBooks[0]);
+    const bookHashes = getExpandedSelectedBooks();
+    const book = libraryBooks.find((book) => book.hash === bookHashes[0]);
     if (book) {
       handleShowDetailsBook(book);
     }
@@ -519,7 +528,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     // We hide the button entirely on those platforms (see sendEnabled
     // in the JSX) so users don't see an action that can't be honoured.
 
-    const ids = getSelectedBooks();
+    const ids = getExpandedSelectedBooks();
     if (ids.length !== 1) return;
     const book = filteredBooks.find((b) => b.hash === ids[0]);
     if (!book || !appService) return;
@@ -609,7 +618,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   };
 
   const updateBooksStatus = async (status: ReadingStatus | undefined) => {
-    const selectedIds = getSelectedBooks();
+    const selectedIds = getExpandedSelectedBooks();
     const booksToUpdate: Book[] = [];
 
     for (const id of selectedIds) {
@@ -726,9 +735,14 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   );
 
   const selectedBooks = getSelectedBooks();
+  // Same resolution Delete/Upload already apply: a selected group id stands
+  // in for every book it rolls up, so the action bar's enabled/disabled state
+  // (and single-book actions like Details/Send) must be judged against the
+  // resolved books, not the raw ids in `selectedBooks`.
+  const expandedSelectedBooks = expandBookshelfSelection(selectedBooks, sortedBookshelfItems);
   const canUploadSelectedBooks =
     selectedBooks.length > 0 &&
-    expandBookshelfSelection(selectedBooks, sortedBookshelfItems).every((hash) => {
+    expandedSelectedBooks.every((hash) => {
       const book = filteredBooks.find((b) => b.hash === hash);
       return !!book && !book.deletedAt && book.storageType !== 'cloud' && book.bookId === 0;
     });
@@ -988,7 +1002,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
       )}
       {!showGroupingModal && isSelectMode && showSelectModeActions && (
         <SelectModeActions
-          selectedBooks={selectedBooks}
+          selectedBooks={expandedSelectedBooks}
           safeAreaBottom={safeAreaInsets?.bottom || 0}
           onHeightChange={setSelectModeActionsHeight}
           // Native send targets: iOS, Android, macOS — route through

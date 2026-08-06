@@ -5,21 +5,18 @@ import {
   MdOutlineCloudDownload,
   MdOutlineDelete,
   MdOutlineEdit,
-  MdMenu,
+  MdSaveAlt,
   MdExpandMore,
   MdExpandLess,
 } from 'react-icons/md';
 
 import { Book } from '@/types/book';
 import { BookMetadata } from '@/libs/document';
-import { openExternalUrl } from '@/utils/open';
-import { getBookGoodreadsQuery, getGoodreadsSearchUrl } from '@/utils/goodreads';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useEnv } from '@/context/EnvContext';
 import {
   formatAuthors,
-  formatCalibreColumnValue,
   formatDate,
   formatBytes,
   formatLanguage,
@@ -28,8 +25,6 @@ import {
 } from '@/utils/book';
 import { saveSysSettings } from '@/helpers/settings';
 import BookCover from '@/components/BookCover';
-import Dropdown from '../Dropdown';
-import MenuItem from '../MenuItem';
 
 interface BookDetailViewProps {
   book: Book;
@@ -38,8 +33,6 @@ interface BookDetailViewProps {
   onEdit?: () => void;
   onDelete?: () => void;
   deleteDisabled?: boolean;
-  onDeleteCloudBackup?: () => void;
-  onDeleteLocalCopy?: () => void;
   onDownload?: () => void;
   onUpload?: () => void;
   onExport?: () => void;
@@ -52,8 +45,6 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
   onEdit,
   onDelete,
   deleteDisabled,
-  onDeleteCloudBackup,
-  onDeleteLocalCopy,
   onDownload,
   onUpload,
   onExport,
@@ -61,10 +52,6 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
   const _ = useTranslation();
   const { envConfig } = useEnv();
   const { settings } = useSettingsStore();
-
-  // Export reads the book file off disk; `fileSize` is only non-null when
-  // getBookFileSize could actually open the local copy.
-  const hasLocalFile = fileSize !== null;
 
   const toggleSeriesCollapse = () => {
     saveSysSettings(envConfig, 'metadataSeriesCollapsed', !settings.metadataSeriesCollapsed);
@@ -107,103 +94,30 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
                 <MdOutlineEdit className='hover:fill-blue-500' />
               </button>
             )}
-            {book.uploadedAt && onDownload && (
-              <button onClick={onDownload} title={_('Download from Cloud')}>
-                <MdOutlineCloudDownload className='fill-base-content' />
+            {onDelete && (
+              <button
+                onClick={deleteDisabled ? undefined : onDelete}
+                className={deleteDisabled ? 'btn-disabled opacity-50' : ''}
+                title={_('Delete Book')}
+              >
+                <MdOutlineDelete className='fill-red-500' />
               </button>
             )}
-            {book.downloadedAt && onUpload && (
-              <button onClick={onUpload} title={_('Upload to Cloud')}>
-                <MdOutlineCloudUpload className='fill-base-content' />
-              </button>
-            )}
-            {book.storageType === 'local' && !book.downloadedAt && onUpload && (
+            {book.storageType !== 'cloud' && book.bookId === 0 && onUpload && (
               <button onClick={onUpload} title={_('Upload to MyBooks')}>
                 <MdOutlineCloudUpload className='fill-base-content' />
               </button>
             )}
-            {book.storageType === 'cloud' && book.downloadedAt && onDownload && (
+            {book.storageType === 'cloud' && !book.downloadedAt && onDownload && (
               <button onClick={onDownload} title={_('Download Book')}>
                 <MdOutlineCloudDownload className='fill-base-content' />
               </button>
             )}
-            {onDelete && (
-              <Dropdown
-                label={_('Delete Book Options')}
-                className='dropdown-bottom dropdown-center flex justify-center'
-                buttonClassName={clsx(
-                  'btn btn-ghost h-8 min-h-8 w-8 p-0',
-                  deleteDisabled && 'btn-disabled opacity-50',
-                )}
-                toggleButton={<MdOutlineDelete className='fill-red-500' />}
-                disabled={deleteDisabled}
-              >
-                <div
-                  className={clsx(
-                    'delete-menu dropdown-content no-triangle !relative',
-                    'border-base-300 !bg-base-200 z-20 mt-1 max-w-[90vw] shadow-2xl',
-                  )}
-                >
-                  <MenuItem
-                    noIcon
-                    transient
-                    label={_('Remove from Cloud & Device')}
-                    onClick={onDelete}
-                  />
-                  {/* Offered only where a cloud-only removal means something: a
-                      third-party provider mirrors the library, so it would just
-                      re-upload the still-local book on its next sync (#5084). */}
-                  {onDeleteCloudBackup && (
-                    <MenuItem
-                      noIcon
-                      transient
-                      label={_('Remove from Cloud Only')}
-                      onClick={onDeleteCloudBackup}
-                      disabled={!book.uploadedAt}
-                    />
-                  )}
-                  <MenuItem
-                    noIcon
-                    transient
-                    label={_('Remove from Device Only')}
-                    onClick={onDeleteLocalCopy}
-                    disabled={!book.downloadedAt}
-                  />
-                </div>
-              </Dropdown>
+            {book.downloadedAt && onExport && (
+              <button onClick={onExport} title={_('Export Book')}>
+                <MdSaveAlt className='fill-base-content' />
+              </button>
             )}
-            <Dropdown
-              label={_('More Actions')}
-              className='dropdown-bottom dropdown-center flex justify-center'
-              buttonClassName='btn btn-ghost h-8 min-h-8 w-8 p-0'
-              toggleButton={<MdMenu className='fill-base-content' />}
-            >
-              <div
-                className={clsx(
-                  'more-menu dropdown-content no-triangle !relative',
-                  'border-base-300 !bg-base-200 z-20 mt-1 max-w-[90vw] shadow-2xl',
-                )}
-              >
-                <MenuItem
-                  noIcon
-                  transient
-                  label={_('Search on Goodreads')}
-                  onClick={() =>
-                    openExternalUrl(getGoodreadsSearchUrl(getBookGoodreadsQuery(book)))
-                  }
-                />
-                {onExport && (
-                  <MenuItem
-                    noIcon
-                    transient
-                    label={_('Export Book')}
-                    disabled={!hasLocalFile}
-                    tooltip={hasLocalFile ? undefined : _('Download the book to export it')}
-                    onClick={onExport}
-                  />
-                )}
-              </div>
-            </Dropdown>
           </div>
         </div>
       </div>
@@ -277,41 +191,6 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
                     {metadata?.identifier || _('Unknown')}
                   </p>
                 </div>
-                {/*
-                  Calibre custom columns embedded in the OPF (#4811). Column
-                  names are user content, not translation keys. The identifier
-                  cell above spans the full row on mobile, so alternate the
-                  end-aligned style from a fresh even/odd count here.
-                */}
-                {metadata?.calibreColumns?.map((column, index) => (
-                  <div
-                    key={column.label}
-                    className={clsx(
-                      'overflow-hidden',
-                      index % 2 === 1 && 'pe-1 text-end sm:text-start',
-                    )}
-                  >
-                    <span className='font-bold'>{column.name}</span>
-                    <p className='text-neutral-content line-clamp-3 text-sm'>
-                      {formatCalibreColumnValue(column)}
-                    </p>
-                  </div>
-                ))}
-                {/*
-                  Only books imported in-place (or files opened directly via the
-                  OS, e.g. Android "Open with Readest") keep a `filePath`; books
-                  copied into Books/<hash>/ have it left undefined. Surfacing the
-                  path lets the user verify which on-disk file the entry points at
-                  and tell apart in-place vs hash-copy imports at a glance.
-                */}
-                {book.filePath && (
-                  <div className='col-span-2 overflow-hidden sm:col-span-3'>
-                    <span className='font-bold'>{_('File Path')}</span>
-                    <p className='text-neutral-content text-sm break-all' title={book.filePath}>
-                      {book.filePath}
-                    </p>
-                  </div>
-                )}
               </div>
             </div>
           )}
