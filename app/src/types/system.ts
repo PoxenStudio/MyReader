@@ -166,6 +166,7 @@ export interface AppService {
   loadSettings(): Promise<SystemSettings>;
   saveSettings(settings: SystemSettings): Promise<void>;
   importFont(file?: string | File): Promise<CustomFontInfo | null>;
+  importFontFromUrl(url: string, filename: string): Promise<CustomFontInfo | null>;
   deleteFont(font: CustomFont): Promise<void>;
   importImage(file?: string | File): Promise<CustomTextureInfo | null>;
   deleteImage(texture: CustomTextureInfo): Promise<void>;

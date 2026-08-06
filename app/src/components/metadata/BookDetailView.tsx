@@ -94,7 +94,7 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
                 <MdOutlineEdit className='hover:fill-blue-500' />
               </button>
             )}
-            {onDelete && (
+            {onDelete && book.storageType !== 'cloud' && (
               <button
                 onClick={deleteDisabled ? undefined : onDelete}
                 className={deleteDisabled ? 'btn-disabled opacity-50' : ''}

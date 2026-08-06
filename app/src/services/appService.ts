@@ -254,6 +254,10 @@ export abstract class BaseAppService implements AppService {
     return FontSvc.importFont(this.fs, file);
   }
 
+  async importFontFromUrl(url: string, filename: string): Promise<CustomFontInfo | null> {
+    return FontSvc.importFontFromUrl(this.fs, this, url, filename);
+  }
+
   async deleteFont(font: CustomFont): Promise<void> {
     return FontSvc.deleteFont(this.fs, font);
   }

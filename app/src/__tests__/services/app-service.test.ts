@@ -43,6 +43,7 @@ vi.mock('@/services/cloudService', () => ({
 
 vi.mock('@/services/fontService', () => ({
   importFont: vi.fn().mockResolvedValue({ name: 'Font', path: '/f' }),
+  importFontFromUrl: vi.fn().mockResolvedValue({ name: 'Font', path: '/f' }),
   deleteFont: vi.fn().mockResolvedValue(undefined),
 }));
 

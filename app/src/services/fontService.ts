@@ -1,9 +1,10 @@
-import { FileSystem } from '@/types/system';
+import { AppService, FileSystem } from '@/types/system';
 import { getFilename } from '@/utils/path';
 import { md5, partialMD5 } from '@/utils/md5';
 import { uniqueId } from '@/utils/misc';
 import { CustomFont, CustomFontInfo } from '@/styles/fonts';
 import { parseFontInfo } from '@/utils/font';
+import { downloadFile } from '@/libs/storage';
 
 /**
  * Build the cross-device content id for a font:
@@ -48,6 +49,40 @@ export async function importFont(
   await fs.writeFile(fontPath, 'Fonts', bytes);
 
   const fontFile = await fs.openFile(fontPath, 'Fonts');
+  const partialMd5 = await partialMD5(fontFile);
+  const byteSize = bytes.byteLength;
+  const contentId = computeFontContentId(partialMd5, byteSize, filename);
+
+  return {
+    path: fontPath,
+    bundleDir,
+    contentId,
+    byteSize,
+    ...parseFontInfo(bytes, filename),
+  };
+}
+
+/**
+ * Download a font from a remote URL into a fresh bundle dir under `Fonts`
+ * (`<bundleDir>/<filename>`), then compute its contentId and parse its
+ * metadata exactly like a local import. Used for preset fonts hosted on
+ * MyBooks (see `PRESET_CJK_FONTS` in `services/constants`).
+ */
+export async function importFontFromUrl(
+  fs: FileSystem,
+  appService: AppService,
+  url: string,
+  filename: string,
+): Promise<CustomFontInfo | null> {
+  const bundleDir = uniqueId();
+  const fontPath = `${bundleDir}/${filename}`;
+
+  await fs.createDir(bundleDir, 'Fonts', true);
+  const dst = await appService.resolveFilePath(fontPath, 'Fonts');
+  await downloadFile({ appService, dst, url });
+
+  const fontFile = await fs.openFile(fontPath, 'Fonts');
+  const bytes = await fontFile.arrayBuffer();
   const partialMd5 = await partialMD5(fontFile);
   const byteSize = bytes.byteLength;
   const contentId = computeFontContentId(partialMd5, byteSize, filename);

@@ -45,7 +45,7 @@ export const downloadFile = async ({
       );
     }
   } catch (error) {
-    console.error(`File '${dst}' download failed:`, error);
+    console.error(`File '${dst}' download from '${url}' failed:`, error);
     throw error;
   }
 };

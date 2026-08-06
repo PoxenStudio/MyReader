@@ -1,8 +1,9 @@
 import clsx from 'clsx';
 import React, { useState } from 'react';
-import { MdAdd, MdDelete } from 'react-icons/md';
+import { MdAdd, MdDelete, MdDownload } from 'react-icons/md';
 import { IoMdCloseCircleOutline } from 'react-icons/io';
 import { useEnv } from '@/context/EnvContext';
+import { useAuth } from '@/context/AuthContext';
 import { useReaderStore } from '@/store/readerStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -10,7 +11,20 @@ import { useCustomFontStore } from '@/store/customFontStore';
 import { useFileSelector } from '@/hooks/useFileSelector';
 import { saveViewSettings } from '@/helpers/settings';
 import { CustomFont, mountCustomFont } from '@/styles/fonts';
+import { PRESET_CJK_FONTS } from '@/services/constants';
+import { isTauriAppPlatform } from '@/services/environment';
 import { Tips } from './primitives';
+
+const Spinner = () => (
+  <svg className='h-4 w-4 animate-spin' viewBox='0 0 24 24' fill='none'>
+    <circle className='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' strokeWidth='4' />
+    <path
+      className='opacity-75'
+      fill='currentColor'
+      d='M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z'
+    />
+  </svg>
+);
 
 interface CustomFontsProps {
   bookKey: string;
@@ -25,6 +39,11 @@ type FontFamily = {
 const CustomFonts: React.FC<CustomFontsProps> = ({ bookKey, onBack }) => {
   const _ = useTranslation();
   const { appService, envConfig } = useEnv();
+  // `host` alone isn't a reliable "signed in" check: logout() clears it from
+  // React state but leaves the `mybooks_host` localStorage key behind, so a
+  // reload right after logout (before the next login) would rehydrate a
+  // stale host while `user` stays correctly cleared. Gate on both.
+  const { host, user } = useAuth();
   const { settings } = useSettingsStore();
   const {
     fonts: customFonts,
@@ -40,6 +59,8 @@ const CustomFonts: React.FC<CustomFontsProps> = ({ bookKey, onBack }) => {
   // null = idle, true = importing (spinner), { family } = done importing (show font name).
   // The card stays mounted throughout — only its content changes.
   const [importingFont, setImportingFont] = useState<true | { family: string } | null>(null);
+  // Preset fonts download one at a time; holds the filename in progress.
+  const [downloadingPreset, setDownloadingPreset] = useState<string | null>(null);
 
   const { selectFiles } = useFileSelector(appService, _);
 
@@ -88,6 +109,39 @@ const CustomFonts: React.FC<CustomFontsProps> = ({ bookKey, onBack }) => {
         setTimeout(() => setImportingFont(null), 0);
       }
     });
+  };
+
+  const handleDownloadPreset = async (preset: { name: string; filename: string }) => {
+    if (!appService || !host || !user || downloadingPreset) return;
+    setDownloadingPreset(preset.filename);
+    try {
+      // Preset fonts live on the MyBooks server the user is actually signed
+      // into (self-hosted instances included), not the default mybooks.top.
+      const normalizedHost = host.endsWith('/') ? host.slice(0, -1) : host;
+      const url = `${normalizedHost}/static/epubreader/assets/font/${preset.filename}`;
+      const fontInfo = await appService.importFontFromUrl(url, preset.filename);
+      if (!fontInfo) return;
+
+      const customFont = addFont(fontInfo.path, {
+        name: fontInfo.name,
+        family: fontInfo.family,
+        style: fontInfo.style,
+        weight: fontInfo.weight,
+        variable: fontInfo.variable,
+        contentId: fontInfo.contentId,
+        bundleDir: fontInfo.bundleDir,
+        byteSize: fontInfo.byteSize,
+      });
+      if (customFont && !customFont.error) {
+        const loadedFont = await loadFont(envConfig, customFont.id);
+        mountCustomFont(document, loadedFont);
+      }
+      await saveCustomFonts(envConfig);
+    } catch (err) {
+      console.error('Failed to download preset font:', preset.name, err);
+    } finally {
+      setDownloadingPreset(null);
+    }
   };
 
   const handleDeleteFamily = (family: FontFamily) => {
@@ -146,6 +200,18 @@ const CustomFonts: React.FC<CustomFontsProps> = ({ bookKey, onBack }) => {
     : availableFonts;
 
   const availableFamilies = getAvailableFamilies(visibleFonts);
+
+  // Preset fonts already downloaded live in `Fonts/<bundleDir>/<filename>` —
+  // matching on the filename suffix is enough to tell them apart from other
+  // imports without needing a dedicated field. Tauri-only for now (#web CORS
+  // concerns for cross-origin `fetch` are unresolved), and only once signed
+  // into a MyBooks server (the source of the preset files).
+  const pendingPresets =
+    isTauriAppPlatform() && host && user
+      ? PRESET_CJK_FONTS.filter(
+          (preset) => !availableFonts.some((font) => font.path.endsWith(`/${preset.filename}`)),
+        )
+      : [];
 
   return (
     <div className='w-full'>
@@ -221,21 +287,7 @@ const CustomFonts: React.FC<CustomFontsProps> = ({ bookKey, onBack }) => {
                 </div>
               ) : (
                 <div className='flex items-center gap-2 text-sm text-base-content/60'>
-                  <svg className='h-4 w-4 animate-spin' viewBox='0 0 24 24' fill='none'>
-                    <circle
-                      className='opacity-25'
-                      cx='12'
-                      cy='12'
-                      r='10'
-                      stroke='currentColor'
-                      strokeWidth='4'
-                    />
-                    <path
-                      className='opacity-75'
-                      fill='currentColor'
-                      d='M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z'
-                    />
-                  </svg>
+                  <Spinner />
                   <span>{_('Importing...')}</span>
                 </div>
               )}
@@ -281,6 +333,47 @@ const CustomFonts: React.FC<CustomFontsProps> = ({ bookKey, onBack }) => {
           </div>
         ))}
       </div>
+
+      {pendingPresets.length > 0 && (
+        <div className='mt-6'>
+          <div className='text-base-content/60 mb-2 text-sm font-medium'>
+            {_('MyBooks Preset Fonts')}
+          </div>
+          <div className='grid grid-cols-2 gap-4'>
+            {pendingPresets.map((preset) => {
+              const isDownloading = downloadingPreset === preset.filename;
+              return (
+                <button
+                  key={preset.filename}
+                  type='button'
+                  onClick={() => handleDownloadPreset(preset)}
+                  disabled={!!downloadingPreset}
+                  className={clsx(
+                    'card border-base-200 bg-base-100 eink-bordered h-12 border shadow-sm',
+                    !downloadingPreset && 'hover:bg-base-300/40 cursor-pointer',
+                  )}
+                >
+                  <div className='card-body flex flex-row items-center justify-center gap-2 p-2'>
+                    {isDownloading ? (
+                      <div className='flex items-center gap-2 text-sm text-base-content/60'>
+                        <Spinner />
+                        <span>{_('Downloading…')}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <MdDownload className='h-4 w-4 text-base-content/60' />
+                        <span className='text-base-content line-clamp-1 break-all text-sm'>
+                          {preset.name}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <Tips className='mt-6'>
         <li>{_('Supported font formats: .ttf, .otf, .woff, .woff2')}</li>

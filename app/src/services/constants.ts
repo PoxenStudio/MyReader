@@ -797,6 +797,19 @@ export const BOOK_IDS_SEPARATOR = '+';
 
 export const DOWNLOAD_MYBOOKS_URL = 'https://mybooks.top';
 
+// Preset CJK fonts hosted on MyBooks, downloadable on demand from the Font
+// settings panel (Tauri only — see CustomFonts.tsx). Each entry's `filename`
+// is fetched from `${host}/static/epubreader/assets/font/${filename}`, where
+// `host` is the MyBooks server the user is signed into (AuthContext's
+// `host`), not this file's `DOWNLOAD_MYBOOKS_URL` — self-hosted instances
+// serve their own copies of these fonts.
+export const PRESET_CJK_FONTS = [
+  { name: '方正宋刻本秀楷', filename: 'FangzhengSongJianKe.ttf' },
+  { name: '汇文仿宋体', filename: 'HuiwenFangSong.ttf' },
+  { name: '汇文港黑', filename: 'HuiwenGangHei.ttf' },
+  { name: '汇文正楷', filename: 'HuiwenZhengKai.ttf' },
+] as const;
+
 export const MYBOOKS_WEB_BASE_URL = 'https://web.mybooks.top';
 export const MYBOOKS_NODE_BASE_URL = 'https://node.mybooks.top';
 
