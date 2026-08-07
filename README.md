@@ -49,8 +49,7 @@ MyReader 会在应用私有数据目录下维护本地书库文件（`MyReader/B
 桌面版本的MyReader支持在应用里像是在浏览器一样直接进行NAS远程登录并使用MyBooks服务，目前支持飞牛和绿联NAS系统。
 
 先在设置-集中开启NAS设备支持，输入远程登录地址。以后在登录时就可以在服务器地址后面看到一个新的ICON, 用于远程登录NAS以获取访问授权。
-[▶ 点此观看 NAS 远程登录演示视频](document/nas_remote.mp4)
-
+[![](document/video_screen.jpg)](https://player.bilibili.com/player.html?aid=117052924888982&bvid=BV1omub6KEKB&cid=40678719845&p=1)
 ## Development
 
 请按照以下步骤克隆并构建项目。
