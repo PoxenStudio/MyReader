@@ -22,6 +22,17 @@ vi.mock('@tauri-apps/plugin-http', () => ({
   fetch: vi.fn(),
 }));
 
+const getNasCookiesMock = vi.fn();
+vi.mock('@/services/mybooks/nasCookieStore', () => ({
+  NAS_CHROME_USER_AGENT: 'test-nas-chrome-ua',
+  getNasCookies: (...args: unknown[]) => getNasCookiesMock(...args),
+}));
+
+const settingsStoreState = { settings: { nas: { enabled: false } } };
+vi.mock('@/store/settingsStore', () => ({
+  useSettingsStore: { getState: () => settingsStoreState },
+}));
+
 afterEach(cleanup);
 
 const makeBook = (overrides?: Partial<Book>): Book =>
@@ -86,6 +97,8 @@ describe('BookCover remote covers on Tauri', () => {
   beforeEach(() => {
     __resetCoverObjectUrlCacheForTests();
     vi.clearAllMocks();
+    getNasCookiesMock.mockReturnValue(null);
+    settingsStoreState.settings.nas = { enabled: false };
     (isTauriAppPlatform as ReturnType<typeof vi.fn>).mockReturnValue(true);
     vi.stubGlobal('caches', {
       open: vi.fn().mockResolvedValue({
@@ -116,6 +129,50 @@ describe('BookCover remote covers on Tauri', () => {
       expect(container.querySelector('img.cover-image')?.getAttribute('src')).toBe(objectUrl);
     });
     expect(tauriFetch).toHaveBeenCalledTimes(1);
+    // NAS login disabled (the default here) — no Cookie/User-Agent added.
+    expect(tauriFetch).toHaveBeenCalledWith(
+      remoteUrl,
+      expect.objectContaining({ headers: { Accept: 'image/*' } }),
+    );
+    expect(getNasCookiesMock).not.toHaveBeenCalled();
+  });
+
+  it('attaches the NAS cookie and User-Agent when NAS login is enabled', async () => {
+    getNasCookiesMock.mockReturnValue('nas-token=xyz');
+    settingsStoreState.settings.nas = { enabled: true };
+    const book = makeBook({ coverImageUrl: remoteUrl, hash: 'remote-nas' });
+    const { container } = render(<BookCover book={book} coverFit='crop' />);
+
+    await waitFor(() => {
+      expect(container.querySelector('img.cover-image')?.getAttribute('src')).toBe(objectUrl);
+    });
+    expect(tauriFetch).toHaveBeenCalledWith(
+      remoteUrl,
+      expect.objectContaining({
+        headers: {
+          Accept: 'image/*',
+          Cookie: 'nas-token=xyz',
+          'User-Agent': 'test-nas-chrome-ua',
+        },
+      }),
+    );
+  });
+
+  it('still adds the NAS User-Agent when NAS login is enabled but no NAS cookie was captured yet', async () => {
+    getNasCookiesMock.mockReturnValue(null);
+    settingsStoreState.settings.nas = { enabled: true };
+    const book = makeBook({ coverImageUrl: remoteUrl, hash: 'remote-nas-no-cookie' });
+    const { container } = render(<BookCover book={book} coverFit='crop' />);
+
+    await waitFor(() => {
+      expect(container.querySelector('img.cover-image')?.getAttribute('src')).toBe(objectUrl);
+    });
+    expect(tauriFetch).toHaveBeenCalledWith(
+      remoteUrl,
+      expect.objectContaining({
+        headers: { Accept: 'image/*', 'User-Agent': 'test-nas-chrome-ua' },
+      }),
+    );
   });
 
   it('reuses the cached object URL on remount instead of re-fetching', async () => {

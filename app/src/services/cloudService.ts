@@ -13,6 +13,8 @@ import { EXTS } from '@/libs/document';
 import { isTauriAppPlatform } from '@/services/environment';
 import { getCloudBookId, getMyBooksId } from '@/utils/bookConverter';
 import { uploadBookToMyBooks, deleteBookFromMyBooks } from '@/services/mybooksService';
+import { useSettingsStore } from '@/store/settingsStore';
+import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
 
 export async function deleteBook(
   fs: FileSystem,
@@ -163,11 +165,25 @@ async function downloadMyBooksUrl(
   if (isTauriAppPlatform()) {
     const { getTauriMyBooksCookie } = await import('@/services/mybooks/tauriCookieStore');
     const cookie = getTauriMyBooksCookie();
+    const headers: Record<string, string> = {};
+    if (cookie) headers['Cookie'] = cookie;
+    // The native downloader's reqwest client doesn't share the webview's
+    // cookie jar either, so — same as `fetchMyBooks` and the cover fetch in
+    // `BookCover.tsx` — the NAS relay cookie has to be attached explicitly,
+    // merged alongside the regular MyBooks session cookie above (a NAS-gated
+    // download needs both: the relay's own gate cookie plus the app-level
+    // session).
+    const nasSettings = useSettingsStore.getState().settings.nas;
+    if (nasSettings?.enabled) {
+      const nasCookie = getNasCookies(new URL(url).host);
+      if (nasCookie) headers['Cookie'] = [cookie, nasCookie].filter(Boolean).join('; ');
+      headers['User-Agent'] = NAS_CHROME_USER_AGENT;
+    }
     await downloadFile({
       appService,
       dst,
       url,
-      headers: cookie ? { Cookie: cookie } : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
       onProgress,
     });
   } else {
@@ -229,7 +245,18 @@ export async function downloadMyBooksBook(
     // TXT sources are plain text and small next to an EPUB with embedded images/fonts, so
     // the memory tradeoff is fine here.
     const { webDownload } = await import('@/utils/transfer');
-    const { blob } = await webDownload(downloadUrl, onProgress, undefined, 'include');
+    // `webDownload` uses `tauriFetch` on Tauri, same as `BookCover.tsx`'s
+    // cover fetch — its cookie jar never sees cookies captured from the NAS
+    // login webview, so they have to be attached explicitly here too.
+    let headers: Record<string, string> | undefined;
+    if (isTauriAppPlatform()) {
+      const nasSettings = useSettingsStore.getState().settings.nas;
+      if (nasSettings?.enabled) {
+        const nasCookie = getNasCookies(new URL(downloadUrl).host);
+        headers = { 'User-Agent': NAS_CHROME_USER_AGENT, ...(nasCookie && { Cookie: nasCookie }) };
+      }
+    }
+    const { blob } = await webDownload(downloadUrl, onProgress, headers, 'include');
     const bookArrayBuffer = await blob.arrayBuffer();
     const { TxtToEpubConverter } = await import('@/utils/txt');
     const txtFile = new File([bookArrayBuffer], `${book.sourceTitle || book.title}.txt`);

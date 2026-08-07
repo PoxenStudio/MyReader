@@ -27,6 +27,17 @@ vi.mock('@/services/mybooks/tauriCookieStore', () => ({
   getTauriMyBooksCookie: () => getTauriMyBooksCookieMock(),
 }));
 
+const getNasCookiesMock = vi.fn();
+vi.mock('@/services/mybooks/nasCookieStore', () => ({
+  NAS_CHROME_USER_AGENT: 'test-nas-chrome-ua',
+  getNasCookies: (...args: unknown[]) => getNasCookiesMock(...args),
+}));
+
+const settingsStoreState = { settings: { nas: { enabled: false } } };
+vi.mock('@/store/settingsStore', () => ({
+  useSettingsStore: { getState: () => settingsStoreState },
+}));
+
 const txtConvertMock = vi.fn();
 vi.mock('@/utils/txt', () => ({
   TxtToEpubConverter: class {
@@ -491,6 +502,9 @@ describe('cloudService', () => {
       downloadFileMock.mockResolvedValue(undefined);
       getTauriMyBooksCookieMock.mockReset();
       getTauriMyBooksCookieMock.mockReturnValue(null);
+      getNasCookiesMock.mockReset();
+      getNasCookiesMock.mockReturnValue(null);
+      settingsStoreState.settings.nas = { enabled: false };
       txtConvertMock.mockReset();
       localStorage.setItem('mybooks_host', 'https://mybooks.example.com');
     });
@@ -563,6 +577,97 @@ describe('cloudService', () => {
 
       expect(downloadFileMock).toHaveBeenCalledWith(
         expect.objectContaining({ headers: undefined }),
+      );
+    });
+
+    test('on Tauri with NAS login enabled, merges the NAS cookie into the Cookie header and adds the NAS User-Agent', async () => {
+      // The native downloader's cookie jar has neither the regular MyBooks
+      // session cookie nor cookies captured from the NAS login webview — a
+      // NAS-gated download needs both attached, since the relay cookie gates
+      // the connection and the session cookie authenticates the app request
+      // once past it.
+      vi.mocked(isTauriAppPlatform).mockReturnValue(true);
+      getTauriMyBooksCookieMock.mockReturnValue('session=abc123');
+      getNasCookiesMock.mockReturnValue('nas-token=xyz');
+      settingsStoreState.settings.nas = { enabled: true };
+      const book = createMockBook({
+        hash: 'cloud-123-pdf',
+        format: 'PDF' as BookFormat,
+        files: [{ format: 'PDF' as BookFormat, size: 2, href: '/api/book/123.pdf' }],
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: {
+            Cookie: 'session=abc123; nas-token=xyz',
+            'User-Agent': 'test-nas-chrome-ua',
+          },
+        }),
+      );
+    });
+
+    test('on Tauri with NAS login enabled but no NAS cookie captured yet, still adds the NAS User-Agent', async () => {
+      vi.mocked(isTauriAppPlatform).mockReturnValue(true);
+      getTauriMyBooksCookieMock.mockReturnValue(null);
+      getNasCookiesMock.mockReturnValue(null);
+      settingsStoreState.settings.nas = { enabled: true };
+      const book = createMockBook({
+        hash: 'cloud-123-pdf',
+        format: 'PDF' as BookFormat,
+        files: [{ format: 'PDF' as BookFormat, size: 2, href: '/api/book/123.pdf' }],
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({ headers: { 'User-Agent': 'test-nas-chrome-ua' } }),
+      );
+    });
+
+    test('does not attach NAS headers when NAS login is disabled, even on Tauri', async () => {
+      vi.mocked(isTauriAppPlatform).mockReturnValue(true);
+      getTauriMyBooksCookieMock.mockReturnValue('session=abc123');
+      getNasCookiesMock.mockReturnValue('nas-token=xyz');
+      settingsStoreState.settings.nas = { enabled: false };
+      const book = createMockBook({
+        hash: 'cloud-123-pdf',
+        format: 'PDF' as BookFormat,
+        files: [{ format: 'PDF' as BookFormat, size: 2, href: '/api/book/123.pdf' }],
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(getNasCookiesMock).not.toHaveBeenCalled();
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({ headers: { Cookie: 'session=abc123' } }),
+      );
+    });
+
+    test('on Tauri with NAS login enabled, a TXT download also carries the NAS cookie and User-Agent to webDownload', async () => {
+      vi.mocked(isTauriAppPlatform).mockReturnValue(true);
+      getNasCookiesMock.mockReturnValue('nas-token=xyz');
+      settingsStoreState.settings.nas = { enabled: true };
+      txtConvertMock.mockResolvedValue({
+        file: new File([new Uint8Array([1, 2, 3]).buffer], 'Test Book.epub'),
+        bookTitle: 'Test Book',
+        chapterCount: 1,
+        language: 'en',
+      });
+      const book = createMockBook({
+        hash: 'cloud-123-txt',
+        format: 'TXT' as BookFormat,
+        files: [{ format: 'TXT' as BookFormat, size: 2, href: '/api/book/123.txt' }],
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(webDownloadMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/book/123.txt'),
+        undefined,
+        { Cookie: 'nas-token=xyz', 'User-Agent': 'test-nas-chrome-ua' },
+        'include',
       );
     });
 

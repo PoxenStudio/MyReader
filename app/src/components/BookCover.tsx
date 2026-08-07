@@ -9,6 +9,8 @@ import { formatAuthors, formatTitle } from '@/utils/book';
 import { isTauriAppPlatform } from '@/services/environment';
 import { isRemoteImageUrl } from '@/utils/image';
 import { getOrCreateCoverObjectUrl, peekCachedCoverObjectUrl } from '@/utils/coverObjectUrlCache';
+import { useSettingsStore } from '@/store/settingsStore';
+import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
 
 const COVER_CACHE_NAME = 'myreader-book-covers-v1';
 
@@ -61,11 +63,26 @@ async function fetchRemoteCoverObjectUrl(
   info(`[BookCover] Fetching remote cover for book: ${title} (${hash})`).catch(() => {});
   info(`[BookCover] Cover URL: ${coverUrl}`).catch(() => {});
 
+  const headers: Record<string, string> = { Accept: 'image/*' };
+  // `tauriFetch`'s (plugin-http) cookie jar is separate from the system
+  // WebView's, so cookies captured from the NAS login webview never reach it
+  // on their own — see the identical attachment in `fetchMyBooks`
+  // (mybooksService.ts). Covers are fetched straight from the book's
+  // `coverImageUrl`, bypassing `fetchMyBooks` entirely, so this has to be
+  // done here too or NAS-gated covers 404/401 despite the book list (which
+  // does go through `fetchMyBooks`) loading fine.
+  if (isTauriAppPlatform()) {
+    const nasSettings = useSettingsStore.getState().settings.nas;
+    if (nasSettings?.enabled) {
+      const nasCookie = getNasCookies(new URL(coverUrl).host);
+      if (nasCookie) headers['Cookie'] = nasCookie;
+      headers['User-Agent'] = NAS_CHROME_USER_AGENT;
+    }
+  }
+
   const response = await (tauriFetch as unknown as typeof fetch)(coverUrl, {
     method: 'GET',
-    headers: {
-      Accept: 'image/*',
-    },
+    headers,
   });
 
   if (!response.ok) {
