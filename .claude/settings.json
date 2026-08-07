@@ -25,7 +25,11 @@
       "Bash(pnpm fmt:check)",
       "Bash(pnpm clippy:check)",
       "Bash(grep -rn \"webview:\\\\${\" /Volumes/data/projects/poxenstudio/myreader/app/src)",
-      "Bash(awk 'NR<1173 && /^class /{cls=$0; ln=NR} END{}' /Volumes/data/projects/reader/mybooks/webserver/handlers/book.py)"
+      "Bash(awk 'NR<1173 && /^class /{cls=$0; ln=NR} END{}' /Volumes/data/projects/reader/mybooks/webserver/handlers/book.py)",
+      "Bash(node -e ' *)",
+      "Bash(ruby -ryaml -e ' *)",
+      "Bash(grep -n \"MyReader_\\\\${version}\" .github/workflows/release.yml)",
+      "Bash(grep -n 'MyReader_\\\\$' .github/workflows/release.yml)"
     ]
   }
 }

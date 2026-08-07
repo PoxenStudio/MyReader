@@ -319,8 +319,8 @@ jobs:
           popd
           version=${{ needs.get-release.outputs.release_version }}
           apk_path=src-tauri/gen/android/app/build/outputs/apk/universal/release
-          universial_apk=MyReader_${version}_universal.apk
-          arm64_apk=MyReader_${version}_arm64.apk
+          universial_apk=MyReader_${version}_android_universal.apk
+          arm64_apk=MyReader_${version}_android_arm64.apk
           # Now that signingConfig is wired above, release builds produce
           # app-universal-release.apk (signed). Still pick the newest
           # matching file rather than hardcoding the name, as a safety net
@@ -371,11 +371,11 @@ jobs:
           fi
 
           version=${{ needs.get-release.outputs.release_version }}
-          universial_apk_url="https://github.com/poxenstudio/myreader/releases/download/${{ needs.get-release.outputs.release_tag }}/MyReader_${version}_universal.apk"
-          arm64_apk_url="https://github.com/poxenstudio/myreader/releases/download/${{ needs.get-release.outputs.release_tag }}/MyReader_${version}_arm64.apk"
+          universial_apk_url="https://github.com/poxenstudio/myreader/releases/download/${{ needs.get-release.outputs.release_tag }}/MyReader_${version}_android_universal.apk"
+          arm64_apk_url="https://github.com/poxenstudio/myreader/releases/download/${{ needs.get-release.outputs.release_tag }}/MyReader_${version}_android_arm64.apk"
 
-          universial_sig=$(cat MyReader_${version}_universal.apk.sig)
-          arm64_sig=$(cat MyReader_${version}_arm64.apk.sig)
+          universial_sig=$(cat MyReader_${version}_android_universal.apk.sig)
+          arm64_sig=$(cat MyReader_${version}_android_arm64.apk.sig)
 
           jq --arg url "$universial_apk_url" \
               --arg sig "$universial_sig" \
@@ -430,6 +430,61 @@ jobs:
           releaseBody: ${{ needs.get-release.outputs.release_note }}
           args: ${{ matrix.config.args || '' }} ${{ env.ENABLE_TAURI_SIGNING != 'true' && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
 
+      # tauri-action (above) builds and auto-uploads the main bundle (deb /
+      # dmg / nsis) under Tauri's own default naming, which has no OS name in
+      # it (e.g. `MyReader_0.3.0_amd64.deb`) — unlike the Android/Windows
+      # portable artifacts elsewhere in this job, which are uploaded manually
+      # with an explicit name. Tauri's bundler has no config option to
+      # template that name, so the only way to add the OS token is to rename
+      # the asset after the fact via the GitHub API (a plain PATCH on the
+      # asset, not a re-upload — keeps the same asset id/download count).
+      #
+      # The local build output on disk (found via `find`, not a fixed path,
+      # since whether `--target <triple>` was passed changes whether the
+      # bundle sits under `target/<triple>/release/bundle/...` or plain
+      # `target/release/bundle/...`) still has the *original* Tauri-assigned
+      # name, so it's used to look up the exact asset to rename — matching by
+      # extension against a shared "any .deb/.dmg/.exe on this release"
+      # listing would risk racing another matrix job's same-extension file
+      # (e.g. the two linux legs, x86_64 and aarch64, both produce a .deb).
+      #
+      # Skipped entirely once ENABLE_TAURI_SIGNING is 'true': tauri-action
+      # then also emits a `latest.json` whose updater URLs point at the
+      # *original* (pre-rename) asset names, so renaming here would 404 the
+      # updater. Revisit this step (rename before tauri-action uploads, or
+      # patch latest.json's URLs too) when that TODO at the top of the file
+      # gets flipped on.
+      - name: rename release asset to include the OS name
+        if: matrix.config.release != 'android' && env.ENABLE_TAURI_SIGNING != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version=${{ needs.get-release.outputs.release_version }}
+          os=${{ matrix.config.release }}
+          case "$os" in
+            linux) bundle_dir=deb ;;
+            macos) bundle_dir=dmg ;;
+            windows) bundle_dir=nsis ;;
+            *) echo "Unknown release os: $os"; exit 1 ;;
+          esac
+
+          find app/src-tauri/target -path "*/release/bundle/${bundle_dir}/*" -type f | while read -r f; do
+            base=$(basename "$f")
+            newname=${base/_${version}_/_${version}_${os}_}
+            if [ "$base" = "$newname" ]; then
+              echo "::warning::Expected '_${version}_' in bundle file name, got '$base' — skipping rename"
+              continue
+            fi
+            asset_id=$(gh api "repos/${{ github.repository }}/releases/${{ needs.get-release.outputs.release_id }}/assets" --jq ".[] | select(.name==\"$base\") | .id")
+            if [ -z "$asset_id" ]; then
+              echo "::warning::Could not find release asset named '$base' to rename"
+              continue
+            fi
+            echo "Renaming release asset: $base -> $newname"
+            gh api --method PATCH "repos/${{ github.repository }}/releases/assets/$asset_id" -f name="$newname"
+          done
+
       - name: upload release notes to GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -466,9 +521,9 @@ jobs:
           version=${{ needs.get-release.outputs.release_version }}
 
           if [ "$arch" = "x86_64" ]; then
-            bin_file="MyReader_${version}_x64-portable.exe"
+            bin_file="MyReader_${version}_windows_x64-portable.exe"
           elif [ "$arch" = "aarch64" ]; then
-            bin_file="MyReader_${version}_arm64-portable.exe"
+            bin_file="MyReader_${version}_windows_arm64-portable.exe"
           else
             echo "Unknown architecture: $arch"
             exit 1
@@ -522,10 +577,10 @@ jobs:
           arch=${{ matrix.config.arch }}
 
           if [ "$arch" = "x86_64" ]; then
-            bin_file="MyReader_${version}_x64-portable.exe"
+            bin_file="MyReader_${version}_windows_x64-portable.exe"
             platform_key="windows-x86_64-portable"
           elif [ "$arch" = "aarch64" ]; then
-            bin_file="MyReader_${version}_arm64-portable.exe"
+            bin_file="MyReader_${version}_windows_arm64-portable.exe"
             platform_key="windows-aarch64-portable"
           else
             echo "Unknown architecture: $arch"
