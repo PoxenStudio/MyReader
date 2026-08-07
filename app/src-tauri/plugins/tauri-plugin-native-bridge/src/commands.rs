@@ -315,18 +315,38 @@ pub(crate) async fn capture_webview_region<R: Runtime>(
     Ok(tauri::ipc::Response::new(png))
 }
 
-/// Read cookies for `payload.url` out of the NAS remote-login popup webview
-/// (`payload.label`), joined into a ready-to-send `Cookie` header value.
+/// Read every cookie out of the NAS remote-login popup webview
+/// (`payload.label`)'s cookie store — not just ones scoped to
+/// `payload.url`'s host.
 ///
 /// The popup is a separate `WebviewWindow`, not a child webview of the
-/// calling window, so we look it up app-wide by label (`Manager::get_webview`,
-/// which requires the `unstable` tauri feature — enabled on the app crate)
-/// rather than restricting the search to the calling window's own webviews.
+/// calling window, so we look it up app-wide by label
+/// (`Manager::get_webview_window`, which requires the `unstable` tauri
+/// feature — enabled on the app crate) rather than restricting the search to
+/// the calling window's own webviews.
 ///
-/// Desktop and iOS use `tauri::Webview::cookies_for_url`, which reads the
-/// per-webview WKWebView/WebView2/WebKitGTK cookie store directly. Android's
-/// `wry` cookie APIs are unimplemented (always empty), so there we go
-/// through the mobile plugin instead, which reads Android's app-wide
+/// No host filtering happens here (`tauri::WebviewWindow::cookies`,
+/// unfiltered — not `cookies_for_url`), for two reasons:
+/// - The NAS login flow typically bounces through several domains before
+///   landing on the one the session cookie actually gets set for (an entry
+///   host, then one or more redirects to the real device host), so filtering
+///   by `payload.url`'s (entry) host alone would miss cookies set later in
+///   that chain — which is exactly why only the long-lived token cookie
+///   (set on the entry host) was ever captured while the session cookie
+///   (set after redirecting) wasn't.
+/// - `cookies_for_url`'s underlying `wry` implementation compares the
+///   cookie's `Domain` attribute to the URL's host with plain string
+///   equality anyway (no leading-dot or subdomain handling), so it would
+///   silently drop most `Domain=`-scoped cookies even for the one host it
+///   does filter by.
+///
+/// The frontend's `nasCookieStore.ts` already does its own RFC 6265-style
+/// domain-suffix matching when a cookie is later looked up for a specific
+/// request host, so scoping happens there instead, against whatever the
+/// actual request host turns out to be — not here against the entry URL.
+///
+/// Android's `wry` cookie APIs are unimplemented (always empty), so there we
+/// go through the mobile plugin instead, which reads Android's app-wide
 /// `android.webkit.CookieManager` — the same store every system WebView
 /// writes to, so `label` isn't needed there.
 #[command]
@@ -340,15 +360,13 @@ pub(crate) async fn get_webview_cookies<R: Runtime>(
     }
     #[cfg(not(target_os = "android"))]
     {
-        use tauri::{Manager, Url};
+        use tauri::Manager;
 
-        let webview = app.get_webview(&payload.label).ok_or_else(|| {
+        let window = app.get_webview_window(&payload.label).ok_or_else(|| {
             crate::Error::NativeBridgeError(format!("no webview with label '{}'", payload.label))
         })?;
-        let url = Url::parse(&payload.url)
-            .map_err(|e| crate::Error::NativeBridgeError(format!("invalid url: {e}")))?;
-        let cookies = webview
-            .cookies_for_url(url)
+        let cookies = window
+            .cookies()
             .map_err(|e| crate::Error::NativeBridgeError(e.to_string()))?;
         let entries = cookies
             .iter()
@@ -427,6 +445,32 @@ fn spawn_nas_loading_title_animation<R: Runtime>(
 /// successfully, so CSS/JS just works.
 const NAS_LOADING_PAGE_ASSET: &str = "nas-loading.html";
 
+/// Forces links the NAS portal opens in a new window/tab (`target="_blank"`
+/// anchors, `window.open(...)`) to navigate in this same popup instead.
+///
+/// This is done in JS rather than via Tauri's `on_new_window` hook because
+/// that hook is desktop-only (unsupported on Android/iOS — see its doc
+/// comment), while an injected `initialization_script` runs the same way on
+/// every platform/webview engine. It reruns on every navigation in this
+/// window (loading page, then the real NAS page), which is fine since it's
+/// idempotent.
+const FORCE_SAME_WINDOW_LINKS_SCRIPT: &str = r#"(function () {
+  window.open = function (url) {
+    if (url) { window.location.href = url; }
+    return null;
+  };
+  var stripBlankTargets = function () {
+    document.querySelectorAll('a[target="_blank"]').forEach(function (a) {
+      a.removeAttribute('target');
+    });
+  };
+  document.addEventListener('DOMContentLoaded', stripBlankTargets);
+  document.addEventListener('click', function (event) {
+    var anchor = event.target && event.target.closest && event.target.closest('a[target="_blank"]');
+    if (anchor) anchor.removeAttribute('target');
+  }, true);
+})();"#;
+
 /// Create the NAS remote-login popup window (see
 /// `GetWebviewCookiesRequest`/`get_webview_cookies` for how the frontend
 /// later reads its cookies). A dedicated command rather than the frontend's
@@ -460,6 +504,7 @@ pub(crate) async fn create_nas_login_window<R: Runtime>(
     .resizable(true)
     .title(format!("{base_title} (Loading...)"))
     .background_color(tauri::webview::Color(255, 255, 255, 255))
+    .initialization_script(FORCE_SAME_WINDOW_LINKS_SCRIPT)
     .on_page_load(move |window, event_payload| match event_payload.event() {
         tauri::webview::PageLoadEvent::Started => {
             loading.store(true, Ordering::SeqCst);

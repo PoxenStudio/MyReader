@@ -95,7 +95,7 @@ export const DEFAULT_NAS_SETTINGS: NasDeviceSettings = {
   enabled: false,
   vendor: 'other',
   loginUrl: '',
-  expiryMinutes: NAS_MIN_EXPIRY_MINUTES,
+  expiryMinutes: NAS_MIN_EXPIRY_MINUTES * 6,
   autoPromptOnExpiry: false,
   lastLoginAt: null,
 };

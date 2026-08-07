@@ -4,8 +4,10 @@
  * Cookies captured from the embedded NAS login webview live in a different
  * cookie store than `@tauri-apps/plugin-http`'s internal jar (the webview
  * uses the system browser engine; plugin-http uses its own reqwest-based
- * client) — see `nasWebviewBridge.ts`. We persist them here, keyed by host,
- * so `fetchMyBooks` can attach them as an explicit `Cookie` header.
+ * client) — see `nasWebviewBridge.ts`. We persist them here, one record per
+ * login (keyed by the login URL's host, just for storage/eviction purposes —
+ * see `getNasCookies` for why lookups don't rely on that key), so
+ * `fetchMyBooks` can attach them as an explicit `Cookie` header.
  *
  * Cookies are stored with their `domain` scope (see `NasCookieEntry`) so a
  * lookup for a *different* host than the one they were captured at (e.g. a
@@ -75,42 +77,43 @@ const cookieAppliesToHost = (
 };
 
 /**
- * Looks up cookies for `host`, then its parent domains (`a.b.c.com` ->
- * `b.c.com` -> `c.com` -> ...) — mirrors how a browser applies a cookie set
- * on a parent domain to its subdomains. The NAS login URL's host and the
- * mybooks server's host are often different subdomains of the same NAS
- * device (e.g. login at `horkynas.fnos.net`, mybooks served from
- * `6289a9567efa-0.horkynas.fnos.net`), so an exact-host-only lookup would
- * never find the cookies captured at login.
+ * Looks up cookies for `host` across *every* stored record, not just the one
+ * (if any) keyed by `host` or one of its parent domains.
  *
- * Once a stored record is found, only the cookies whose own scope actually
- * covers `host` are included — a host-only cookie captured at the login
- * host is excluded when `host` is a different (sub)domain.
+ * Records are still keyed by the login URL's host (see `setNasCookies`), but
+ * a captured cookie's own `domain` scope routinely has nothing to do with
+ * that key — `get_webview_cookies` (native side) now captures the login
+ * popup's *entire* cookie jar, since the login flow can redirect through
+ * several unrelated domains before the session cookie is actually set (e.g.
+ * a login started at `ug.link` landing on `app-8082-mybooks.cn57.ugdocker.link`,
+ * which shares no domain suffix with `ug.link` at all). A parent-domain walk
+ * from the storage key can never reach a host like that, so instead every
+ * record's cookies are checked against `host` directly via
+ * `cookieAppliesToHost`, and only host-only cookies (no `domain`) stay
+ * pinned to the record they were captured under (via `capturedHost`) — the
+ * same fallback as before, just no longer gating which records get looked at
+ * in the first place.
  */
 export function getNasCookies(host: string): string | null {
   const requestedHost = normalizeHostKey(host);
   const records = readAll();
-  let candidate = requestedHost;
-  for (;;) {
-    const record = records[candidate];
-    if (record) {
-      const applicable = record.cookies.filter((c) =>
-        cookieAppliesToHost(c, requestedHost, candidate),
-      );
-      const cookieHeader = applicable.length
-        ? applicable.map((c) => `${c.name}=${c.value}`).join('; ')
-        : null;
-      console.log(
-        `[nas-cookie-store] read cookies for host "${requestedHost}" (matched record "${candidate}", ${applicable.length}/${record.cookies.length} cookies applicable): ${cookieHeader ?? 'none'}`,
-      );
-      return cookieHeader;
+  const applicable: NasCookieEntry[] = [];
+  for (const [capturedHost, record] of Object.entries(records)) {
+    // Guards against records left over from an older storage schema (the
+    // very first version stored `{ cookieHeader, capturedAt }`, no `cookies`
+    // array) still sitting in a returning user's `localStorage`.
+    if (!Array.isArray(record.cookies)) continue;
+    for (const entry of record.cookies) {
+      if (cookieAppliesToHost(entry, requestedHost, capturedHost)) applicable.push(entry);
     }
-    const dotIndex = candidate.indexOf('.');
-    if (dotIndex === -1) break;
-    candidate = candidate.slice(dotIndex + 1);
   }
-  console.log(`[nas-cookie-store] read cookies for host "${requestedHost}": none`);
-  return null;
+  const cookieHeader = applicable.length
+    ? applicable.map((c) => `${c.name}=${c.value}`).join('; ')
+    : null;
+  console.log(
+    `[nas-cookie-store] read cookies for host "${requestedHost}" (${applicable.length} cookies applicable): ${cookieHeader ?? 'none'}`,
+  );
+  return cookieHeader;
 }
 
 export function clearNasCookies(host: string): void {
