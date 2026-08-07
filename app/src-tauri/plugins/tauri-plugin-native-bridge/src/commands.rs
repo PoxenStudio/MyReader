@@ -448,12 +448,23 @@ const NAS_LOADING_PAGE_ASSET: &str = "nas-loading.html";
 /// Forces links the NAS portal opens in a new window/tab (`target="_blank"`
 /// anchors, `window.open(...)`) to navigate in this same popup instead.
 ///
-/// This is done in JS rather than via Tauri's `on_new_window` hook because
-/// that hook is desktop-only (unsupported on Android/iOS — see its doc
-/// comment), while an injected `initialization_script` runs the same way on
-/// every platform/webview engine. It reruns on every navigation in this
-/// window (loading page, then the real NAS page), which is fine since it's
-/// idempotent.
+/// This alone used to be the whole fix, on the assumption that intercepting
+/// `window.open` and stripping `target="_blank"` in page JS was enough to
+/// stop a new window from ever being requested. That held on macOS 15, but
+/// on macOS 26 the same NAS portal still opened a second window — WKWebView
+/// is a system framework (`WebKit.framework`), not something this app
+/// bundles, so its policy for *which* navigations count as "open a new
+/// window" (modifier-key clicks, links added after this script already ran,
+/// etc.) can shift between OS versions independently of anything here. A
+/// page-JS intercept can only stop paths that actually go through page JS;
+/// see `on_new_window` below for the engine-level backstop that doesn't
+/// depend on that.
+///
+/// This script stays as the cross-platform layer — an injected
+/// `initialization_script` runs the same way on every platform/webview
+/// engine, including Android/iOS where `on_new_window` isn't supported (see
+/// its doc comment). It reruns on every navigation in this window (loading
+/// page, then the real NAS page), which is fine since it's idempotent.
 const FORCE_SAME_WINDOW_LINKS_SCRIPT: &str = r#"(function () {
   window.open = function (url) {
     if (url) { window.location.href = url; }
@@ -484,6 +495,8 @@ pub(crate) async fn create_nas_login_window<R: Runtime>(
     app: AppHandle<R>,
     payload: CreateNasLoginWindowRequest,
 ) -> Result<()> {
+    use tauri::Manager;
+
     let target_url = tauri::Url::parse(&payload.url)
         .map_err(|e| crate::Error::NativeBridgeError(format!("invalid url: {e}")))?;
     let base_title = payload.title.clone();
@@ -505,6 +518,26 @@ pub(crate) async fn create_nas_login_window<R: Runtime>(
     .title(format!("{base_title} (Loading...)"))
     .background_color(tauri::webview::Color(255, 255, 255, 255))
     .initialization_script(FORCE_SAME_WINDOW_LINKS_SCRIPT)
+    .on_new_window({
+        // Engine-level backstop for `FORCE_SAME_WINDOW_LINKS_SCRIPT`: this
+        // fires from the webview engine's own new-window policy check
+        // (WKWebView's `createWebViewWithConfiguration:` on macOS), before
+        // any page JS runs, so it still catches a new-window request the
+        // injected script's `window.open`/`target` interception missed —
+        // which is what let a second window through on macOS 26 despite the
+        // JS fix working fine on macOS 15 (see the comment above
+        // `FORCE_SAME_WINDOW_LINKS_SCRIPT`). Not supported on Android/iOS
+        // (no-op there per the method's own doc comment), which is why the
+        // JS approach has to stay as the actual cross-platform fix.
+        let app = app.clone();
+        let label = payload.label.clone();
+        move |url, _features| {
+            if let Some(window) = app.get_webview_window(&label) {
+                let _ = window.navigate(url);
+            }
+            tauri::webview::NewWindowResponse::Deny
+        }
+    })
     .on_page_load(move |window, event_payload| match event_payload.event() {
         tauri::webview::PageLoadEvent::Started => {
             loading.store(true, Ordering::SeqCst);
