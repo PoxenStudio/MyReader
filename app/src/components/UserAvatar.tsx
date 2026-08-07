@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { IconType } from 'react-icons';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
+import { useSettingsStore } from '@/store/settingsStore';
+import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
 
 interface UserAvatarProps {
   url: string;
@@ -67,8 +69,25 @@ const UserAvatar: React.FC<UserAvatarProps> = ({
         // Tauri's HTTP plugin owns its own native cookie jar (invisible to
         // the webview) and has no API-route server in production builds, so
         // the MyBooks session cookie can only be attached via tauriFetch.
+        let tauriHeaders: Record<string, string> | undefined;
+        if (isTauriAppPlatform()) {
+          // plugin-http's cookie jar never sees cookies captured from the
+          // NAS login webview (a different engine) — same gap as
+          // `fetchMyBooks`/`BookCover.tsx`/`cloudService.ts`. Without this,
+          // a NAS-gated avatar host serves the relay's login page (200 OK,
+          // text/html) instead of the image, which is exactly what threw
+          // above.
+          const nasSettings = useSettingsStore.getState().settings.nas;
+          if (nasSettings?.enabled) {
+            const nasCookie = getNasCookies(new URL(url).host);
+            tauriHeaders = {
+              ...(nasCookie && { Cookie: nasCookie }),
+              'User-Agent': NAS_CHROME_USER_AGENT,
+            };
+          }
+        }
         const response = isTauriAppPlatform()
-          ? await (tauriFetch as unknown as typeof fetch)(url)
+          ? await (tauriFetch as unknown as typeof fetch)(url, { headers: tauriHeaders })
           : await fetch(url, { referrerPolicy: 'no-referrer' });
         if (!response.ok) {
           throw new Error(`Avatar request failed with status ${response.status}`);

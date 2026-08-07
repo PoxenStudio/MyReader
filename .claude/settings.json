@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import json; json.load\\(open\\('public/locales/zh-CN/translation.json'\\)\\); json.load\\(open\\('public/locales/zh-TW/translation.json'\\)\\); print\\('OK'\\)\")",
+      "Bash(find / -maxdepth 6 -iname \"registry\" -path \"*cargo*\")",
+      "Bash(find / -iname \"*.crate\" -path \"*tauri-2*\")",
+      "Bash(grep -A2 '^name = \"tauri\"$')",
+      "Bash(CARGO_HOME=/Volumes/data/cache/cargo cargo check --target-dir /private/tmp/claude-501/-Volumes-data-projects-poxenstudio-myreader/fe846f92-a13a-42a4-beff-c0a11991b635/scratchpad/cargo-target)",
+      "Bash(CARGO_HOME=/Volumes/data/cache/cargo cargo fmt --check)",
+      "Bash(CARGO_HOME=/Volumes/data/cache/cargo cargo clippy --target-dir /private/tmp/claude-501/-Volumes-data-projects-poxenstudio-myreader/fe846f92-a13a-42a4-beff-c0a11991b635/scratchpad/cargo-target)",
+      "Bash(dotenv -e .env -e .env.test.local -- pnpm exec vitest run src/__tests__/services/constants.test.ts)",
+      "Bash(grep -on '_\\('\\\\''[^'\\\\'']*'\\\\''\\\\\\(, {[^}]*}\\\\\\)\\\\?\\)' src/components/settings/integrations/NasDeviceForm.tsx src/components/settings/IntegrationsPanel.tsx src/components/nas/NasRemoteWebview.tsx src/components/nas/NasSessionPrompt.tsx src/components/user/LoginDialog.tsx src/components/user/UserSettingsDialog.tsx)",
+      "Bash(python3 -c \"import json; json.load\\(open\\('public/locales/zh-CN/translation.json'\\)\\); json.load\\(open\\('public/locales/zh-TW/translation.json'\\)\\); print\\('valid json'\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import json; json.load\\(open\\('capabilities/default.json'\\)\\); print\\('valid'\\)\")",
+      "Bash(python3 -c \"import json,tomllib\")",
+      "Bash(CARGO_HOME=/Volumes/data/cache/cargo timeout 280 cargo check --target-dir /private/tmp/claude-501/-Volumes-data-projects-poxenstudio-myreader/fe846f92-a13a-42a4-beff-c0a11991b635/scratchpad/cargo-target-app)",
+      "Bash(CARGO_HOME=/Volumes/data/cache/cargo timeout 280 cargo clippy --target-dir /private/tmp/claude-501/-Volumes-data-projects-poxenstudio-myreader/fe846f92-a13a-42a4-beff-c0a11991b635/scratchpad/cargo-target-app)",
+      "Bash(find ~/.cargo /Users -maxdepth 8 -iname \"tauri-2*\" -type d 2>/dev/null | head -20)",
+      "Read(//Users/**)",
+      "Bash(find / -maxdepth 10 -type d -iname \"tauri-2.*\")",
+      "Bash(cargo metadata *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo clippy *)",
+      "Bash(pnpm fmt:check)",
+      "Bash(pnpm clippy:check)",
+      "Bash(grep -rn \"webview:\\\\${\" /Volumes/data/projects/poxenstudio/myreader/app/src)",
+      "Bash(awk 'NR<1173 && /^class /{cls=$0; ln=NR} END{}' /Volumes/data/projects/reader/mybooks/webserver/handlers/book.py)"
+    ]
+  }
+}

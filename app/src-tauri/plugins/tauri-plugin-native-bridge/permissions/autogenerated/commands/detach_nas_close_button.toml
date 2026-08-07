@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-detach-nas-close-button"
+description = "Enables the detach_nas_close_button command without any pre-configured scope."
+commands.allow = ["detach_nas_close_button"]
+
+[[permission]]
+identifier = "deny-detach-nas-close-button"
+description = "Denies the detach_nas_close_button command without any pre-configured scope."
+commands.deny = ["detach_nas_close_button"]

@@ -9,6 +9,7 @@ import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useNasDeviceStore } from '@/store/nasDeviceStore';
 import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
+import { getTauriMyBooksCookie } from '@/services/mybooks/tauriCookieStore';
 import { shouldAutoPromptNasLogin } from '@/services/mybooks/nasSession';
 
 export interface MyBooksBook {
@@ -238,15 +239,44 @@ export async function fetchMyBooks<T>(
   // Attach them explicitly, and — if the NAS session looks expired — ask
   // the root-mounted NasSessionPrompt to re-open the login webview. This
   // doesn't block the in-flight request; it just arms the next one.
+  //
+  // Setting a `Cookie` header at all suppresses plugin-http's own automatic
+  // one for this request (reqwest's cookie store only fills it in when the
+  // request doesn't already have one), so the regular MyBooks session
+  // cookie — normally replayed from plugin-http's jar without any help —
+  // has to be merged in here explicitly too, the same way
+  // `downloadMyBooksUrl` (cloudService.ts) already does. Without this, a
+  // NAS-gated request would authenticate at the relay but arrive at MyBooks
+  // itself with no session cookie at all, failing as "not logged in" even
+  // though the user is.
   if (host && isTauriAppPlatform()) {
     const nasSettings = useSettingsStore.getState().settings.nas;
     if (nasSettings?.enabled) {
-      const nasCookie = getNasCookies(new URL(url).host);
-      fetchOptions.headers = {
-        ...fetchOptions.headers,
-        ...(nasCookie && { Cookie: nasCookie }),
-        'User-Agent': NAS_CHROME_USER_AGENT,
-      };
+      try {
+        const sessionCookie = getTauriMyBooksCookie();
+        const nasCookie = getNasCookies(new URL(url).host);
+        // Defensive: a raw HTTP header value must not contain CR/LF (or it's
+        // rejected outright, at the Rust/reqwest layer for plugin-http's
+        // IPC-based fetch — surfacing here as a generic, unhelpful "Failed
+        // to fetch" with no indication it was ever about a header). Captured
+        // cookie values should never legitimately contain these, but the NAS
+        // popup's cookie jar isn't scoped to just the login flow (see
+        // `get_webview_cookies` in commands.rs) and gets replayed as-is, so
+        // strip defensively rather than let one bad stored value take down
+        // every NAS-gated request.
+        const sanitize = (v: string) => v.replace(/[\r\n]/g, '');
+        const cookie = [sessionCookie, nasCookie]
+          .filter((v): v is string => !!v)
+          .map(sanitize)
+          .join('; ');
+        fetchOptions.headers = {
+          ...fetchOptions.headers,
+          ...(cookie && { Cookie: cookie }),
+          'User-Agent': NAS_CHROME_USER_AGENT,
+        };
+      } catch (e) {
+        console.error('[fetchMyBooks] Failed to build NAS cookie header:', e);
+      }
       if (shouldAutoPromptNasLogin(nasSettings)) {
         useNasDeviceStore.getState().requestPrompt();
       }
@@ -264,6 +294,15 @@ export async function fetchMyBooks<T>(
   } catch (error) {
     // Couldn't reach the configured MyBooks host at all (network down, server
     // unreachable, timed out, etc.) — surface this as "offline" rather than an error.
+    // Logged here (not just left to bubble up) because WebKit's Error
+    // objects carry only enumerable `line`/`column` own properties — a
+    // caller that logs the caught error object directly (e.g. via a
+    // template literal) gets a useless `{"line":0,"column":0}` with no
+    // `message` at all, so the real reason never makes it into the log.
+    console.error(
+      `[fetchMyBooks] Request to ${url.toString()} failed:`,
+      error instanceof Error ? error.message : error,
+    );
     if (host) useMyBooksStatusStore.getState().setOffline(true);
     throw error;
   } finally {

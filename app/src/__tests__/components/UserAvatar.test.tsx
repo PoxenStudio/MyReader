@@ -18,6 +18,17 @@ vi.mock('@tauri-apps/plugin-http', () => ({
   fetch: vi.fn(),
 }));
 
+const getNasCookiesMock = vi.fn();
+vi.mock('@/services/mybooks/nasCookieStore', () => ({
+  NAS_CHROME_USER_AGENT: 'test-nas-chrome-ua',
+  getNasCookies: (...args: unknown[]) => getNasCookiesMock(...args),
+}));
+
+const settingsStoreState = { settings: { nas: { enabled: false } } };
+vi.mock('@/store/settingsStore', () => ({
+  useSettingsStore: { getState: () => settingsStoreState },
+}));
+
 import { isTauriAppPlatform } from '@/services/environment';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import UserAvatar from '@/components/UserAvatar';
@@ -31,6 +42,9 @@ afterEach(() => {
 describe('UserAvatar', () => {
   beforeEach(() => {
     vi.mocked(isTauriAppPlatform).mockReturnValue(true);
+    getNasCookiesMock.mockReset();
+    getNasCookiesMock.mockReturnValue(null);
+    settingsStoreState.settings.nas = { enabled: false };
   });
 
   it('never renders a direct cross-origin <img src> in Tauri mode (avoids CORP-blocked loads)', async () => {
