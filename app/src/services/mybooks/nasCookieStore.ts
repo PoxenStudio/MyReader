@@ -59,10 +59,10 @@ export function setNasCookies(host: string, cookies: NasCookieEntry[]): void {
   const key = normalizeHostKey(host);
   records[key] = { cookies, capturedAt: Date.now() };
   writeAll(records);
-  const preview = cookies
-    .map((c) => `${c.name}=${c.value} (${c.domain ? `domain=${c.domain}` : 'host-only'})`)
-    .join('; ');
-  console.log(`[nas-cookie-store] saved ${cookies.length} cookies for host "${key}": ${preview}`);
+  // const preview = cookies
+  //   .map((c) => `${c.name}=${c.value} (${c.domain ? `domain=${c.domain}` : 'host-only'})`)
+  //   .join('; ');
+  // console.log(`[nas-cookie-store] saved ${cookies.length} cookies for host "${key}": ${preview}`);
 }
 
 /** Whether `entry` would actually be sent to `requestedHost` per RFC 6265 domain matching. */
@@ -110,9 +110,9 @@ export function getNasCookies(host: string): string | null {
   const cookieHeader = applicable.length
     ? applicable.map((c) => `${c.name}=${c.value}`).join('; ')
     : null;
-  console.log(
-    `[nas-cookie-store] read cookies for host "${requestedHost}" (${applicable.length} cookies applicable): ${cookieHeader ?? 'none'}`,
-  );
+  // console.log(
+  //   `[nas-cookie-store] read cookies for host "${requestedHost}" (${applicable.length} cookies applicable): ${cookieHeader ?? 'none'}`,
+  // );
   return cookieHeader;
 }
 

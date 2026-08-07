@@ -1,6 +1,7 @@
 'use client';
 
 import clsx from 'clsx';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   MdContentCopy,
@@ -45,6 +46,7 @@ interface UserSettingsDialogProps {
 
 const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose }) => {
   const _ = useTranslation();
+  const router = useRouter();
   const { logout } = useAuth();
   const { envConfig, appService } = useEnv();
   const { settings, setSettings, saveSettings } = useSettingsStore();
@@ -206,6 +208,11 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
     } finally {
       logout();
       onClose();
+      // The cloud shelf (and any of its sub-views — categories/author/tag/
+      // .../reading etc., all `?source=cloud`) has nothing to show once
+      // signed out, so send the shelf back to the local library rather than
+      // leaving it stuck on a now-inaccessible cloud view.
+      router.push('/library?source=local');
     }
   };
 

@@ -75,7 +75,7 @@ describe('UserAvatar', () => {
     );
 
     await waitFor(() => {
-      expect(tauriFetch).toHaveBeenCalledWith(directUrl);
+      expect(tauriFetch).toHaveBeenCalledWith(directUrl, { headers: undefined });
     });
     await waitFor(() => {
       expect(container.querySelector('img')).toBeTruthy();
@@ -122,10 +122,30 @@ describe('UserAvatar', () => {
     );
 
     await waitFor(() => {
-      expect(tauriFetch).toHaveBeenCalledWith(directUrl);
+      expect(tauriFetch).toHaveBeenCalledWith(directUrl, { headers: undefined });
     });
     await waitFor(() => {
       expect(container.querySelector('img')).toBeTruthy();
+    });
+  });
+
+  it('attaches the NAS cookie and User-Agent when NAS login is enabled', async () => {
+    const directUrl = 'http://127.0.0.1:8082/avatar/1.png';
+    getNasCookiesMock.mockReturnValue('nas-token=xyz');
+    settingsStoreState.settings.nas = { enabled: true };
+    const blob = new Blob(['fake-bytes'], { type: 'image/png' });
+    vi.mocked(tauriFetch).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'Content-Type': 'image/png' }),
+      blob: async () => blob,
+    } as unknown as Response);
+
+    render(<UserAvatar url={directUrl} size={48} DefaultIcon={PiUserCircle} />);
+
+    await waitFor(() => {
+      expect(tauriFetch).toHaveBeenCalledWith(directUrl, {
+        headers: { Cookie: 'nas-token=xyz', 'User-Agent': 'test-nas-chrome-ua' },
+      });
     });
   });
 
