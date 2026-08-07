@@ -1953,7 +1953,6 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
             handleBookUpload={handleBookUpload}
             handleBookDownload={handleBookDownload}
             handleBookDelete={source === 'cloud' ? handleCloudDelete : handleBookDelete('both')}
-            handleBookDeleteCloudBackup={source === 'cloud' ? undefined : handleBookDelete('cloud')}
             handleBookDeleteLocalCopy={source === 'cloud' ? undefined : handleBookDelete('local')}
             handleBookPurge={source === 'cloud' ? undefined : handleBookDelete('purge')}
             deleteDisabled={source === 'cloud' && (!isAdmin || !settings.allowDelCloudBook)}
