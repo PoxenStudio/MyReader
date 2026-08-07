@@ -26,7 +26,6 @@ interface BookDetailModalProps {
   handleBookDownload?: (book: Book, options?: { redownload?: boolean; queued?: boolean }) => void;
   handleBookUpload?: (book: Book) => void;
   handleBookDelete?: (book: Book) => void;
-  handleBookDeleteCloudBackup?: (book: Book) => void;
   handleBookDeleteLocalCopy?: (book: Book) => void;
   handleBookPurge?: (book: Book) => void;
   deleteDisabled?: boolean;
@@ -35,8 +34,12 @@ interface BookDetailModalProps {
 }
 
 // Purge is no longer a standalone menu action — it is an opt-in toggle on the
-// standard ('both') delete confirmation, so the menu only triggers these three.
-type DeleteMenuAction = Exclude<DeleteAction, 'purge' | 'remote'>;
+// standard ('both') delete confirmation. 'cloud' (cloud-backup-only removal)
+// has no UI trigger either — BookDetailView only exposes a single plain
+// delete button (no dropdown), so it can only ever drive 'both' here; 'local'
+// stays available for other future callers even though nothing currently
+// reaches it through this modal.
+type DeleteMenuAction = Exclude<DeleteAction, 'purge' | 'remote' | 'cloud'>;
 
 interface DeleteConfig {
   message: string;
@@ -51,7 +54,6 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
   handleBookDownload,
   handleBookUpload,
   handleBookDelete,
-  handleBookDeleteCloudBackup,
   handleBookDeleteLocalCopy,
   handleBookPurge,
   deleteDisabled,
@@ -119,10 +121,6 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
       handler: handleBookDelete,
       showPurgeToggle: !!handleBookPurge,
     },
-    cloud: {
-      message: _('Are you sure to delete the cloud backup of the selected book?'),
-      handler: handleBookDeleteCloudBackup,
-    },
     local: {
       message: _('Are you sure to delete the local copy of the selected book?'),
       handler: handleBookDeleteLocalCopy,
@@ -181,8 +179,11 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
   };
 
   const handleDelete = () => handleDeleteAction('both');
-  const handleDeleteCloudBackup = () => handleDeleteAction('cloud');
-  const handleDeleteLocalCopy = () => handleDeleteAction('local');
+  // 'local' isn't wired to BookDetailView right now (it only exposes a
+  // single plain delete button, no per-scope dropdown) — a future
+  // caller/UI can still reach it via `handleDeleteAction('local')`
+  // directly; `deleteConfigs.local`/`handleBookDeleteLocalCopy` above stay
+  // in place for that.
 
   const handleReupload = async () => {
     handleClose();
@@ -253,10 +254,6 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
                 onEdit={handleBookMetadataUpdate ? handleEditMetadata : undefined}
                 onDelete={handleBookDelete ? handleDelete : undefined}
                 deleteDisabled={deleteDisabled}
-                onDeleteCloudBackup={
-                  handleBookDeleteCloudBackup ? handleDeleteCloudBackup : undefined
-                }
-                onDeleteLocalCopy={handleBookDeleteLocalCopy ? handleDeleteLocalCopy : undefined}
                 onDownload={handleBookDownload ? handleDownload : undefined}
                 onUpload={handleBookUpload ? handleReupload : undefined}
                 onExport={handleBookExport}
