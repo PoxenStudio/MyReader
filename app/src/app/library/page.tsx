@@ -1127,8 +1127,19 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         }
       }
 
-      // Use transfer queue for normal downloads - priority 1 for manual downloads
+      // Use transfer queue for normal downloads - priority 1 for manual downloads.
+      // The queue only stores the book's hash and looks the full Book object
+      // back up in the library store when it actually runs the transfer, so a
+      // book browsed straight from the MyBooks cloud catalog (not yet part of
+      // the local library) has to be added here first or the deferred lookup
+      // fails with "Book not found in library".
+      if (!useLibraryStore.getState().getBookByHash(book.hash)) {
+        console.log('[handleBookDownload] adding cloud-browsed book to library before queuing');
+        await updateBook(envConfig, book);
+      }
+      console.log('[handleBookDownload] queuing download for:', book.title, 'hash:', book.hash);
       const transferId = transferManager.queueDownload(book, 1);
+      console.log('[handleBookDownload] queueDownload returned transferId:', transferId);
       if (transferId) {
         eventDispatcher.dispatch('toast', {
           type: 'info',
