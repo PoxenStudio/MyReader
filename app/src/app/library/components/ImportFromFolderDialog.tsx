@@ -85,7 +85,7 @@ interface ImportFromFolderDialogProps {
   /**
    * Initial value for the folder-structure radios. Persisted by the
    * caller across dialog opens so users don't have to re-pick the same
-   * mode every time. Defaults to `'keep'` when omitted.
+   * mode every time. Defaults to `'flatten'` when omitted.
    */
   initialFolderMode?: 'keep' | 'flatten';
   /**
@@ -150,7 +150,7 @@ const DEFAULT_MIN_SIZE_KB = 20;
  */
 const ImportFromFolderDialog: React.FC<ImportFromFolderDialogProps> = ({
   initialDirectory,
-  initialFolderMode = 'keep',
+  initialFolderMode = 'flatten',
   initialSelectedGroupIds,
   initialMinSizeKB,
   initialReadInPlace = false,
@@ -417,7 +417,7 @@ const ImportFromFolderDialog: React.FC<ImportFromFolderDialogProps> = ({
                 <span className='block'>{_('Auto-import new books from this folder')}</span>
                 <span className='text-base-content/60 block text-xs'>
                   {_(
-                    'When new books are added to this folder, import them automatically the next time Readest opens or returns to the foreground.',
+                    'When new books are added to this folder, import them automatically the next time MyBooks opens or returns to the foreground.',
                   )}
                 </span>
               </span>

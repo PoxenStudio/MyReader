@@ -45,9 +45,11 @@ import androidx.core.content.FileProvider
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
@@ -301,9 +303,7 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
 
     companion object {
         private const val REQUEST_MANAGE_STORAGE = 1001
-        private const val FOLDER_PICKER_REQUEST_CODE = 1002
         var pendingInvoke: Invoke? = null
-        var pendingFolderPickerInvoke: Invoke? = null
         private var instance: NativeBridgePlugin? = null
         fun getInstance(): NativeBridgePlugin? = instance
     }
@@ -1183,13 +1183,20 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         }
     }
 
+    // Tauri's Android `Plugin` base class has no `onActivityResult` override
+    // point (unlike `onNewIntent`, which is genuinely forwarded) — activity
+    // results are routed through `startActivityForResult(invoke, intent,
+    // callbackName)`, which registers `invoke` against `callbackName` and
+    // replays it into the matching `@ActivityCallback` method once the
+    // system picker returns. The previous implementation called the raw
+    // `Activity.startActivityForResult` + a same-named `handleActivityResult`
+    // that nothing ever invoked, so the picker promise on the JS side hung
+    // forever after the user chose a folder.
     @Command
     fun select_directory(invoke: Invoke) {
-        pendingFolderPickerInvoke = invoke
-
         try {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-            activity.startActivityForResult(intent, FOLDER_PICKER_REQUEST_CODE)
+            startActivityForResult(invoke, intent, "handleDirectoryPickerResult")
         } catch (e: Exception) {
             val result = JSObject()
             result.put("cancelled", true)
@@ -1197,18 +1204,12 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             result.put("path", null)
             result.put("error", e.message)
             invoke.resolve(result)
-            pendingFolderPickerInvoke = null
         }
     }
 
-    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == FOLDER_PICKER_REQUEST_CODE) {
-            val invoke = pendingFolderPickerInvoke
-            if (invoke != null) {
-                handleDirectorySelected(data?.data, invoke)
-                pendingFolderPickerInvoke = null
-            }
-        }
+    @ActivityCallback
+    private fun handleDirectoryPickerResult(invoke: Invoke, result: ActivityResult) {
+        handleDirectorySelected(result.data?.data, invoke)
     }
 
     private fun handleDirectorySelected(uri: Uri?, invoke: Invoke) {
@@ -1239,7 +1240,6 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         }
 
         invoke.resolve(result)
-        pendingInvoke = null
     }
 
     private fun extractPathFromUri(uri: Uri): String? {

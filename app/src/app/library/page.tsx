@@ -1363,7 +1363,9 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         : undefined;
     setImportFromFolderState({
       initialDirectory: storedDirectory,
-      initialFolderMode: storedMode === 'flatten' ? 'flatten' : 'keep',
+      // Default to "flatten" (import all into library) on first use;
+      // only honor an explicitly-persisted 'keep' from a prior session.
+      initialFolderMode: storedMode === 'keep' ? 'keep' : 'flatten',
       initialSelectedGroupIds: parsedFormats,
       initialMinSizeKB:
         parsedMinSize !== undefined && Number.isFinite(parsedMinSize) && parsedMinSize >= 0
