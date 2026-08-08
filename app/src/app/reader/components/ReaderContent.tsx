@@ -78,7 +78,7 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
           console.log('Error initializing book', key, error);
           setErrorLoading(true);
           eventDispatcher.dispatch('toast', {
-            message: _('Unable to open book'),
+            message: _('Unable to open book') + '(' + error + ')',
             callback: async () => {
               const service = await envConfig.getAppService();
               await closeReaderWindowOrGoToLibrary(service, router);

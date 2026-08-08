@@ -48,6 +48,7 @@ interface LibraryHeaderProps {
   isSelectMode: boolean;
   isSelectAll: boolean;
   isCloudLibrary: boolean;
+  isDrawerOpen: boolean;
   onImportBooksFromFiles: () => void;
   onImportBooksFromDirectory?: () => void;
   onImportBookFromUrl?: () => void;
@@ -63,6 +64,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   isSelectMode,
   isSelectAll,
   isCloudLibrary,
+  isDrawerOpen,
   onImportBooksFromFiles,
   onImportBooksFromDirectory,
   onImportBookFromUrl,
@@ -222,10 +224,37 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
         <div className='exclude-title-bar-mousedown relative flex w-full items-center pl-2 sm:pl-4'>
           <button
             onClick={onToggleDrawer}
-            className='btn btn-ghost p-1 h-9 min-h-9 mr-1 lg:hidden flex items-center justify-center text-base-content/70'
-            aria-label={_('Toggle Menu')}
+            className='btn btn-ghost p-1 h-9 min-h-9 mr-1 flex items-center justify-center text-base-content/70'
+            aria-label={isDrawerOpen ? _('Collapse Sidebar') : _('Expand Sidebar')}
           >
-            <MdOutlineMenu className='w-6 h-6' />
+            {isDrawerOpen ? (
+              <svg
+                width='1.5em'
+                height='1.5em'
+                viewBox='0 0 24 24'
+                fill='none'
+                xmlns='http://www.w3.org/2000/svg'
+              >
+                <path
+                  d='M22 4a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h18a1 1 0 0 0 1-1Zm-11.111 7c.614 0 1.111.448 1.111 1s-.498 1-1.111 1H3.11C2.497 13 2 12.552 2 12s.497-1 1.111-1h7.778ZM12 20c0-.552-.498-1-1.111-1H3.11C2.497 19 2 19.448 2 20s.497 1 1.111 1h7.778c.614 0 1.111-.448 1.111-1Zm3.41-3.136a1.117 1.117 0 0 1 0-1.729l4.951-3.917c.675-.534 1.639-.026 1.639.865v7.834c0 .89-.964 1.4-1.639.865l-4.951-3.918Z'
+                  fill='currentColor'
+                />
+              </svg>
+            ) : (
+              <svg
+                width='1.5em'
+                height='1.5em'
+                viewBox='0 0 24 24'
+                fill='none'
+                xmlns='http://www.w3.org/2000/svg'
+              >
+                <path
+                  d='M22 4a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h18a1 1 0 0 0 1-1Zm-11.111 7c.614 0 1.111.448 1.111 1s-.498 1-1.111 1H3.11C2.497 13 2 12.552 2 12s.497-1 1.111-1h7.778ZM12 20c0-.552-.498-1-1.111-1H3.11C2.497 19 2 19.448 2 20s.497 1 1.111 1h7.778c.614 0 1.111-.448 1.111-1Zm3.41-3.136a1.117 1.117 0 0 1 0-1.729l4.951-3.917c.675-.534 1.639-.026 1.639.865v7.834c0 .89-.964 1.4-1.639.865l-4.951-3.918Z'
+                  fill='currentColor'
+                  transform='rotate(180 12 12)'
+                />
+              </svg>
+            )}
           </button>
 
           {!isMobile && (

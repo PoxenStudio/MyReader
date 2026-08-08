@@ -3,10 +3,10 @@ import clsx from 'clsx';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslation } from '@/hooks/useTranslation';
-import { useThemeStore } from '@/store/themeStore';
 import { useEnv } from '@/context/EnvContext';
 import { useAuth } from '@/context/AuthContext';
 import { useMyBooksConnectionStatus } from '@/store/mybooksStatusStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import UserSettingsDialog from '@/components/user/UserSettingsDialog';
 import DeviceManagementDialog from '@/components/user/DeviceManagementDialog';
 
@@ -55,6 +55,7 @@ interface NavGroupItem {
 interface LibraryDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpen?: () => void;
   onNavigate?: () => void;
   className?: string;
 }
@@ -71,7 +72,8 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
   const { appService } = useEnv();
   const { status } = useAuth();
   const connectionStatus = useMyBooksConnectionStatus();
-  const { safeAreaInsets: insets, systemUIVisible, statusBarHeight } = useThemeStore();
+  const settings = useSettingsStore((s) => s.settings);
+  const viewSettings = settings?.globalViewSettings;
 
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [showDeviceManagement, setShowDeviceManagement] = useState(false);
@@ -396,7 +398,7 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
       {/* Mobile Overlay */}
       {isOpen && (
         <div
-          className='fixed inset-0 bg-black/40 z-40 lg:hidden transition-opacity'
+          className='absolute inset-0 bg-black/40 z-20 lg:hidden transition-opacity'
           onClick={onClose}
         />
       )}
@@ -404,19 +406,16 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
       {/* Drawer Container */}
       <div
         className={clsx(
-          'fixed lg:static inset-y-0 left-0 z-50 flex flex-col bg-base-100 border-r border-base-300 w-64 transition-transform duration-300 ease-in-out',
-          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+          'absolute inset-y-0 left-0 z-30 flex flex-col border-r border-base-300 w-64 transition-all duration-300 ease-in-out overflow-hidden',
+          viewSettings?.isEink ? 'bg-base-100' : 'bg-base-200',
+          'lg:static lg:inset-auto lg:self-stretch lg:h-full',
+          isOpen ? 'translate-x-0' : '-translate-x-full',
+          !isOpen && 'lg:w-0 lg:border-r-0',
           className,
         )}
-        style={{
-          paddingTop: appService?.hasSafeAreaInset
-            ? `max(${insets?.top || 0}px, ${systemUIVisible ? statusBarHeight : 0}px)`
-            : '0px',
-        }}
       >
         <div className='flex-1 overflow-y-auto overflow-x-hidden p-3 custom-scrollbar'>
           <ul className='space-y-1'>
-            <li className='h-10'></li>
             {/* Home Links Section */}
             <div className='space-y-1'>
               {home_links.map((link, idx) => renderNavLink(link, idx))}
@@ -442,6 +441,7 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
           </ul>
         </div>
       </div>
+
       <UserSettingsDialog isOpen={showUserSettings} onClose={() => setShowUserSettings(false)} />
       <DeviceManagementDialog
         isOpen={showDeviceManagement}
