@@ -9,8 +9,10 @@ vi.mock('@/utils/md5', () => ({
 }));
 
 const updateReadState = vi.fn().mockResolvedValue(undefined);
+const toggleWants = vi.fn().mockResolvedValue(undefined);
 vi.mock('@/services/mybooksService', () => ({
   updateReadState: (...args: unknown[]) => updateReadState(...args),
+  toggleWants: (...args: unknown[]) => toggleWants(...args),
 }));
 
 import { useLibraryStore } from '@/store/libraryStore';
@@ -41,6 +43,7 @@ function makeBook(overrides: Partial<Book> = {}): Book {
 describe('libraryStore', () => {
   beforeEach(() => {
     updateReadState.mockClear();
+    toggleWants.mockClear();
     useLibraryStore.setState({
       library: [],
       libraryLoaded: false,
@@ -211,6 +214,25 @@ describe('libraryStore', () => {
       useLibraryStore.getState().updateBookProgress('a', [100, 100], 'finished');
 
       expect(updateReadState).not.toHaveBeenCalled();
+    });
+
+    test('marks the MyBooks book unread and as "wants" when set to On hold (abandoned)', () => {
+      const books = [makeBook({ hash: 'a', bookId: 42, readingStatus: 'reading' })];
+      useLibraryStore.getState().setLibrary(books);
+
+      useLibraryStore.getState().updateBookProgress('a', [50, 100], 'abandoned');
+
+      expect(updateReadState).toHaveBeenCalledWith(42, 0);
+      expect(toggleWants).toHaveBeenCalledWith(42, true);
+    });
+
+    test('does not mark as "wants" for other status transitions', () => {
+      const books = [makeBook({ hash: 'a', bookId: 42, readingStatus: undefined })];
+      useLibraryStore.getState().setLibrary(books);
+
+      useLibraryStore.getState().updateBookProgress('a', [100, 100], 'finished');
+
+      expect(toggleWants).not.toHaveBeenCalled();
     });
 
     test('falls back to parsing the cloud-<id> hash when bookId is missing', () => {

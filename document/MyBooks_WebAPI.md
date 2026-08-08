@@ -1073,7 +1073,15 @@ sys中为基础系统信息，title为网站标题, books为在库书籍数量�
 - **认证**：需要登录
 - **参数**：
   - `id` (path, 必填): 图书ID
-  - `action` (string, 必填): "add" 或 "remove"
+  - `favorite` (body, boolean, 必填): `true` 为添加收藏，`false` 为取消收藏
+- **请求示例**：
+
+```json
+{
+  "favorite": true
+}
+```
+
 - **响应示例**：
 
 ```json
@@ -1090,13 +1098,21 @@ sys中为基础系统信息，title为网站标题, books为在库书籍数量�
 - **认证**：需要登录
 - **参数**：
   - `id` (path, 必填): 图书ID
-  - `action` (string, 必填): "add" 或 "remove"
+  - `wants` (body, boolean, 必填): `true` 为标记待读，`false` 为取消待读
+- **请求示例**：
+
+```json
+{
+  "wants": true
+}
+```
+
 - **响应示例**：
 
 ```json
 {
   "err": "ok",
-  "msg": "添加成功"
+  "msg": "标记为待读成功"
 }
 ```
 
@@ -1107,7 +1123,17 @@ sys中为基础系统信息，title为网站标题, books为在库书籍数量�
 - **认证**：需要登录
 - **参数**：
   - `id` (path, 必填): 图书ID
-  - `read_state` (int, 必填): 阅读状态（0=未读，1=在读，2=已读）
+  - `read_state` (body, int, 必填): 阅读状态（0=未读，1=在读，2=已读）
+  - `online_read` (body, boolean, 可选): 是否在线阅读，传入时会一并更新该状态
+  - `download` (body, boolean, 可选): 是否已下载，传入时会一并更新该状态
+- **请求示例**：
+
+```json
+{
+  "read_state": 1
+}
+```
+
 - **响应示例**：
 
 ```json

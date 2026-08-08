@@ -3,16 +3,18 @@ import { Book, BookGroupType, BooksGroup, ReadingStatus } from '@/types/book';
 import { EnvConfigType, isTauriAppPlatform } from '@/services/environment';
 import { BOOK_UNGROUPED_NAME } from '@/services/constants';
 import { md5Fingerprint } from '@/utils/md5';
-import { updateReadState } from '@/services/mybooksService';
+import { updateReadState, toggleWants } from '@/services/mybooksService';
 import { getMyBooksId } from '@/utils/bookConverter';
 import { useSettingsStore } from '@/store/settingsStore';
 
 // MyBooks read state: 0=unread, 1=reading, 2=finished. Books without an
 // explicit status (e.g. actively being read but never tagged 'finished'
-// or 'unread') are treated as "reading".
+// or 'unread') are treated as "reading". 'abandoned' (shown locally as
+// "On hold") maps to MyBooks' "待读" (wants-to-read) concept, so it's
+// pushed as unread.
 function toMyBooksReadState(status: ReadingStatus | undefined): 0 | 1 | 2 {
   if (status === 'finished') return 2;
-  if (status === 'unread') return 0;
+  if (status === 'unread' || status === 'abandoned') return 0;
   return 1;
 }
 
@@ -28,6 +30,11 @@ function syncReadingStatusToMyBooks(book: Book, prevStatus: ReadingStatus | unde
   updateReadState(bookId, status).catch((error) => {
     console.log('[libraryStore] Failed to sync reading status to MyBooks:', error);
   });
+  if (book.readingStatus === 'abandoned') {
+    toggleWants(bookId, true).catch((error) => {
+      console.log('[libraryStore] Failed to sync wants status to MyBooks:', error);
+    });
+  }
 }
 
 interface LibraryState {
