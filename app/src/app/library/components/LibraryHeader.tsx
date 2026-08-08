@@ -42,7 +42,11 @@ import SettingsMenu from './SettingsMenu';
 import ImportMenu from './ImportMenu';
 import ViewMenu from './ViewMenu';
 import SearchCategoryMenu from './SearchCategoryMenu';
-import { SEARCH_CATEGORIES, SearchCategory } from '@/app/library/utils/libraryUtils';
+import {
+  SEARCH_CATEGORIES,
+  SearchCategory,
+  getBookshelfTitleKey,
+} from '@/app/library/utils/libraryUtils';
 
 interface LibraryHeaderProps {
   isSelectMode: boolean;
@@ -165,6 +169,13 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const currentCategoryLabel =
     SEARCH_CATEGORIES.find((cat) => cat.value === searchCategory)?.label ?? 'Current Bookshelf';
 
+  const currentBookshelfTitle = _(
+    getBookshelfTitleKey(
+      searchParams?.get('source') || 'local',
+      searchParams?.get('type') || 'all',
+    ),
+  );
+
   const handleCheckMyBooksConnectivity = async () => {
     const { online, needsLogin } = await checkMyBooksConnectivity();
     if (!online) {
@@ -256,6 +267,14 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
               </svg>
             )}
           </button>
+
+          {isMobile && !showMobileSearch && (
+            <span className='flex flex-1 items-center justify-center'>
+              <span className='bg-base-300/50 max-w-full truncate rounded-full px-3 py-1 text-sm font-medium'>
+                {currentBookshelfTitle}
+              </span>
+            </span>
+          )}
 
           {!isMobile && (
             <>
