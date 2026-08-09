@@ -469,6 +469,11 @@ jobs:
             *) echo "Unknown release os: $os"; exit 1 ;;
           esac
 
+          if [ ! -d "app/src-tauri/target" ]; then
+            echo "::warning::app/src-tauri/target not found — skipping asset rename (no bundle produced?)"
+            exit 0
+          fi
+
           find app/src-tauri/target -path "*/release/bundle/${bundle_dir}/*" -type f | while read -r f; do
             base=$(basename "$f")
             newname=${base/_${version}_/_${version}_${os}_}
