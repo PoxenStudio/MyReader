@@ -469,12 +469,17 @@ jobs:
             *) echo "Unknown release os: $os"; exit 1 ;;
           esac
 
-          if [ ! -d "app/src-tauri/target" ]; then
-            echo "::warning::app/src-tauri/target not found — skipping asset rename (no bundle produced?)"
+          # app/src-tauri is a member of the Cargo workspace rooted at the
+          # repo root (see ./Cargo.toml), so Cargo puts build output under
+          # the *workspace* root's `target/`, not `app/src-tauri/target` —
+          # every matrix leg confirmed this by hitting the "not found" guard
+          # below on the first run of this step.
+          if [ ! -d "target" ]; then
+            echo "::warning::target not found — skipping asset rename (no bundle produced?)"
             exit 0
           fi
 
-          find app/src-tauri/target -path "*/release/bundle/${bundle_dir}/*" -type f | while read -r f; do
+          find target -path "*/release/bundle/${bundle_dir}/*" -type f | while read -r f; do
             base=$(basename "$f")
             newname=${base/_${version}_/_${version}_${os}_}
             if [ "$base" = "$newname" ]; then
