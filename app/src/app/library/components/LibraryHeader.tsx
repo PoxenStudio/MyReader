@@ -20,7 +20,7 @@ import { useThemeStore } from '@/store/themeStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useLibraryStore } from '@/store/libraryStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { useMyBooksConnectionStatus } from '@/store/mybooksStatusStore';
+import { useMyBooksConnectionStatus, useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthUIStore } from '@/store/authUIStore';
 import {
@@ -31,6 +31,9 @@ import {
   type MyBooksUserInfo,
 } from '@/services/mybooksService';
 import { AccessCodeDialog } from '@/components/user/AccessCodeDialog';
+import { refreshTauriAccessCodeCookie } from '@/services/mybooks/accessCodeRefresh';
+import { hasTauriMyBooksCookieNamed } from '@/services/mybooks/tauriCookieStore';
+import { isTauriAppPlatform } from '@/services/environment';
 import { eventDispatcher } from '@/utils/event';
 import { useTrafficLight } from '@/hooks/useTrafficLight';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
@@ -106,31 +109,45 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const iconSize18 = useResponsiveSize(18);
   const { safeAreaInsets: insets } = useThemeStore();
 
-  const fetchUserInfo = useCallback(() => {
-    getUserInfo()
-      .then((info) => {
-        setUserInfo(info);
-        setIsAdmin(info?.is_admin ?? false);
-      })
-      .catch((error) => {
-        // The site requires an access code and the client's `invited` cookie
-        // is missing/expired — surface the same dialog LoginDialog shows so
-        // the user can re-enter it, instead of silently failing every
-        // MyBooks request.
-        if (error instanceof MyBooksApiError && error.err === 'not_invited') {
-          setShowAccessCodeDialog(true);
-        }
-      });
+  const fetchUserInfo = useCallback(async () => {
+    try {
+      const info = await getUserInfo();
+      setUserInfo(info);
+      setIsAdmin(info?.is_admin ?? false);
+      const sysInfo = useMyBooksStatusStore.getState().sysInfo;
+      if (
+        isTauriAppPlatform() &&
+        sysInfo?.invited_enabled &&
+        !hasTauriMyBooksCookieNamed('invited')
+      ) {
+        setShowAccessCodeDialog(true);
+      }
+    } catch (error) {
+      // The site requires an access code and the client's `invited` cookie
+      // is missing/expired — surface the same dialog LoginDialog shows so
+      // the user can re-enter it, instead of silently failing every
+      // MyBooks request.
+      if (error instanceof MyBooksApiError && error.err === 'not_invited') {
+        setShowAccessCodeDialog(true);
+      }
+    }
   }, [setIsAdmin]);
 
   useEffect(() => {
     if (status === 'logged_in') {
-      fetchUserInfo();
+      // Give a remembered access code a chance to silently refresh
+      // `mybooks_tauri_cookie` first, so the invited_enabled check above
+      // doesn't ask the user something we can already answer ourselves.
+      if (host) {
+        refreshTauriAccessCodeCookie(host).then(fetchUserInfo);
+      } else {
+        fetchUserInfo();
+      }
     } else {
       setUserInfo(null);
       setIsAdmin(false);
     }
-  }, [status, fetchUserInfo]);
+  }, [status, fetchUserInfo, host]);
 
   const avatarProxyUrl = userInfo?.avatar ? getMyBooksAvatarUrl(userInfo.avatar) : '';
 

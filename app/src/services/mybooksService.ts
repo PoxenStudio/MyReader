@@ -131,6 +131,10 @@ export interface MyBooksSysInfo {
   upgrable: string;
   defaultPageSize: number;
   aiEnabled: boolean;
+  // Whether the site has invite-code mode on. A successful /user/info doesn't
+  // mean the client's own explicit `mybooks_tauri_cookie` store actually has
+  // `invited` in it — see accessCodeRefresh.ts / LibraryHeader.tsx.
+  invited_enabled?: boolean;
   allow?: {
     register?: boolean;
     download?: boolean;

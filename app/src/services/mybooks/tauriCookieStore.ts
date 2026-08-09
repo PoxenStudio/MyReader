@@ -64,6 +64,18 @@ export function mergeTauriMyBooksCookie(cookie: string): void {
   setTauriMyBooksCookie(joined);
 }
 
+/**
+ * Whether `mybooks_tauri_cookie` already carries a cookie named `name` —
+ * used to tell "already verified this session" (a matching pair was merged
+ * in from AccessCodeDialog, LoginDialog, or the silent remembered-code
+ * refresh) apart from "genuinely missing", without needing a separate flag.
+ */
+export function hasTauriMyBooksCookieNamed(name: string): boolean {
+  const existing = getTauriMyBooksCookie();
+  if (!existing) return false;
+  return parseCookiePairs(existing).has(name);
+}
+
 type HeadersWithGetSetCookie = Headers & { getSetCookie?: () => string[] };
 
 /**

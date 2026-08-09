@@ -5,6 +5,7 @@ import {
   setTauriMyBooksCookie,
   clearTauriMyBooksCookie,
   mergeTauriMyBooksCookie,
+  hasTauriMyBooksCookieNamed,
 } from '@/services/mybooks/tauriCookieStore';
 
 describe('tauriCookieStore', () => {
@@ -73,5 +74,30 @@ describe('mergeTauriMyBooksCookie', () => {
     setTauriMyBooksCookie('invited=170000; user_id=abc123');
     mergeTauriMyBooksCookie('user_id=xyz789');
     expect(getTauriMyBooksCookie()).toBe('invited=170000; user_id=xyz789');
+  });
+});
+
+describe('hasTauriMyBooksCookieNamed', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('returns false when nothing is stored', () => {
+    expect(hasTauriMyBooksCookieNamed('invited')).toBe(false);
+  });
+
+  it('returns false when the named cookie is absent', () => {
+    setTauriMyBooksCookie('user_id=abc123');
+    expect(hasTauriMyBooksCookieNamed('invited')).toBe(false);
+  });
+
+  it('returns true when the named cookie is present', () => {
+    setTauriMyBooksCookie('user_id=abc123; invited=170000');
+    expect(hasTauriMyBooksCookieNamed('invited')).toBe(true);
+  });
+
+  it('does not match a name that is only a substring of another cookie name', () => {
+    setTauriMyBooksCookie('not_invited_marker=1');
+    expect(hasTauriMyBooksCookieNamed('invited')).toBe(false);
   });
 });
