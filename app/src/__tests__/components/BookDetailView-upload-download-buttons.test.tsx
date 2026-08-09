@@ -112,3 +112,20 @@ describe('BookDetailView Upload/Download button availability', () => {
     expect(container.querySelector('button[title="Download Book"]')).toBeNull();
   });
 });
+
+describe('BookDetailView rating display', () => {
+  it('shows a 10-star rating under the author for a MyBooks book with a rating', () => {
+    const { container } = render(
+      <BookDetailView book={makeBook({ rating: 6 })} metadata={null} fileSize={null} />,
+    );
+    expect(container.querySelectorAll('[data-star]')).toHaveLength(10);
+    expect(container.querySelectorAll('[data-star="filled"]')).toHaveLength(6);
+  });
+
+  it('hides the rating stars when the book has no rating', () => {
+    const { container } = render(
+      <BookDetailView book={makeBook()} metadata={null} fileSize={null} />,
+    );
+    expect(container.querySelectorAll('[data-star]')).toHaveLength(0);
+  });
+});

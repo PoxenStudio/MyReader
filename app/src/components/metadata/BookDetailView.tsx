@@ -25,6 +25,7 @@ import {
 } from '@/utils/book';
 import { saveSysSettings } from '@/helpers/settings';
 import BookCover from '@/components/BookCover';
+import StarRating from '@/components/StarRating';
 
 interface BookDetailViewProps {
   book: Book;
@@ -83,6 +84,9 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
             <p className='text-neutral-content line-clamp-1'>
               {formatAuthors(book.author, book.primaryLanguage) || _('Unknown')}
             </p>
+            {typeof book.rating === 'number' && book.rating > 0 && (
+              <StarRating rating={book.rating} className='mt-1 text-sm' />
+            )}
           </div>
           <div className='flex flex-nowrap items-center gap-3 sm:gap-x-4'>
             {onEdit && (

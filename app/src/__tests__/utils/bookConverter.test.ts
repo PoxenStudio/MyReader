@@ -122,6 +122,37 @@ describe('getPrimaryFormat priority via convertMyBooksToLocalBook', () => {
   });
 });
 
+describe('metadata and rating conversion via convertMyBooksToLocalBook', () => {
+  test('maps publisher, pubdate, comments and series into book.metadata', () => {
+    const cloudBook = createMyBooksBook({
+      publisher: '重庆出版社',
+      pubdate: '2024-01-01',
+      comments: '书籍内容简介',
+      series: '三体系列',
+      series_index: 1,
+      languages: ['zho'],
+    });
+    const book = convertMyBooksToLocalBook(cloudBook);
+    expect(book.metadata?.publisher).toBe('重庆出版社');
+    expect(book.metadata?.published).toBe('2024-01-01');
+    expect(book.metadata?.description).toBe('书籍内容简介');
+    expect(book.metadata?.series).toBe('三体系列');
+    expect(book.metadata?.seriesIndex).toBe(1);
+  });
+
+  test('maps rating from MyBooksBook', () => {
+    const cloudBook = createMyBooksBook({ rating: 8 });
+    const book = convertMyBooksToLocalBook(cloudBook);
+    expect(book.rating).toBe(8);
+  });
+
+  test('leaves rating undefined when MyBooksBook rating is 0', () => {
+    const cloudBook = createMyBooksBook({ rating: 0 });
+    const book = convertMyBooksToLocalBook(cloudBook);
+    expect(book.rating).toBeUndefined();
+  });
+});
+
 describe('getCloudBookId', () => {
   test('parses id from hash with format suffix', () => {
     expect(getCloudBookId('cloud-123-epub')).toBe(123);

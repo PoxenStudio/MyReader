@@ -4,8 +4,26 @@
  */
 
 import { Book, BookFormat, ReadingStatus } from '@/types/book';
+import type { BookMetadata } from '@/libs/document';
 import type { MyBooksBook } from '@/services/mybooksService';
 import { isTauriAppPlatform } from '@/services/environment';
+
+/**
+ * 将 MyBooksBook 上的出版社/出版日期/丛书/简介等字段转换为本地 BookMetadata，
+ * 使云端书籍在下载前也能在书籍详情中正确显示这些信息。
+ */
+function buildMetadataFromCloudBook(cloudBook: MyBooksBook): BookMetadata {
+  return {
+    title: cloudBook.title,
+    author: cloudBook.author,
+    language: cloudBook.languages?.length ? cloudBook.languages : '',
+    publisher: cloudBook.publisher || undefined,
+    published: cloudBook.pubdate || undefined,
+    description: cloudBook.comments || undefined,
+    series: cloudBook.series || undefined,
+    seriesIndex: cloudBook.series_index || undefined,
+  };
+}
 
 /**
  * 构建封面图片的代理路径
@@ -148,6 +166,10 @@ export function convertMyBooksToLocalBook(cloudBook: MyBooksBook): Book {
     author: cloudBook.author,
     tags: cloudBook.tags || [],
     coverImageUrl,
+    // 出版社/出版日期/丛书/简介，供未下载的云端书籍在详情页正确展示
+    metadata: buildMetadataFromCloudBook(cloudBook),
+    // MyBooks 评分（0-10），0 表示未评分
+    rating: cloudBook.rating || undefined,
     // 使用当前时间作为创建和更新时间
     createdAt: now,
     updatedAt: now,
