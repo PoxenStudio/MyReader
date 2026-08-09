@@ -54,7 +54,7 @@
   "tag": "科幻 / 长篇",
   "tags": ["科幻", "长篇"],
   "publisher": "重庆出版社",
-  "comments": "暂无简介",
+  "comments": "书籍内容简介",
   "series": "三体系列",
   "series_index": 1,
   "languages": ["zho"],
