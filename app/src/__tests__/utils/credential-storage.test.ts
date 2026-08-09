@@ -5,6 +5,10 @@ import {
   setStoredMyBooksPassword,
   getStoredMyBooksPassword,
   MYBOOKS_PASSWORD_KEY,
+  setStoredMyBooksAccessCode,
+  getStoredMyBooksAccessCode,
+  clearStoredMyBooksAccessCode,
+  MYBOOKS_ACCESS_CODE_KEY,
 } from '@/utils/credentialStorage';
 
 describe('encodeCredential / decodeCredential', () => {
@@ -39,5 +43,27 @@ describe('setStoredMyBooksPassword / getStoredMyBooksPassword', () => {
 
   test('returns null when nothing is stored', () => {
     expect(getStoredMyBooksPassword()).toBeNull();
+  });
+});
+
+describe('setStoredMyBooksAccessCode / getStoredMyBooksAccessCode / clearStoredMyBooksAccessCode', () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  test('stores the access code obfuscated, not in plaintext', () => {
+    setStoredMyBooksAccessCode('invite-123');
+    expect(localStorage.getItem(MYBOOKS_ACCESS_CODE_KEY)).not.toBe('invite-123');
+    expect(getStoredMyBooksAccessCode()).toBe('invite-123');
+  });
+
+  test('returns null when nothing is stored', () => {
+    expect(getStoredMyBooksAccessCode()).toBeNull();
+  });
+
+  test('clears the stored access code', () => {
+    setStoredMyBooksAccessCode('invite-123');
+    clearStoredMyBooksAccessCode();
+    expect(getStoredMyBooksAccessCode()).toBeNull();
   });
 });

@@ -56,3 +56,22 @@ export const getSessionMyBooksPassword = (): string | null => {
   if (!encoded) return null;
   return decodeCredential(encoded);
 };
+
+export const MYBOOKS_ACCESS_CODE_KEY = 'mybooks_access_code';
+
+/** Persist the MyBooks access (invite) code in obfuscated form. */
+export const setStoredMyBooksAccessCode = (accessCode: string): void => {
+  localStorage.setItem(MYBOOKS_ACCESS_CODE_KEY, encodeCredential(accessCode));
+};
+
+/** Read back the remembered MyBooks access code, or `null` if absent/unreadable. */
+export const getStoredMyBooksAccessCode = (): string | null => {
+  const encoded = localStorage.getItem(MYBOOKS_ACCESS_CODE_KEY);
+  if (!encoded) return null;
+  return decodeCredential(encoded);
+};
+
+/** Forget the remembered MyBooks access code. */
+export const clearStoredMyBooksAccessCode = (): void => {
+  localStorage.removeItem(MYBOOKS_ACCESS_CODE_KEY);
+};

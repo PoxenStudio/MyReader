@@ -121,3 +121,9 @@ export function clearNasCookies(host: string): void {
   delete records[normalizeHostKey(host)];
   writeAll(records);
 }
+
+/** Wipes every stored NAS cookie record, across all captured hosts. Used on logout. */
+export function clearAllNasCookies(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(STORAGE_KEY);
+}

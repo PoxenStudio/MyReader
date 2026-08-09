@@ -28,6 +28,42 @@ export function clearTauriMyBooksCookie(): void {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+const parseCookiePairs = (header: string): Map<string, string> => {
+  const pairs = new Map<string, string>();
+  for (const part of header.split(';')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    pairs.set(trimmed.slice(0, eq), trimmed.slice(eq + 1));
+  }
+  return pairs;
+};
+
+/**
+ * Adds `cookie`'s name=value pairs to whatever is already stored, instead of
+ * replacing it outright — a same-named pair in `cookie` wins. Unlike a plain
+ * `setTauriMyBooksCookie`, this doesn't erase a cookie captured by an earlier
+ * response (e.g. the `invited` cookie from `/api/access`) when a later
+ * response (e.g. sign-in, which doesn't resend it) is captured afterward.
+ */
+export function mergeTauriMyBooksCookie(cookie: string): void {
+  if (typeof window === 'undefined') return;
+  const existing = getTauriMyBooksCookie();
+  if (!existing) {
+    setTauriMyBooksCookie(cookie);
+    return;
+  }
+  const merged = parseCookiePairs(existing);
+  for (const [name, value] of parseCookiePairs(cookie)) {
+    merged.set(name, value);
+  }
+  const joined = Array.from(merged.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+  setTauriMyBooksCookie(joined);
+}
+
 type HeadersWithGetSetCookie = Headers & { getSetCookie?: () => string[] };
 
 /**

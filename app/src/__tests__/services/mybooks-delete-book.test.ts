@@ -38,4 +38,18 @@ describe('deleteBookFromMyBooks', () => {
     await expect(deleteBookFromMyBooks(42)).rejects.toThrow(MyBooksApiError);
     await expect(deleteBookFromMyBooks(42)).rejects.toThrow('需要管理员权限');
   });
+
+  it('carries the server error code on the thrown MyBooksApiError', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      json: async () => ({ err: 'not_invited', msg: '需要访问码' }),
+    } as Response);
+
+    try {
+      await deleteBookFromMyBooks(42);
+      expect.unreachable('expected deleteBookFromMyBooks to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(MyBooksApiError);
+      expect((error as MyBooksApiError).err).toBe('not_invited');
+    }
+  });
 });

@@ -29,7 +29,19 @@
       "Bash(node -e ' *)",
       "Bash(ruby -ryaml -e ' *)",
       "Bash(grep -n \"MyReader_\\\\${version}\" .github/workflows/release.yml)",
-      "Bash(grep -n 'MyReader_\\\\$' .github/workflows/release.yml)"
+      "Bash(grep -n 'MyReader_\\\\$' .github/workflows/release.yml)",
+      "Bash(curl -s -D - -o /tmp/rsc-body.txt \"http://localhost:3000/library?source=cloud&type=wants\" -H \"RSC: 1\" -H \"Next-Router-State-Tree: %5B%22%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2C%22%2Flibrary%3Fsource%3Dcloud%26type%3Dwants%22%2C%22refresh%22%5D%7D%5D\")",
+      "Bash(curl -s -o /dev/null -w \"plain GET: %{http_code}\\\\n\" \"http://localhost:3000/library?source=cloud&type=wants\")",
+      "Bash(curl -s -D - -o /tmp/rsc-body2.txt \"http://localhost:3000/library?source=cloud&type=wants\" -H \"RSC: 1\")",
+      "Bash(pkill -f \"dotenv -e .env.web -- next dev\")",
+      "Bash(jobs -l)",
+      "Bash(curl -s -o /dev/null -w \"library page: %{http_code}\\\\n\" \"http://localhost:3000/library?source=cloud&type=wants\")",
+      "Bash(curl -s -D - -o /dev/null \"http://localhost:3000/library?source=cloud&type=wants\" -H \"RSC: 1\")",
+      "Bash(curl -s -o /dev/null -w \"mybooks root: %{http_code}\\\\n\" http://localhost:8082/ --max-time 3)",
+      "Bash(curl -s -o /dev/null -w \"mybooks /api/access GET: %{http_code}\\\\n\" http://localhost:8082/api/access --max-time 3)",
+      "Bash(curl -s -D - -o /dev/null \"http://localhost:8082/get/cover/8389.jpg?t=1784702022\" --max-time 5)",
+      "Bash(curl -s -D - -o /dev/null \"http://localhost:8082/api/book/8540.EPUB\" --max-time 5)",
+      "Bash(grep '\" \"-\"$' /Volumes/data/workspace/mybooks/data/log/nginx/mybooks-access.log)"
     ]
   }
 }

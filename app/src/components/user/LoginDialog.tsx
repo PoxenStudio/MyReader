@@ -35,7 +35,7 @@ import { AccessCodeDialog } from '@/components/user/AccessCodeDialog';
 import Dialog from '@/components/Dialog';
 import { useAuthUIStore } from '@/store/authUIStore';
 import {
-  setTauriMyBooksCookie,
+  mergeTauriMyBooksCookie,
   extractCookieHeaderFromResponse,
 } from '@/services/mybooks/tauriCookieStore';
 
@@ -304,7 +304,10 @@ const LoginDialog: React.FC = () => {
         const sessionToken = btoa(`mybooks:${userId}:${Date.now()}`);
         if (isTauri) {
           const cookie = extractCookieHeaderFromResponse(response);
-          if (cookie) setTauriMyBooksCookie(cookie);
+          // Merge rather than overwrite — sign-in doesn't resend the
+          // `invited` cookie captured moments earlier by AccessCodeDialog,
+          // and a plain overwrite here would erase it.
+          if (cookie) mergeTauriMyBooksCookie(cookie);
         }
         localStorage.setItem(MYBOOKS_USERNAME_KEY, username);
         addMyBooksHostToHistory(host);

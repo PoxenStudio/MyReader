@@ -18,6 +18,8 @@ vi.mock('posthog-js', () => ({
 }));
 
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { setNasCookies, getNasCookies } from '@/services/mybooks/nasCookieStore';
+import { setTauriMyBooksCookie, getTauriMyBooksCookie } from '@/services/mybooks/tauriCookieStore';
 
 describe('AuthContext memoization', () => {
   beforeEach(() => {
@@ -159,6 +161,25 @@ describe('AuthContext guest login', () => {
     expect(current!.status).toBe('logged_out');
     expect(current!.user).toBeNull();
     expect(localStorage.getItem('mybooks_is_guest')).toBeNull();
+  });
+
+  test('logout clears the Tauri session/invited cookie store and every NAS cookie record', async () => {
+    setTauriMyBooksCookie('user_id=abc; invited=170000');
+    setNasCookies('nas.example.com', [{ name: 'token', value: 'xyz', domain: null }]);
+
+    let current: ReturnType<typeof useAuth> | null = null;
+    render(
+      <AuthProvider>
+        <Probe onValue={(v) => (current = v)} />
+      </AuthProvider>,
+    );
+
+    await act(async () => {
+      await current!.logout();
+    });
+
+    expect(getTauriMyBooksCookie()).toBeNull();
+    expect(getNasCookies('nas.example.com')).toBeNull();
   });
 
   test('status is logged_out with no token/user/guest flag', () => {

@@ -13,6 +13,7 @@ import { User } from '@supabase/supabase-js';
 import { supabase } from '@/utils/supabase';
 import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { clearTauriMyBooksCookie } from '@/services/mybooks/tauriCookieStore';
+import { clearAllNasCookies } from '@/services/mybooks/nasCookieStore';
 import posthog from 'posthog-js';
 
 export type LoginStatus = 'logged_out' | 'guest' | 'logged_in';
@@ -182,7 +183,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       localStorage.removeItem('user');
       localStorage.removeItem('mybooks_user_info');
       localStorage.removeItem('mybooks_is_guest');
+      // Combined session + `invited` cookie (Tauri custom store — see
+      // tauriCookieStore.ts) and the NAS relay cookie jar (per-host store —
+      // see nasCookieStore.ts) both need clearing; neither is reachable by
+      // the server's own sign-out Set-Cookie (which only expires user_id/
+      // admin_id), and plugin-http's own internal jar isn't exposed to JS to
+      // clear at all.
       clearTauriMyBooksCookie();
+      clearAllNasCookies();
       setToken(null);
       setUser(null);
       setIsGuest(false);

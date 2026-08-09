@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { getNasCookies, setNasCookies } from '@/services/mybooks/nasCookieStore';
+import {
+  clearAllNasCookies,
+  getNasCookies,
+  setNasCookies,
+} from '@/services/mybooks/nasCookieStore';
 
 describe('nasCookieStore', () => {
   beforeEach(() => {
@@ -60,5 +64,21 @@ describe('nasCookieStore', () => {
 
     expect(() => getNasCookies('legacy.example.com')).not.toThrow();
     expect(getNasCookies('legacy.example.com')).toBeNull();
+  });
+});
+
+describe('clearAllNasCookies', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('wipes every stored record, not just one host', () => {
+    setNasCookies('a.example.com', [{ name: 'x', value: '1', domain: null }]);
+    setNasCookies('b.example.com', [{ name: 'y', value: '2', domain: null }]);
+
+    clearAllNasCookies();
+
+    expect(getNasCookies('a.example.com')).toBeNull();
+    expect(getNasCookies('b.example.com')).toBeNull();
   });
 });

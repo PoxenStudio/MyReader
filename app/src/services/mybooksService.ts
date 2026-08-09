@@ -9,7 +9,11 @@ import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useNasDeviceStore } from '@/store/nasDeviceStore';
 import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
-import { getTauriMyBooksCookie } from '@/services/mybooks/tauriCookieStore';
+import {
+  getTauriMyBooksCookie,
+  mergeTauriMyBooksCookie,
+  extractCookieHeaderFromResponse,
+} from '@/services/mybooks/tauriCookieStore';
 import { shouldAutoPromptNasLogin } from '@/services/mybooks/nasSession';
 
 export interface MyBooksBook {
@@ -183,7 +187,15 @@ export interface MyBooksResponse<T = unknown> {
 // Thrown when MyReader responded but reported a logical error (e.g. not logged
 // in). Distinguishes this from network failures so callers can tell "the
 // server told us the real current state" apart from "we couldn't reach it".
-export class MyBooksApiError extends Error {}
+// `err` carries the server's machine-readable error code (e.g. 'not_invited')
+// so callers can react to specific cases instead of only the human message.
+export class MyBooksApiError extends Error {
+  err: string;
+  constructor(err: string, message?: string) {
+    super(message || err);
+    this.err = err;
+  }
+}
 
 /**
  * 通用请求方法
@@ -290,6 +302,24 @@ export async function fetchMyBooks<T>(
   let result: MyBooksResponse<T>;
   try {
     const response = await fetchFn(url.toString(), fetchOptions);
+    // Opportunistically keep `mybooks_tauri_cookie` (the store the native
+    // downloader and WS sync channel read explicitly — see
+    // tauriCookieStore.ts) in sync with whatever session is actually live,
+    // not just at login/access-code time. Without this, a `mybooks_tauri_cookie`
+    // that was wiped independently of the real session (e.g. app data
+    // cleared — that clears localStorage but not plugin-http's own cookie
+    // jar or the server-side session) stays empty forever: every *other*
+    // Tauri call keeps working fine via plugin-http's automatic jar, so
+    // nothing ever prompts a fresh login to repopulate it, and the native
+    // downloader silently sends no cookie at all until it does.
+    if (host && isTauriAppPlatform()) {
+      try {
+        const cookie = extractCookieHeaderFromResponse(response as unknown as Response);
+        if (cookie) mergeTauriMyBooksCookie(cookie);
+      } catch (e) {
+        console.error('[fetchMyBooks] Failed to refresh the Tauri cookie store:', e);
+      }
+    }
     result = await response.json();
   } catch (error) {
     // Couldn't reach the configured MyBooks host at all (network down, server
@@ -311,7 +341,7 @@ export async function fetchMyBooks<T>(
   if (host) useMyBooksStatusStore.getState().setOffline(false);
 
   if (result.err !== 'ok') {
-    throw new MyBooksApiError(result.msg || 'Failed to fetch from MyReader');
+    throw new MyBooksApiError(result.err, result.msg || 'Failed to fetch from MyReader');
   }
 
   return result;

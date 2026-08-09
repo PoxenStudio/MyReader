@@ -27,8 +27,10 @@ import {
   checkMyBooksConnectivity,
   getUserInfo,
   getMyBooksAvatarUrl,
+  MyBooksApiError,
   type MyBooksUserInfo,
 } from '@/services/mybooksService';
+import { AccessCodeDialog } from '@/components/user/AccessCodeDialog';
 import { eventDispatcher } from '@/utils/event';
 import { useTrafficLight } from '@/hooks/useTrafficLight';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
@@ -86,7 +88,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const { systemUIVisible, statusBarHeight } = useThemeStore();
   const { currentBookshelf } = useLibraryStore();
   const connectionStatus = useMyBooksConnectionStatus();
-  const { status, isGuest, setIsAdmin } = useAuth();
+  const { status, isGuest, setIsAdmin, host } = useAuth();
   const openLoginDialog = useAuthUIStore((state) => state.openLoginDialog);
   const { setSettingsDialogOpen, setRequestedPanel } = useSettingsStore();
   const [searchQuery, setSearchQuery] = useState(searchParams?.get('q') ?? '');
@@ -96,6 +98,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const [userInfo, setUserInfo] = useState<MyBooksUserInfo | null>(null);
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
+  const [showAccessCodeDialog, setShowAccessCodeDialog] = useState(false);
 
   const headerRef = useRef<HTMLDivElement>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
@@ -103,19 +106,31 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const iconSize18 = useResponsiveSize(18);
   const { safeAreaInsets: insets } = useThemeStore();
 
+  const fetchUserInfo = useCallback(() => {
+    getUserInfo()
+      .then((info) => {
+        setUserInfo(info);
+        setIsAdmin(info?.is_admin ?? false);
+      })
+      .catch((error) => {
+        // The site requires an access code and the client's `invited` cookie
+        // is missing/expired — surface the same dialog LoginDialog shows so
+        // the user can re-enter it, instead of silently failing every
+        // MyBooks request.
+        if (error instanceof MyBooksApiError && error.err === 'not_invited') {
+          setShowAccessCodeDialog(true);
+        }
+      });
+  }, [setIsAdmin]);
+
   useEffect(() => {
     if (status === 'logged_in') {
-      getUserInfo()
-        .then((info) => {
-          setUserInfo(info);
-          setIsAdmin(info?.is_admin ?? false);
-        })
-        .catch(() => {});
+      fetchUserInfo();
     } else {
       setUserInfo(null);
       setIsAdmin(false);
     }
-  }, [status]);
+  }, [status, fetchUserInfo]);
 
   const avatarProxyUrl = userInfo?.avatar ? getMyBooksAvatarUrl(userInfo.avatar) : '';
 
@@ -576,6 +591,16 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
         </div>
       )}
       <UserSettingsDialog isOpen={showUserSettings} onClose={() => setShowUserSettings(false)} />
+      {showAccessCodeDialog && host && (
+        <AccessCodeDialog
+          host={host}
+          onClose={() => setShowAccessCodeDialog(false)}
+          onSuccess={() => {
+            setShowAccessCodeDialog(false);
+            fetchUserInfo();
+          }}
+        />
+      )}
     </div>
   );
 };
