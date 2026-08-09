@@ -221,6 +221,12 @@ export async function downloadMyBooksBook(
     const ext = EXTS[book.format] || book.format.toLowerCase();
     downloadUrl = `${normalizedHost}/api/book/${bookId}.${ext}`;
   }
+  console.log(
+    '[downloadMyBooksBook] matchedFile:',
+    matchedFile,
+    'resolved downloadUrl:',
+    downloadUrl,
+  );
 
   // Web 平台下使用本地代理解决 CORS 跨域问题
   if (!isTauriAppPlatform()) {

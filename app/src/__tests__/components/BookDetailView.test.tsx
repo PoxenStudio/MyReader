@@ -122,19 +122,19 @@ describe('BookDetailView delete dropdown layout', () => {
   });
 });
 
-describe('BookDetailView More menu (Goodreads + Export)', () => {
+describe('BookDetailView More menu (Douban + Export)', () => {
   const openMore = (container: HTMLElement) => {
     const toggle = container.querySelector('button[aria-label="More Actions"]');
     expect(toggle).toBeTruthy();
     fireEvent.click(toggle!);
   };
 
-  it('folds Goodreads into the hamburger menu', () => {
+  it('folds Douban into the hamburger menu', () => {
     // Goodreads is no longer a standalone icon button outside the menu.
     const { container, getByText } = renderView();
     expect(container.querySelector('button[aria-label="More Actions"]')).toBeTruthy();
     openMore(container);
-    expect(getByText('Search on Goodreads')).toBeTruthy();
+    expect(getByText('Search on Douban')).toBeTruthy();
   });
 
   it('keeps Export in the More menu and calls onExport when the file exists', () => {

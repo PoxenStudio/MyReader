@@ -635,10 +635,16 @@ export async function toggleFavorite(id: number, action: 'add' | 'remove'): Prom
 /**
  * 添加/取消待读
  * @param id - 图书ID
- * @param action - add 或 remove
+ * @param wants - true 为标记待读，false 为取消待读
  */
-export async function toggleWants(id: number, action: 'add' | 'remove'): Promise<void> {
-  await fetchMyBooks(`/book/${id}/wants`, { action }, 'POST');
+export async function toggleWants(id: number, wants: boolean): Promise<void> {
+  await fetchMyBooks(
+    `/book/${id}/wants`,
+    undefined,
+    'POST',
+    JSON.stringify({ wants }),
+    'application/json',
+  );
 }
 
 /**

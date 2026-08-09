@@ -36,6 +36,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useLibraryStore } from '@/store/libraryStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
+import { useMediaQuery } from 'react-responsive';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useTheme } from '@/hooks/useTheme';
 import { useUICSS } from '@/hooks/useUICSS';
@@ -213,6 +214,11 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   const [showDetailsBook, setShowDetailsBook] = useState<Book | null>(null);
   const [failedImportsModal, setFailedImportsModal] = useState<FailedImport[] | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const isDesktop = useMediaQuery({ minWidth: 1024 });
+
+  useEffect(() => {
+    setIsDrawerOpen(isDesktop);
+  }, [isDesktop]);
   // "Import from folder" dialog state. Held as a small object rather
   // than a boolean because we need a default starting directory to seed
   // the path field, and we want the dialog to remain mounted long
@@ -1127,8 +1133,19 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         }
       }
 
-      // Use transfer queue for normal downloads - priority 1 for manual downloads
+      // Use transfer queue for normal downloads - priority 1 for manual downloads.
+      // The queue only stores the book's hash and looks the full Book object
+      // back up in the library store when it actually runs the transfer, so a
+      // book browsed straight from the MyBooks cloud catalog (not yet part of
+      // the local library) has to be added here first or the deferred lookup
+      // fails with "Book not found in library".
+      if (!useLibraryStore.getState().getBookByHash(book.hash)) {
+        console.log('[handleBookDownload] adding cloud-browsed book to library before queuing');
+        await updateBook(envConfig, book);
+      }
+      console.log('[handleBookDownload] queuing download for:', book.title, 'hash:', book.hash);
       const transferId = transferManager.queueDownload(book, 1);
+      console.log('[handleBookDownload] queueDownload returned transferId:', transferId);
       if (transferId) {
         eventDispatcher.dispatch('toast', {
           type: 'info',
@@ -1704,341 +1721,344 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       ref={pageRef}
       aria-label={_('Your Library')}
       className={clsx(
-        'library-page text-base-content full-height flex select-none flex-row overflow-hidden w-full',
+        'library-page text-base-content full-height flex select-none flex-col overflow-hidden w-full',
         viewSettings?.isEink ? 'bg-base-100' : 'bg-base-200',
         appService?.hasRoundedWindow && isRoundedWindow && 'window-border rounded-window',
       )}
     >
-      <LibraryDrawer
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        onNavigate={() => setCloudBooksLoading(true)}
-      />
+      <div
+        className='relative top-0 z-40 w-full shrink-0'
+        role='banner'
+        tabIndex={-1}
+        aria-label={_('Library Header')}
+      >
+        <LibraryHeader
+          isSelectMode={isSelectMode}
+          isSelectAll={isSelectAll}
+          isCloudLibrary={source === 'cloud'}
+          isDrawerOpen={isDrawerOpen}
+          onToggleDrawer={() => setIsDrawerOpen((prev) => !prev)}
+          onImportBooksFromFiles={handleImportBooksFromFiles}
+          onImportBooksFromDirectory={
+            appService?.canReadExternalDir ? handleImportBooksFromDirectory : undefined
+          }
+          onImportBookFromUrl={isTauriAppPlatform() ? () => setShowImportFromUrl(true) : undefined}
+          onOpenCatalogManager={handleShowOPDSDialog}
+          onOpenFeeds={handleShowFeeds}
+          onToggleSelectMode={() => handleSetSelectMode(!isSelectMode)}
+          onSelectAll={handleSelectAll}
+          onDeselectAll={handleDeselectAll}
+        />
+        <progress
+          aria-label={_('Library Sync Progress')}
+          aria-hidden={isSyncing ? 'false' : 'true'}
+          className={clsx(
+            'progress progress-success absolute bottom-0 left-0 right-0 h-1 translate-y-[2px] transition-opacity duration-200 sm:translate-y-[4px]',
+            isSyncing ? 'opacity-100' : 'opacity-0',
+          )}
+          value={syncProgress * 100}
+          max='100'
+        />
+      </div>
 
-      <div className='flex flex-col flex-1 min-w-0 h-full relative'>
-        <div
-          className='relative top-0 z-40 w-full'
-          role='banner'
-          tabIndex={-1}
-          aria-label={_('Library Header')}
-        >
-          <LibraryHeader
-            isSelectMode={isSelectMode}
-            isSelectAll={isSelectAll}
-            isCloudLibrary={source === 'cloud'}
-            onToggleDrawer={() => setIsDrawerOpen((prev) => !prev)}
-            onImportBooksFromFiles={handleImportBooksFromFiles}
-            onImportBooksFromDirectory={
-              appService?.canReadExternalDir ? handleImportBooksFromDirectory : undefined
-            }
-            onImportBookFromUrl={
-              isTauriAppPlatform() ? () => setShowImportFromUrl(true) : undefined
-            }
-            onOpenCatalogManager={handleShowOPDSDialog}
-            onOpenFeeds={handleShowFeeds}
-            onToggleSelectMode={() => handleSetSelectMode(!isSelectMode)}
-            onSelectAll={handleSelectAll}
-            onDeselectAll={handleDeselectAll}
-          />
-          <progress
-            aria-label={_('Library Sync Progress')}
-            aria-hidden={isSyncing ? 'false' : 'true'}
-            className={clsx(
-              'progress progress-success absolute bottom-0 left-0 right-0 h-1 translate-y-[2px] transition-opacity duration-200 sm:translate-y-[4px]',
-              isSyncing ? 'opacity-100' : 'opacity-0',
-            )}
-            value={syncProgress * 100}
-            max='100'
-          />
-        </div>
-        {(loading || isSyncing) && (
-          <div className='fixed inset-0 z-50 flex items-center justify-center'>
-            <Spinner loading />
-          </div>
-        )}
-        {currentGroupPath && (
-          <div
-            className={`transition-all duration-300 ease-in-out ${
-              currentGroupPath ? 'opacity-100' : 'max-h-0 opacity-0'
-            }`}
-          >
-            <div className='flex flex-wrap items-center gap-y-1 px-4 text-base'>
-              <button
-                onClick={() => handleNavigateToPath(undefined)}
-                className='hover:bg-base-300 text-base-content/85 rounded px-2 py-1'
-              >
-                {_('All')}
-              </button>
-              {getBreadcrumbs(currentGroupPath).map((crumb, index, array) => {
-                const isLast = index === array.length - 1;
-                return (
-                  <React.Fragment key={index}>
-                    <MdChevronRight size={iconSize} className='text-neutral-content' />
-                    {isLast ? (
-                      <span className='truncate rounded px-2 py-1'>{crumb.name}</span>
-                    ) : (
-                      <button
-                        onClick={() => handleNavigateToPath(crumb.path)}
-                        className='hover:bg-base-300 text-base-content/85 truncate rounded px-2 py-1'
-                      >
-                        {crumb.name}
-                      </button>
-                    )}
-                  </React.Fragment>
-                );
-              })}
+      <div className='flex flex-row flex-1 min-h-0 w-full relative'>
+        <LibraryDrawer
+          isOpen={isDrawerOpen}
+          onClose={() => setIsDrawerOpen(false)}
+          onOpen={() => setIsDrawerOpen(true)}
+          onNavigate={() => setCloudBooksLoading(true)}
+        />
+
+        <div className='flex flex-col flex-1 min-w-0 h-full relative'>
+          {(loading || isSyncing) && (
+            <div className='fixed inset-0 z-50 flex items-center justify-center'>
+              <Spinner loading />
             </div>
-          </div>
-        )}
-        {currentSeriesAuthorGroup && (
-          <GroupHeader
-            groupBy={currentSeriesAuthorGroup.groupBy}
-            groupName={currentSeriesAuthorGroup.groupName}
-          />
-        )}
-        {showBookshelf && (
-          <div aria-label={_('Your Bookshelf')} className='flex min-h-0 flex-grow flex-col'>
+          )}
+          {currentGroupPath && (
             <div
-              ref={containerRef}
-              className={clsx(
-                'scroll-container drop-zone flex min-h-0 flex-grow flex-col',
-                isDragging && 'drag-over',
-              )}
-              style={{
-                paddingRight: `${insets.right}px`,
-                paddingLeft: `${insets.left}px`,
-              }}
+              className={`transition-all duration-300 ease-in-out ${
+                currentGroupPath ? 'opacity-100' : 'max-h-0 opacity-0'
+              }`}
             >
-              <DropIndicator />
-              {cloudBooksLoading && (
-                <div className='flex-1 flex items-center justify-center'>
-                  <Spinner loading />
-                </div>
-              )}
-              {!cloudBooksLoading &&
-                (() => {
-                  const source = searchParams?.get('source') || 'local';
-                  const type = searchParams?.get('type') || 'all';
-                  const itemName = searchParams?.get('item');
-                  const displayBooks = source === 'cloud' ? cloudBooks : libraryBooks;
-                  const hasBooks =
-                    source === 'cloud'
-                      ? cloudBooks.length > 0
-                      : libraryBooks.some((book) => !book.deletedAt);
+              <div className='flex flex-wrap items-center gap-y-1 px-4 text-base'>
+                <button
+                  onClick={() => handleNavigateToPath(undefined)}
+                  className='hover:bg-base-300 text-base-content/85 rounded px-2 py-1'
+                >
+                  {_('All')}
+                </button>
+                {getBreadcrumbs(currentGroupPath).map((crumb, index, array) => {
+                  const isLast = index === array.length - 1;
+                  return (
+                    <React.Fragment key={index}>
+                      <MdChevronRight size={iconSize} className='text-neutral-content' />
+                      {isLast ? (
+                        <span className='truncate rounded px-2 py-1'>{crumb.name}</span>
+                      ) : (
+                        <button
+                          onClick={() => handleNavigateToPath(crumb.path)}
+                          className='hover:bg-base-300 text-base-content/85 truncate rounded px-2 py-1'
+                        >
+                          {crumb.name}
+                        </button>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {currentSeriesAuthorGroup && (
+            <GroupHeader
+              groupBy={currentSeriesAuthorGroup.groupBy}
+              groupName={currentSeriesAuthorGroup.groupName}
+            />
+          )}
+          {showBookshelf && (
+            <div aria-label={_('Your Bookshelf')} className='flex min-h-0 flex-grow flex-col'>
+              <div
+                ref={containerRef}
+                className={clsx(
+                  'scroll-container drop-zone flex min-h-0 flex-grow flex-col',
+                  isDragging && 'drag-over',
+                )}
+                style={{
+                  paddingRight: `${insets.right}px`,
+                  paddingLeft: `${insets.left}px`,
+                }}
+              >
+                <DropIndicator />
+                {cloudBooksLoading && (
+                  <div className='flex-1 flex items-center justify-center'>
+                    <Spinner loading />
+                  </div>
+                )}
+                {!cloudBooksLoading &&
+                  (() => {
+                    const source = searchParams?.get('source') || 'local';
+                    const type = searchParams?.get('type') || 'all';
+                    const itemName = searchParams?.get('item');
+                    const displayBooks = source === 'cloud' ? cloudBooks : libraryBooks;
+                    const hasBooks =
+                      source === 'cloud'
+                        ? cloudBooks.length > 0
+                        : libraryBooks.some((book) => !book.deletedAt);
 
-                  // Determine if we need to show meta list
-                  const showMetaList =
-                    source === 'cloud' &&
-                    [
-                      'categories',
-                      'author',
-                      'tag',
-                      'publisher',
-                      'series',
-                      'language',
-                      'rating',
-                    ].includes(type) &&
-                    !itemName;
+                    // Determine if we need to show meta list
+                    const showMetaList =
+                      source === 'cloud' &&
+                      [
+                        'categories',
+                        'author',
+                        'tag',
+                        'publisher',
+                        'series',
+                        'language',
+                        'rating',
+                      ].includes(type) &&
+                      !itemName;
 
-                  // Get meta list data based on type
-                  const metaListConfig: Record<
-                    string,
-                    {
-                      type:
-                        | 'author'
-                        | 'tag'
-                        | 'publisher'
-                        | 'series'
-                        | 'language'
-                        | 'rating'
-                        | 'categories';
-                      title: string;
+                    // Get meta list data based on type
+                    const metaListConfig: Record<
+                      string,
+                      {
+                        type:
+                          | 'author'
+                          | 'tag'
+                          | 'publisher'
+                          | 'series'
+                          | 'language'
+                          | 'rating'
+                          | 'categories';
+                        title: string;
+                      }
+                    > = {
+                      categories: { type: 'categories', title: _('Categories') },
+                      author: { type: 'author', title: _('Authors') },
+                      tag: { type: 'tag', title: _('Tags') },
+                      publisher: { type: 'publisher', title: _('Publishers') },
+                      series: { type: 'series', title: _('Series') },
+                      language: { type: 'language', title: _('Languages') },
+                      rating: { type: 'rating', title: _('Ratings') },
+                    };
+
+                    const config = metaListConfig[type];
+
+                    const handleMetaItemSelect = (name: string) => {
+                      const params = new URLSearchParams(searchParams?.toString());
+                      params.set('item', name);
+                      navigateToLibrary(router, `${params.toString()}`);
+                    };
+
+                    if (!hasBooks && !showMetaList) {
+                      return (
+                        <div className='flex-1 flex items-center justify-center'>
+                          <LibraryEmptyState
+                            onImport={handleImportBooksFromFiles}
+                            onImportBooksFromDirectory={
+                              appService?.canReadExternalDir
+                                ? handleImportBooksFromDirectory
+                                : undefined
+                            }
+                            onSyncReadingBooks={() => syncReadingBooks(true)}
+                            source={source as 'local' | 'cloud'}
+                          />
+                        </div>
+                      );
                     }
-                  > = {
-                    categories: { type: 'categories', title: _('Categories') },
-                    author: { type: 'author', title: _('Authors') },
-                    tag: { type: 'tag', title: _('Tags') },
-                    publisher: { type: 'publisher', title: _('Publishers') },
-                    series: { type: 'series', title: _('Series') },
-                    language: { type: 'language', title: _('Languages') },
-                    rating: { type: 'rating', title: _('Ratings') },
-                  };
 
-                  const config = metaListConfig[type];
-
-                  const handleMetaItemSelect = (name: string) => {
-                    const params = new URLSearchParams(searchParams?.toString());
-                    params.set('item', name);
-                    navigateToLibrary(router, `${params.toString()}`);
-                  };
-
-                  if (!hasBooks && !showMetaList) {
                     return (
-                      <div className='flex-1 flex items-center justify-center'>
-                        <LibraryEmptyState
-                          onImport={handleImportBooksFromFiles}
-                          onImportBooksFromDirectory={
-                            appService?.canReadExternalDir
-                              ? handleImportBooksFromDirectory
-                              : undefined
+                      <div className='flex flex-col flex-1'>
+                        {/* Meta List for cloud books */}
+                        {showMetaList && config && (
+                          <div className='p-4 border-b'>
+                            <h3 className='text-lg font-semibold mb-3'>{config.title}</h3>
+                            <MetaList
+                              type={config.type}
+                              items={metaItems}
+                              pins={metaPins}
+                              total={metaTotal}
+                              loading={metaLoading}
+                              onSelectItem={handleMetaItemSelect}
+                              currentItem={itemName || undefined}
+                              onShowMore={() => {
+                                setShowAllMeta(true);
+                                refreshMeta();
+                              }}
+                              showAll={showAllMeta}
+                            />
+                          </div>
+                        )}
+
+                        <Bookshelf
+                          libraryBooks={displayBooks}
+                          isSelectMode={isSelectMode}
+                          isSelectAll={isSelectAll}
+                          isSelectNone={isSelectNone}
+                          onScrollerRef={handleScrollerRef}
+                          handleImportBooks={handleImportBooksFromFiles}
+                          handleBookUpload={handleBookUpload}
+                          handleBookDownload={handleBookDownload}
+                          handleBookDelete={
+                            source === 'cloud' && isAdmin && settings.allowDelCloudBook
+                              ? handleCloudDelete
+                              : handleBookDelete('both')
                           }
-                          onSyncReadingBooks={() => syncReadingBooks(true)}
-                          source={source as 'local' | 'cloud'}
+                          handleBookPurge={handleBookDelete('purge')}
+                          handleSetSelectMode={handleSetSelectMode}
+                          handleShowDetailsBook={handleShowDetailsBook}
+                          handleLibraryNavigation={handleLibraryNavigation}
+                          booksTransferProgress={booksTransferProgress}
+                          source={source}
+                          isCloudLibrary={source === 'cloud'}
+                          cloudBooksTotal={cloudBooksTotal}
+                          onLoadMoreCloudBooks={() => {
+                            setCloudBooksPage((prev) => prev + 1);
+                          }}
+                          showCloudIcon={source === 'cloud'}
+                          showAllFormatsBadge={source === 'cloud'}
                         />
                       </div>
                     );
-                  }
-
-                  return (
-                    <div className='flex flex-col flex-1'>
-                      {/* Meta List for cloud books */}
-                      {showMetaList && config && (
-                        <div className='p-4 border-b'>
-                          <h3 className='text-lg font-semibold mb-3'>{config.title}</h3>
-                          <MetaList
-                            type={config.type}
-                            items={metaItems}
-                            pins={metaPins}
-                            total={metaTotal}
-                            loading={metaLoading}
-                            onSelectItem={handleMetaItemSelect}
-                            currentItem={itemName || undefined}
-                            onShowMore={() => {
-                              setShowAllMeta(true);
-                              refreshMeta();
-                            }}
-                            showAll={showAllMeta}
-                          />
-                        </div>
-                      )}
-
-                      <Bookshelf
-                        libraryBooks={displayBooks}
-                        isSelectMode={isSelectMode}
-                        isSelectAll={isSelectAll}
-                        isSelectNone={isSelectNone}
-                        onScrollerRef={handleScrollerRef}
-                        handleImportBooks={handleImportBooksFromFiles}
-                        handleBookUpload={handleBookUpload}
-                        handleBookDownload={handleBookDownload}
-                        handleBookDelete={
-                          source === 'cloud' && isAdmin && settings.allowDelCloudBook
-                            ? handleCloudDelete
-                            : handleBookDelete('both')
-                        }
-                        handleBookPurge={handleBookDelete('purge')}
-                        handleSetSelectMode={handleSetSelectMode}
-                        handleShowDetailsBook={handleShowDetailsBook}
-                        handleLibraryNavigation={handleLibraryNavigation}
-                        booksTransferProgress={booksTransferProgress}
-                        source={source}
-                        isCloudLibrary={source === 'cloud'}
-                        cloudBooksTotal={cloudBooksTotal}
-                        onLoadMoreCloudBooks={() => {
-                          setCloudBooksPage((prev) => prev + 1);
-                        }}
-                        showCloudIcon={source === 'cloud'}
-                        showAllFormatsBadge={source === 'cloud'}
-                      />
-                    </div>
-                  );
-                })()}
+                  })()}
+              </div>
             </div>
-          </div>
-        )}
-        <NowPlayingBar isSelectMode={isSelectMode} />
-        {showDetailsBook && (
-          <BookDetailModal
-            isOpen={!!showDetailsBook}
-            book={showDetailsBook}
-            onClose={() => setShowDetailsBook(null)}
-            handleBookUpload={handleBookUpload}
-            handleBookDownload={handleBookDownload}
-            handleBookDelete={source === 'cloud' ? handleCloudDelete : handleBookDelete('both')}
-            handleBookDeleteLocalCopy={source === 'cloud' ? undefined : handleBookDelete('local')}
-            handleBookPurge={source === 'cloud' ? undefined : handleBookDelete('purge')}
-            deleteDisabled={source === 'cloud' && (!isAdmin || !settings.allowDelCloudBook)}
-            deleteConfirmMessage={
-              source === 'cloud' ? _('Are you sure to delete this book from MyBooks?') : undefined
-            }
-            handleBookMetadataUpdate={handleUpdateMetadata}
+          )}
+          <NowPlayingBar isSelectMode={isSelectMode} />
+          {showDetailsBook && (
+            <BookDetailModal
+              isOpen={!!showDetailsBook}
+              book={showDetailsBook}
+              onClose={() => setShowDetailsBook(null)}
+              handleBookUpload={handleBookUpload}
+              handleBookDownload={handleBookDownload}
+              handleBookDelete={source === 'cloud' ? handleCloudDelete : handleBookDelete('both')}
+              handleBookDeleteLocalCopy={source === 'cloud' ? undefined : handleBookDelete('local')}
+              handleBookPurge={source === 'cloud' ? undefined : handleBookDelete('purge')}
+              deleteDisabled={source === 'cloud' && (!isAdmin || !settings.allowDelCloudBook)}
+              deleteConfirmMessage={
+                source === 'cloud' ? _('Are you sure to delete this book from MyBooks?') : undefined
+              }
+              handleBookMetadataUpdate={handleUpdateMetadata}
+            />
+          )}
+          {isTransferQueueOpen && (
+            <ModalPortal>
+              <TransferQueuePanel />
+            </ModalPortal>
+          )}
+          <AboutWindow />
+          <KeyboardShortcutsHelp />
+          <UpdaterWindow />
+          <MigrateDataWindow />
+          <BackupWindow />
+          <CacheManagerWindow />
+          {isSettingsDialogOpen && <SettingsDialog bookKey={''} />}
+          {showCatalogManager && <CatalogDialog onClose={handleDismissOPDSDialog} />}
+          {showFeeds && <FeedsView onClose={() => setShowFeeds(false)} />}
+          <AddFeedModal
+            isOpen={showAddFeed}
+            onClose={() => setShowAddFeed(false)}
+            onSubmit={handleAddFeedSubmit}
           />
-        )}
-        {isTransferQueueOpen && (
-          <ModalPortal>
-            <TransferQueuePanel />
-          </ModalPortal>
-        )}
-        <AboutWindow />
-        <KeyboardShortcutsHelp />
-        <UpdaterWindow />
-        <MigrateDataWindow />
-        <BackupWindow />
-        <CacheManagerWindow />
-        {isSettingsDialogOpen && <SettingsDialog bookKey={''} />}
-        {showCatalogManager && <CatalogDialog onClose={handleDismissOPDSDialog} />}
-        {showFeeds && <FeedsView onClose={() => setShowFeeds(false)} />}
-        <AddFeedModal
-          isOpen={showAddFeed}
-          onClose={() => setShowAddFeed(false)}
-          onSubmit={handleAddFeedSubmit}
-        />
-        {failedImportsModal && (
-          <FailedImportsDialog
-            failedImports={failedImportsModal}
-            onClose={() => setFailedImportsModal(null)}
-          />
-        )}
-        {importFromFolderState && (
-          <ImportFromFolderDialog
-            initialDirectory={importFromFolderState.initialDirectory}
-            initialFolderMode={importFromFolderState.initialFolderMode}
-            initialSelectedGroupIds={importFromFolderState.initialSelectedGroupIds}
-            initialMinSizeKB={importFromFolderState.initialMinSizeKB}
-            initialReadInPlace={importFromFolderState.initialReadInPlace}
-            initialAutoImport={importFromFolderState.initialAutoImport}
-            isRegisteredExternalRoot={isRegisteredExternalRoot}
-            onPickDirectory={pickImportDirectory}
-            onCancel={() => setImportFromFolderState(null)}
-            onConfirm={(result) => {
-              setImportFromFolderState(null);
-              // Remember the folder + filters for next time. Done here
-              // (rather than inside pickImportDirectory) so we only
-              // persist values the user actually committed to, not
-              // ones they cancelled out of.
-              if (typeof window !== 'undefined') {
-                if (result.directory) {
-                  window.localStorage.setItem(LAST_IMPORT_FOLDER_KEY, result.directory);
-                }
-                window.localStorage.setItem(
-                  LAST_IMPORT_FOLDER_MODE_KEY,
-                  result.flatten ? 'flatten' : 'keep',
-                );
-                if (result.selectedGroupIds.length > 0) {
+          {failedImportsModal && (
+            <FailedImportsDialog
+              failedImports={failedImportsModal}
+              onClose={() => setFailedImportsModal(null)}
+            />
+          )}
+          {importFromFolderState && (
+            <ImportFromFolderDialog
+              initialDirectory={importFromFolderState.initialDirectory}
+              initialFolderMode={importFromFolderState.initialFolderMode}
+              initialSelectedGroupIds={importFromFolderState.initialSelectedGroupIds}
+              initialMinSizeKB={importFromFolderState.initialMinSizeKB}
+              initialReadInPlace={importFromFolderState.initialReadInPlace}
+              initialAutoImport={importFromFolderState.initialAutoImport}
+              isRegisteredExternalRoot={isRegisteredExternalRoot}
+              onPickDirectory={pickImportDirectory}
+              onCancel={() => setImportFromFolderState(null)}
+              onConfirm={(result) => {
+                setImportFromFolderState(null);
+                // Remember the folder + filters for next time. Done here
+                // (rather than inside pickImportDirectory) so we only
+                // persist values the user actually committed to, not
+                // ones they cancelled out of.
+                if (typeof window !== 'undefined') {
+                  if (result.directory) {
+                    window.localStorage.setItem(LAST_IMPORT_FOLDER_KEY, result.directory);
+                  }
                   window.localStorage.setItem(
-                    LAST_IMPORT_FOLDER_FORMATS_KEY,
-                    result.selectedGroupIds.join(','),
+                    LAST_IMPORT_FOLDER_MODE_KEY,
+                    result.flatten ? 'flatten' : 'keep',
+                  );
+                  if (result.selectedGroupIds.length > 0) {
+                    window.localStorage.setItem(
+                      LAST_IMPORT_FOLDER_FORMATS_KEY,
+                      result.selectedGroupIds.join(','),
+                    );
+                  }
+                  window.localStorage.setItem(
+                    LAST_IMPORT_FOLDER_MIN_SIZE_KEY,
+                    String(result.minSizeKB),
+                  );
+                  window.localStorage.setItem(
+                    LAST_IMPORT_FOLDER_READ_IN_PLACE_KEY,
+                    result.readInPlace ? '1' : '0',
                   );
                 }
-                window.localStorage.setItem(
-                  LAST_IMPORT_FOLDER_MIN_SIZE_KEY,
-                  String(result.minSizeKB),
-                );
-                window.localStorage.setItem(
-                  LAST_IMPORT_FOLDER_READ_IN_PLACE_KEY,
-                  result.readInPlace ? '1' : '0',
-                );
-              }
-              void runFolderImport(result);
-            }}
+                void runFolderImport(result);
+              }}
+            />
+          )}
+          <ImportFromUrlDialog
+            isOpen={showImportFromUrl}
+            onClose={() => setShowImportFromUrl(false)}
+            onSubmit={handleImportBookFromUrl}
           />
-        )}
-        <ImportFromUrlDialog
-          isOpen={showImportFromUrl}
-          onClose={() => setShowImportFromUrl(false)}
-          onSubmit={handleImportBookFromUrl}
-        />
-        <Toast />
+          <Toast />
+        </div>
       </div>
     </div>
   );

@@ -731,6 +731,42 @@ export type SearchCategory =
   | 'tags'
   | 'series';
 
+/**
+ * Human-readable title for the currently selected bookshelf, matching the
+ * nav labels in LibraryDrawer. Pass through `_()` for translation.
+ */
+export const getBookshelfTitleKey = (source: string, type: string): string => {
+  if (source !== 'cloud') return 'Home';
+  switch (type) {
+    case 'favorites':
+      return 'My Favorites';
+    case 'wants':
+      return 'Want to Read';
+    case 'reading':
+      return 'Reading';
+    case 'read-done':
+      return 'Read';
+    case 'soledbooks':
+      return 'Private Books';
+    case 'categories':
+      return 'Categories';
+    case 'author':
+      return 'Authors';
+    case 'tag':
+      return 'Tags';
+    case 'publisher':
+      return 'Publishers';
+    case 'series':
+      return 'Series';
+    case 'language':
+      return 'Languages';
+    case 'rating':
+      return 'Rating';
+    default:
+      return 'All Books';
+  }
+};
+
 export const SEARCH_CATEGORIES: { value: SearchCategory; label: string }[] = [
   { value: 'local', label: 'Current Bookshelf' },
   { value: 'all', label: 'All Fields' },

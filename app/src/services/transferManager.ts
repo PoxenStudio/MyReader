@@ -427,6 +427,11 @@ class TransferManager {
         return;
       }
 
+      console.error(
+        `[TransferManager] ${transfer.type} failed for "${transfer.bookTitle}" (${transfer.bookHash}):`,
+        error,
+      );
+
       const errorMessage = error instanceof Error ? error.message : _('Unknown error');
       const currentStore = useTransferStore.getState();
       const currentTransfer = currentStore.transfers[transfer.id];
@@ -526,6 +531,9 @@ class TransferManager {
       book.uploadedAt = Date.now();
       await this.updateBook!(book);
     } else if (transfer.type === 'download') {
+      console.log(
+        `[TransferManager] Starting download for "${book.title}" (${book.hash}), format: ${book.format}`,
+      );
       await this.appService!.downloadBook(book, false, false, progressHandler);
       book.downloadedAt = Date.now();
       await this.updateBook!(book);

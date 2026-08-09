@@ -271,7 +271,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
       },
     });
     const searchGoodreadsMenuItem = await MenuItem.new({
-      text: _('Search on Goodreads'),
+      text: _('Search on Douban'),
       action: async () => {
         openExternalUrl(getGoodreadsSearchUrl(getBookGoodreadsQuery(book)));
       },

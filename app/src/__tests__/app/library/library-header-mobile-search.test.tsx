@@ -79,13 +79,16 @@ vi.mock('@/components/user/UserSettingsDialog', () => ({
   default: () => null,
 }));
 
+let mockSearchParams = '';
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(mockSearchParams),
 }));
 
 beforeEach(() => {
   Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 });
+  mockSearchParams = '';
 });
 
 afterEach(() => {
@@ -117,5 +120,30 @@ describe('LibraryHeader mobile search', () => {
 
     fireEvent.click(screen.getByLabelText('Search Books'));
     expect(screen.queryByPlaceholderText('Search Books...')).toBeNull();
+  });
+
+  it('shows the current bookshelf name where the search box would be, and hides it while searching', () => {
+    mockSearchParams = 'source=cloud&type=favorites';
+
+    render(
+      <LibraryHeader
+        isSelectMode={false}
+        isSelectAll={false}
+        isCloudLibrary={false}
+        isDrawerOpen={false}
+        onImportBooksFromFiles={noop}
+        onOpenCatalogManager={noop}
+        onOpenFeeds={noop}
+        onToggleSelectMode={noop}
+        onSelectAll={noop}
+        onDeselectAll={noop}
+        onToggleDrawer={noop}
+      />,
+    );
+
+    expect(screen.getByText('My Favorites')).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Search Books'));
+    expect(screen.queryByText('My Favorites')).toBeNull();
   });
 });

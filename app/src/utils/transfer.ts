@@ -222,15 +222,29 @@ export const tauriDownload = async (
     onProgress.onmessage = progressHandler;
   }
 
-  const responseHeaders = await invoke<Record<string, string>>('download_file', {
-    id,
+  console.log(
+    '[tauriDownload] invoking download_file:',
     url,
+    '->',
     filePath,
-    headers: headers ?? {},
-    onProgress,
-    body,
-    singleThreaded,
-    skipSslVerification,
-  });
-  return responseHeaders;
+    'headers:',
+    Object.keys(headers ?? {}),
+  );
+  try {
+    const responseHeaders = await invoke<Record<string, string>>('download_file', {
+      id,
+      url,
+      filePath,
+      headers: headers ?? {},
+      onProgress,
+      body,
+      singleThreaded,
+      skipSslVerification,
+    });
+    console.log('[tauriDownload] download_file completed:', url);
+    return responseHeaders;
+  } catch (error) {
+    console.error('[tauriDownload] download_file invoke failed:', url, error);
+    throw error;
+  }
 };
