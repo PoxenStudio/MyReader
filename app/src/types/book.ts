@@ -135,6 +135,9 @@ export interface Book {
   primaryLanguage?: string;
 
   metadata?: BookMetadata;
+  // Rating (0-10) reported by MyBooks for cloud books. Undefined for local
+  // books or when the cloud book has no rating.
+  rating?: number;
 
   files?: { format: BookFormat; size: number; href: string }[];
   originCoverUrl?: string | null;
