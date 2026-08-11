@@ -3,6 +3,7 @@
   "private": true,
   "repository": "poxenstudio/myreader",
   "scripts": {
+    "clean": "pnpm --filter @poxenstudio/myreader run clean",
     "test": "pnpm --filter @poxenstudio/myreader test",
     "test:lua": "pnpm --filter @poxenstudio/myreader test:lua",
     "lint": "pnpm --filter @poxenstudio/myreader lint",

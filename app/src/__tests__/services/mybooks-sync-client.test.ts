@@ -21,14 +21,12 @@ describe('syncClient', () => {
   });
 
   it('pullSync builds the proxy URL with since/type/book on web', async () => {
-    const fetchSpy = vi
-      .spyOn(global, 'fetch')
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ books: [], notes: null, configs: null }),
-      } as Response);
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ books: [], notes: null, configs: null }),
+    } as Response);
 
-    await pullSync(123, { type: 'configs', book: 'abcd' });
+    await pullSync(123, { type: 'configs', book: 'abcd', own: 0 });
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, options] = fetchSpy.mock.calls[0]!;
@@ -40,20 +38,32 @@ describe('syncClient', () => {
     expect(options).toMatchObject({ method: 'GET' });
   });
 
+  it('pullSync always sends own, whether 0 or 1', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ books: null, notes: [], configs: null }),
+    } as Response);
+
+    await pullSync(0, { book: 'abcd', own: 1 });
+    expect(String(fetchSpy.mock.calls[0]![0])).toContain('own=1');
+
+    fetchSpy.mockClear();
+    await pullSync(0, { book: 'abcd', own: 0 });
+    expect(String(fetchSpy.mock.calls[0]![0])).toContain('own=0');
+  });
+
   it('pullSync hits the mybooks host directly on Tauri', async () => {
     vi.mocked(isTauriAppPlatform).mockReturnValue(true);
-    const tauriFetchMock = vi
-      .mocked(tauriFetch)
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ books: null, notes: null, configs: [] }),
-      } as Response);
+    const tauriFetchMock = vi.mocked(tauriFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ books: null, notes: null, configs: [] }),
+    } as Response);
 
-    await pullSync(0);
+    await pullSync(0, { own: 1 });
 
     expect(tauriFetchMock).toHaveBeenCalledTimes(1);
     const [url] = tauriFetchMock.mock.calls[0]!;
-    expect(String(url)).toBe('http://mybooks.local/api/sync?since=0');
+    expect(String(url)).toBe('http://mybooks.local/api/sync?since=0&own=1');
   });
 
   it('pushSync POSTs a JSON body and returns the merged envelope', async () => {
@@ -80,12 +90,12 @@ describe('syncClient', () => {
       json: async () => ({ err: 'permission.denied' }),
     } as Response);
 
-    await expect(pullSync(0)).rejects.toThrow(SyncApiError);
-    await expect(pullSync(0)).rejects.toThrow('permission.denied');
+    await expect(pullSync(0, { own: 1 })).rejects.toThrow(SyncApiError);
+    await expect(pullSync(0, { own: 1 })).rejects.toThrow('permission.denied');
   });
 
   it('throws SyncApiError when no mybooks host is configured', async () => {
     localStorage.clear();
-    await expect(pullSync(0)).rejects.toThrow('MyBooks host is not configured');
+    await expect(pullSync(0, { own: 1 })).rejects.toThrow('MyBooks host is not configured');
   });
 });

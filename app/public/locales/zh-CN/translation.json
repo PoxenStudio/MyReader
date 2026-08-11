@@ -1756,5 +1756,7 @@
   "{{count}} books refreshed_one": "已刷新 {{count}} 本书",
   "{{count}} books refreshed_other": "已刷新 {{count}} 本书",
   "Library sync via {{count}} providers_one": "通过 {{count}} 个提供商同步书库",
-  "Library sync via {{count}} providers_other": "通过 {{count}} 个提供商同步书库"
+  "Library sync via {{count}} providers_other": "通过 {{count}} 个提供商同步书库",
+  "Annotation Data": "批注数据",
+  "Show other users’ annotations while reading": "阅读时显示其他用户的批注"
 }

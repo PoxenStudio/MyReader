@@ -72,11 +72,11 @@ async function parseSyncResponse(response: Response): Promise<SyncEnvelope> {
  */
 export async function pullSync(
   since: number,
-  options?: { type?: SyncRecordType; book?: string },
+  options: { type?: SyncRecordType; book?: string; own: 0 | 1 },
 ): Promise<SyncEnvelope> {
-  const params: Record<string, string | number> = { since };
-  if (options?.type) params['type'] = options.type;
-  if (options?.book) params['book'] = options.book;
+  const params: Record<string, string | number> = { since, own: options.own };
+  if (options.type) params['type'] = options.type;
+  if (options.book) params['book'] = options.book;
 
   const { url, fetchFn } = buildSyncRequest(params);
   const response = await fetchFn(url, { method: 'GET', credentials: 'include' });

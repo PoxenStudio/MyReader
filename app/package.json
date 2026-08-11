@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "clean": "rm -rf .next out",
     "dev": "dotenv -e .env.tauri -- next dev",
     "build": "dotenv -e .env.tauri -- next build",
     "start": "dotenv -e .env.tauri -- next start",

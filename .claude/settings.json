@@ -41,7 +41,15 @@
       "Bash(curl -s -o /dev/null -w \"mybooks /api/access GET: %{http_code}\\\\n\" http://localhost:8082/api/access --max-time 3)",
       "Bash(curl -s -D - -o /dev/null \"http://localhost:8082/get/cover/8389.jpg?t=1784702022\" --max-time 5)",
       "Bash(curl -s -D - -o /dev/null \"http://localhost:8082/api/book/8540.EPUB\" --max-time 5)",
-      "Bash(grep '\" \"-\"$' /Volumes/data/workspace/mybooks/data/log/nginx/mybooks-access.log)"
+      "Bash(grep '\" \"-\"$' /Volumes/data/workspace/mybooks/data/log/nginx/mybooks-access.log)",
+      "Bash(python -m pytest tests/test_sync.py -k test_shared_notes_include_author_nickname_and_avatar -x -q)",
+      "Bash(xargs -I{} basename {})",
+      "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/services/mybooks-sync-client.test.ts)",
+      "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/store/mybooks-show-other-annotations.test.ts)",
+      "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/services/mybooks-show-other-annotations-sync.test.ts)",
+      "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/hooks/useNativeSync.test.tsx)",
+      "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/components/user-settings-dialog-annotation-data.test.tsx)",
+      "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/components/BooknoteItem-ownership.test.tsx)"
     ]
   }
 }

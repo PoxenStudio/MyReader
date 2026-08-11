@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
+import type { BookNote } from '@/types/book';
 
 const h = vi.hoisted(() => {
   const makeStore = <T,>(state: T) => {
@@ -14,15 +15,17 @@ const h = vi.hoisted(() => {
       config: { location: 'local-loc', updatedAt: 1000 } as {
         location: string;
         updatedAt: number;
+        booknotes?: BookNote[];
       },
       progress: { location: 'local-loc' } as { location: string } | null,
       previewMode: false,
     },
     pullSyncMock: vi.fn(async () => ({ configs: null, notes: null })),
-    pushSyncMock: vi.fn(async () => ({})),
+    pushSyncMock: vi.fn(async (_payload: unknown) => ({})),
     setConfigMock: vi.fn(),
     saveConfigMock: vi.fn(async () => {}),
     goToMock: vi.fn(),
+    mybooksStatus: { currentUserId: 1, showOtherAnnotations: true },
   };
 });
 
@@ -45,6 +48,7 @@ vi.mock('@/store/bookDataStore', () => ({
 
 vi.mock('@/store/mybooksStatusStore', () => ({
   useMyBooksSyncAllowed: () => true,
+  useMyBooksStatusStore: h.makeStore(h.mybooksStatus),
 }));
 
 vi.mock('@/store/readerStore', () => ({
@@ -93,6 +97,8 @@ beforeEach(() => {
   h.state.config = { location: 'local-loc', updatedAt: 1000 };
   h.state.progress = { location: 'local-loc' };
   h.state.previewMode = false;
+  h.mybooksStatus.currentUserId = 1;
+  h.mybooksStatus.showOtherAnnotations = true;
 });
 
 afterEach(() => {
@@ -191,5 +197,84 @@ describe('useNativeSync', () => {
         lastSyncedAtNotes: expect.any(Number),
       }),
     );
+  });
+
+  test('pulls with own=1 when showOtherAnnotations is off', async () => {
+    h.mybooksStatus.showOtherAnnotations = false;
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    expect(h.pullSyncMock).toHaveBeenCalledWith(0, { book: 'book-hash', own: 1 });
+  });
+
+  test('pulls with own=0 when showOtherAnnotations is on', async () => {
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    expect(h.pullSyncMock).toHaveBeenCalledWith(0, { book: 'book-hash', own: 0 });
+  });
+
+  test('merges a pulled note’s userId/author from the wire uid/author fields', async () => {
+    // The mybooks `/api/sync` server stamps cross-user notes with a numeric
+    // `uid` field (see webserver/services/sync_service.py's
+    // _push_book_records/_shared_notes) — NOT `user_id`. A note carrying
+    // `author` but no recognized uid field must not silently fall back to
+    // "own" (isOwn treats a missing userId as the current user's note).
+    h.pullSyncMock.mockResolvedValue({
+      configs: null,
+      notes: [
+        {
+          id: 'n1',
+          book_hash: 'book-hash',
+          uid: 99,
+          author: { nickname: 'Alice', avatar: 'a.png' },
+          updatedAt: 10,
+          note: 'theirs',
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof h.pullSyncMock>>);
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    expect(h.setConfigMock).toHaveBeenCalledWith(
+      'book-key',
+      expect.objectContaining({
+        booknotes: [
+          expect.objectContaining({
+            id: 'n1',
+            userId: '99',
+            author: { nickname: 'Alice', avatar: 'a.png' },
+          }),
+        ],
+      }),
+    );
+  });
+
+  test('does not push back a note that belongs to another user', async () => {
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+    h.state.config = {
+      location: 'local-loc',
+      updatedAt: 1000,
+      booknotes: [
+        { id: 'mine', userId: '1', updatedAt: 5, note: 'mine' } as BookNote,
+        { id: 'theirs', userId: '99', updatedAt: 5, note: 'theirs' } as BookNote,
+        { id: 'local', updatedAt: 5, note: 'local, not yet synced' } as BookNote,
+      ],
+    };
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    h.setConfigMock.mockClear();
+
+    await flushPushDebounce();
+
+    expect(h.pushSyncMock).toHaveBeenCalled();
+    const payload = h.pushSyncMock.mock.calls[0]![0] as { notes: { id: string }[] };
+    expect(payload.notes.map((n) => n.id)).toEqual(['mine', 'local']);
   });
 });

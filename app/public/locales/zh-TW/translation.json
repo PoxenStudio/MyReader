@@ -1756,5 +1756,7 @@
   "{{count}} books refreshed_one": "已重新整理 {{count}} 本書",
   "{{count}} books refreshed_other": "已重新整理 {{count}} 本書",
   "Library sync via {{count}} providers_one": "透過 {{count}} 個提供者同步書庫",
-  "Library sync via {{count}} providers_other": "透過 {{count}} 個提供者同步書庫"
+  "Library sync via {{count}} providers_other": "透過 {{count}} 個提供者同步書庫",
+  "Annotation Data": "批註資料",
+  "Show other users’ annotations while reading": "閱讀時顯示其他使用者的批註"
 }

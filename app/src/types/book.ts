@@ -185,6 +185,14 @@ export interface BookNote {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number | null;
+
+  // Populated when this note was merged in from a `/api/sync` pull — the
+  // mybooks reader id (as a string, stringified from `BookDataRecord.uid`)
+  // that authored it, and — only when it's someone else's note (shared via
+  // `showOtherAnnotations`) — their display info. Absent for notes that are
+  // purely local/not-yet-synced, which are treated as the current user's own.
+  userId?: string;
+  author?: { nickname?: string; avatar?: string };
 }
 
 export interface BooknoteGroup {
@@ -525,7 +533,13 @@ export interface BookDataRecord {
   id: string;
   book_hash: string;
   meta_hash?: string;
-  user_id: string;
+  // The authoring reader's id. Only ever present (as a number, not a string)
+  // on `notes` records — the server stamps every note payload with the
+  // pushing user's `uid` (see webserver/services/sync_service.py's
+  // _push_book_records) and returns it as a wire field literally named
+  // `uid`, not `user_id`. Absent on `books`/`configs`, which have no
+  // cross-user sharing concept.
+  uid?: number;
   updated_at: number | null;
   deleted_at: number | null;
   // Server-assigned incremental-pull cursor, decoupled from updated_at (the
@@ -538,6 +552,10 @@ export interface BookDataRecord {
   // as soon as its metadata syncs, but is unavailable to peers until its file
   // blob is uploaded. Absent on config/note records.
   uploaded_at?: string | null;
+  // Only present on `notes` records that belong to another user, returned by
+  // an `own=0` pull (see plan/Social_Reading_Plan.md §2.2) — lets the reader
+  // show who wrote a shared annotation. Absent on the caller's own records.
+  author?: { nickname?: string; avatar?: string };
 }
 
 // Wire records for the mybooks `/api/sync` Legacy Record Sync endpoint.

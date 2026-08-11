@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RiQuillPenLine } from 'react-icons/ri';
+import { PiUserCircle } from 'react-icons/pi';
 
 import { useSettingsStore } from '@/store/settingsStore';
 import { useBookDataStore } from '@/store/bookDataStore';
@@ -10,6 +11,7 @@ import { useNotebookStore } from '@/store/notebookStore';
 import { useAIChatStore } from '@/store/aiChatStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useThemeStore } from '@/store/themeStore';
+import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useEnv } from '@/context/EnvContext';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
 import { usePanelResize } from '@/hooks/usePanelResize';
@@ -20,6 +22,8 @@ import { eventDispatcher } from '@/utils/event';
 import { getBookDirFromLanguage } from '@/utils/book';
 import { getPanelTopInset } from '@/utils/insets';
 import { Overlay } from '@/components/Overlay';
+import UserAvatar from '@/components/UserAvatar';
+import { getMyBooksAvatarUrl } from '@/services/mybooksService';
 import { saveSysSettings } from '@/helpers/settings';
 import { NOTE_PREFIX } from '@/types/view';
 import useShortcuts from '@/hooks/useShortcuts';
@@ -55,6 +59,11 @@ const Notebook: React.FC = ({}) => {
   const { setNotebookNewAnnotation, setNotebookNewHighlightId } = useNotebookStore();
   const { setNotebookEditAnnotation, setNotebookActiveTab } = useNotebookStore();
   const { activeConversationId } = useAIChatStore();
+  const currentUserId = useMyBooksStatusStore((state) => state.currentUserId);
+  const isOwnNote = useCallback(
+    (note: BookNote) => !note.userId || note.userId === String(currentUserId),
+    [currentUserId],
+  );
 
   const [isSearchBarVisible, setIsSearchBarVisible] = useState(false);
   const [searchResults, setSearchResults] = useState<BookNote[] | null>(null);
@@ -473,7 +482,7 @@ const Notebook: React.FC = ({}) => {
                     role='button'
                     tabIndex={0}
                     onKeyDown={(e) => {
-                      if (e.key === 'Backspace' || e.key === 'Delete') {
+                      if ((e.key === 'Backspace' || e.key === 'Delete') && isOwnNote(item)) {
                         handleEditNote(item, true);
                       }
                     }}
@@ -494,17 +503,36 @@ const Notebook: React.FC = ({}) => {
                       <p className='line-clamp-1'>{item.text || `Excerpt ${index + 1}`}</p>
                     </div>
                     <div className='collapse-content font-size-xs select-text px-3 pb-0'>
+                      {!isOwnNote(item) && item.author && (
+                        <span className='flex shrink-0 items-center gap-1 truncate text-sm text-gray-500 sm:text-xs'>
+                          {item.author.avatar && (
+                            <span className='h-4 w-4 shrink-0'>
+                              <UserAvatar
+                                url={getMyBooksAvatarUrl(item.author.avatar)}
+                                size={16}
+                                DefaultIcon={PiUserCircle}
+                                fillContainer
+                              />
+                            </span>
+                          )}
+                          {item.author.nickname && (
+                            <span className='truncate'>{item.author.nickname}</span>
+                          )}
+                        </span>
+                      )}
                       <p className='hyphens-auto text-justify'>{item.text}</p>
-                      <div className='flex justify-end' dir='ltr'>
-                        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions*/}
-                        <div
-                          className='font-size-xs cursor-pointer align-bottom text-red-500 hover:text-red-600'
-                          onClick={handleEditNote.bind(null, item, true)}
-                          aria-label={_('Delete')}
-                        >
-                          {_('Delete')}
+                      {isOwnNote(item) && (
+                        <div className='flex justify-end' dir='ltr'>
+                          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions*/}
+                          <div
+                            className='font-size-xs cursor-pointer align-bottom text-red-500 hover:text-red-600'
+                            onClick={handleEditNote.bind(null, item, true)}
+                            aria-label={_('Delete')}
+                          >
+                            {_('Delete')}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 </li>

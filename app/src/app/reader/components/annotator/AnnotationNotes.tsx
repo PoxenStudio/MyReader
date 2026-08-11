@@ -1,12 +1,16 @@
 import clsx from 'clsx';
 import dayjs from 'dayjs';
 import React, { useMemo } from 'react';
+import { PiUserCircle } from 'react-icons/pi';
 import { BookNote } from '@/types/book';
 import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSidebarStore } from '@/store/sidebarStore';
+import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
+import { getMyBooksAvatarUrl } from '@/services/mybooksService';
+import UserAvatar from '@/components/UserAvatar';
 
 interface AnnotationNotesProps {
   bookKey: string;
@@ -33,8 +37,12 @@ const AnnotationNotes: React.FC<AnnotationNotesProps> = ({
   const { getConfig, setConfig } = useBookDataStore();
   const { setHoveredBookKey } = useReaderStore();
   const { setSideBarVisible } = useSidebarStore();
+  const currentUserId = useMyBooksStatusStore((state) => state.currentUserId);
   const config = getConfig(bookKey);
   const maxSize = useResponsiveSize(250);
+
+  const isOwnNote = (note: BookNote) =>
+    !note.userId || (currentUserId !== null && note.userId === String(currentUserId));
 
   const sortedNotes = useMemo(() => {
     return [...notes].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -129,6 +137,23 @@ const AnnotationNotes: React.FC<AnnotationNotesProps> = ({
                 }
               >
                 <div className={clsx('flex flex-col justify-between gap-2')}>
+                  {!isOwnNote(note) && note.author && (
+                    <span className='flex shrink-0 items-center gap-1 truncate text-sm text-white/50 sm:text-xs'>
+                      {note.author.avatar && (
+                        <span className='h-4 w-4 shrink-0'>
+                          <UserAvatar
+                            url={getMyBooksAvatarUrl(note.author.avatar)}
+                            size={16}
+                            DefaultIcon={PiUserCircle}
+                            fillContainer
+                          />
+                        </span>
+                      )}
+                      {note.author.nickname && (
+                        <span className='truncate'>{note.author.nickname}</span>
+                      )}
+                    </span>
+                  )}
                   {note.note}
                   <span className='not-eink:text-white/50 eink:text-base-content/50 text-sm sm:text-xs'>
                     {dayjs(note.createdAt).fromNow()}

@@ -30,7 +30,7 @@ import {
   type MyBooksUserDetailInfo,
 } from '@/services/mybooksService';
 import { useMyBooksStatusStore, useMyBooksSyncAllowed } from '@/store/mybooksStatusStore';
-import { BoxedList, SettingsRow } from '@/components/settings/primitives';
+import { BoxedList, SettingsRow, SettingsSwitchRow } from '@/components/settings/primitives';
 import Dialog from '@/components/Dialog';
 import UserAvatar from '@/components/UserAvatar';
 import NasRemoteWebview from '@/components/nas/NasRemoteWebview';
@@ -66,6 +66,8 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [podcastToken, setPodcastToken] = useState('');
 
+  const [showOtherAnnotations, setShowOtherAnnotations] = useState(true);
+
   const [showAvatarDialog, setShowAvatarDialog] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -83,6 +85,7 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
       setUserInfo(cached.user);
       setNickname(cached.user.nickname || '');
       setPodcastToken(cached.user.podcast_token || '');
+      setShowOtherAnnotations(cached.user.show_other_annotations ?? true);
     }
     setRefreshStatus('loading');
     getUserDetailInfo()
@@ -91,6 +94,7 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
           setUserInfo(result.user);
           setNickname(result.user.nickname || '');
           setPodcastToken(result.user.podcast_token || '');
+          setShowOtherAnnotations(result.user.show_other_annotations ?? true);
         }
         setRefreshStatus('idle');
       })
@@ -124,7 +128,9 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
         password1,
         password2,
         podcast_token: podcastToken,
+        show_other_annotations: showOtherAnnotations,
       });
+      useMyBooksStatusStore.getState().setShowOtherAnnotations(showOtherAnnotations);
       toast('success', _('Settings saved'));
       setPassword0('');
       setPassword1('');
@@ -360,6 +366,15 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
                   </button>
                 </div>
               </SettingsRow>
+            </BoxedList>
+
+            {/* Annotation Data */}
+            <BoxedList title={_('Annotation Data')}>
+              <SettingsSwitchRow
+                label={_('Show other users’ annotations while reading')}
+                checked={showOtherAnnotations}
+                onChange={() => setShowOtherAnnotations((v) => !v)}
+              />
             </BoxedList>
 
             {/* Server Info */}

@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useNotebookStore } from '@/store/notebookStore';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { useIsOwnBooknote } from '@/store/mybooksStatusStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { eventDispatcher } from '@/utils/event';
@@ -19,9 +20,12 @@ import { buildAnnotationUrl } from '@/utils/deeplink';
 import { buildAnnotationCopyMarkdown } from '@/utils/note';
 import { writeTextToClipboard } from '@/utils/clipboard';
 import { DEFAULT_NOTE_EXPORT_CONFIG } from '@/services/constants';
+import { getMyBooksAvatarUrl } from '@/services/mybooksService';
 import { removeBookNoteOverlays } from '../../utils/annotatorUtil';
 import TextButton from '@/components/TextButton';
 import TextEditor, { TextEditorRef } from '@/components/TextEditor';
+import UserAvatar from '@/components/UserAvatar';
+import { PiUserCircle } from 'react-icons/pi';
 
 interface BooknoteItemProps {
   bookKey: string;
@@ -47,6 +51,8 @@ const BooknoteItem: React.FC<BooknoteItemProps> = ({ bookKey, item, isNearest, o
   const [inlineEditMode, setInlineEditMode] = useState(false);
   const separatorWidth = useResponsiveSize(3);
   const size18 = useResponsiveSize(18);
+
+  const isOwn = useIsOwnBooknote(item.userId);
 
   const progress = getProgress(bookKey);
   // Active highlight: keep visual "current" state but don't scroll from the
@@ -175,7 +181,7 @@ const BooknoteItem: React.FC<BooknoteItemProps> = ({ bookKey, item, isNearest, o
     );
   }
 
-  const isEditable = item.note || item.type === 'bookmark';
+  const isEditable = isOwn && (item.note || item.type === 'bookmark');
 
   return (
     <li
@@ -279,6 +285,22 @@ const BooknoteItem: React.FC<BooknoteItemProps> = ({ bookKey, item, isNearest, o
           )}
         >
           <div className='flex w-full items-center gap-1 truncate'>
+            {!isOwn && item.author && (
+              <span className='flex shrink-0 items-center gap-1 truncate text-sm text-gray-500 sm:text-xs'>
+                {item.author.avatar && (
+                  <span className='h-4 w-4 shrink-0'>
+                    <UserAvatar
+                      url={getMyBooksAvatarUrl(item.author.avatar)}
+                      size={16}
+                      DefaultIcon={PiUserCircle}
+                      fillContainer
+                    />
+                  </span>
+                )}
+                {item.author.nickname && <span className='truncate'>{item.author.nickname}</span>}
+                <span aria-hidden='true'>·</span>
+              </span>
+            )}
             <span className='truncate text-sm text-gray-500 sm:text-xs'>
               {item.page ? _('p {{page}}' + ' · ', { page: item.page }) : ''}
             </span>
@@ -296,13 +318,15 @@ const BooknoteItem: React.FC<BooknoteItemProps> = ({ bookKey, item, isNearest, o
               <MdContentCopy size={size18} />
             </button>
 
-            <button
-              onClick={deleteNote.bind(null, item)}
-              className='btn btn-ghost btn-xs p-0 text-red-500 opacity-0 transition duration-300 ease-in-out hover:bg-transparent group-focus-within:opacity-100 group-hover:opacity-100'
-              aria-label={_('Delete')}
-            >
-              <MdDelete size={size18} />
-            </button>
+            {isOwn && (
+              <button
+                onClick={deleteNote.bind(null, item)}
+                className='btn btn-ghost btn-xs p-0 text-red-500 opacity-0 transition duration-300 ease-in-out hover:bg-transparent group-focus-within:opacity-100 group-hover:opacity-100'
+                aria-label={_('Delete')}
+              >
+                <MdDelete size={size18} />
+              </button>
+            )}
 
             {isEditable && (
               <button

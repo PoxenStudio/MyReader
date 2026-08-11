@@ -181,7 +181,9 @@
     "name": "管理员",
     "email": "admin@example.com",
     "avatar": "reader.svg",
-    "is_admin": true
+    "is_admin": true,
+    "show_home_recommendations": false,
+    "show_other_annotations": false
   }
 }
 ```
@@ -202,6 +204,14 @@ sys中为基础系统信息，title为网站标题, books为在库书籍数量�
   - `kindle_email` (string, 可选): Kindle推送邮箱
   - `podcast_token` (string, 可选): Podcast订阅Token
   - `allow_sending_mail` (boolean, 可选): 是否允许发送邮件
+  - `show_other_annotations` (boolean, 可选): 是否查看其他用户的批注数据
+- **请求示例**:
+```json
+{
+  "show_home_recommendations": true,
+  "show_other_annotations": false
+}
+```
 - **响应示例**：
 
 ```json

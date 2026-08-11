@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore } from '@/store/bookDataStore';
-import { useMyBooksSyncAllowed } from '@/store/mybooksStatusStore';
+import { useMyBooksStatusStore, useMyBooksSyncAllowed } from '@/store/mybooksStatusStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -76,6 +76,13 @@ export const useNativeSync = (bookKey: string) => {
       localUpdatedAt: config.updatedAt ?? 0,
     });
     try {
+      const currentUserId = useMyBooksStatusStore.getState().currentUserId;
+      // Never push back a note that belongs to someone else — it can only be
+      // here because it was pulled in via showOtherAnnotations, and pushing
+      // it would re-store it under this account's own records server-side.
+      const ownNotes = (config.booknotes ?? []).filter(
+        (note) => !note.userId || note.userId === String(currentUserId),
+      );
       await pushSync({
         configs: [
           {
@@ -90,7 +97,7 @@ export const useNativeSync = (bookKey: string) => {
             updatedAt: now,
           },
         ],
-        notes: (config.booknotes ?? []).map((note) => ({
+        notes: ownNotes.map((note) => ({
           book_hash: book.hash,
           meta_hash: book.metaHash,
           updated_at: note.updatedAt,
@@ -139,7 +146,13 @@ export const useNativeSync = (bookKey: string) => {
     });
 
     try {
-      const result = await pullSync(0, { book: book.hash });
+      const showOtherAnnotations = useMyBooksStatusStore.getState().showOtherAnnotations;
+      // Always pass own explicitly (0/1), never omitted — lets the server
+      // tell this (new) client apart from an old one that never sends it.
+      const result = await pullSync(0, {
+        book: book.hash,
+        own: showOtherAnnotations ? 0 : 1,
+      });
       lastPulledAtRef.current = Date.now();
       const now = Date.now();
       const elapsedMs = now - requestStartedAt;
@@ -195,7 +208,16 @@ export const useNativeSync = (bookKey: string) => {
         const local = byId.get(remote.id);
         const remoteTs = Math.max(remote.updatedAt ?? 0, remote.deletedAt ?? 0);
         const localTs = local ? Math.max(local.updatedAt ?? 0, local.deletedAt ?? 0) : -1;
-        if (remoteTs >= localTs) byId.set(remote.id, { ...local, ...remote } as BookNote);
+        if (remoteTs >= localTs) {
+          byId.set(remote.id, {
+            ...local,
+            ...remote,
+            // The wire field is `uid` (a number), not `user_id` — see
+            // `BookDataRecord.uid`'s doc comment.
+            userId: remote.uid !== undefined ? String(remote.uid) : undefined,
+            author: remote.author,
+          } as BookNote);
+        }
       }
       mergedConfig.booknotes = Array.from(byId.values());
       mergedConfig.lastSyncedAtNotes = now;

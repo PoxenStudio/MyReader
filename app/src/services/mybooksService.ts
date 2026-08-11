@@ -72,6 +72,7 @@ export interface MyBooksUserInfo {
   is_admin: boolean;
   is_login: boolean;
   is_guest: boolean;
+  show_other_annotations?: boolean;
 }
 
 export interface MyBooksUserDetailInfo extends MyBooksUserInfo {
@@ -90,6 +91,7 @@ export interface MyBooksUpdateSettings {
   password1?: string;
   password2?: string;
   podcast_token?: string;
+  show_other_annotations?: boolean;
 }
 
 // 设备类型，参见 document/MyBooks_WebAPI.md 2.6 用户设备管理
@@ -578,11 +580,26 @@ function updateSysInfo(sys?: MyBooksSysInfo): void {
   useMyBooksStatusStore.getState().setSysInfo({ ...current, ...sys });
 }
 
+// Mirrors the logged-in user's `show_other_annotations` preference and
+// numeric id into mybooksStatusStore, so the reader (useNativeSync.ts) and
+// ownership checks (BooknoteItem, Notebook) have them without a
+// component-local fetch. Called from every `/user/info` call site — see
+// getUserInfo/getUserDetailInfo below.
+function updateUserPrefs(user?: MyBooksUserInfo): void {
+  if (!user?.is_login) return;
+  const store = useMyBooksStatusStore.getState();
+  store.setCurrentUserId(user.id);
+  if (user.show_other_annotations !== undefined) {
+    store.setShowOtherAnnotations(user.show_other_annotations);
+  }
+}
+
 export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
   try {
     const response = await fetchMyBooks('/user/info');
     updateSysInfo(response.sys);
     const user = response.user;
+    updateUserPrefs(user);
     if (typeof window !== 'undefined') {
       if (user?.is_login || user?.is_guest) {
         localStorage.setItem(MYBOOKS_USER_INFO_CACHE_KEY, JSON.stringify(user));
@@ -719,6 +736,7 @@ export function getCachedUserDetailInfo(): MyBooksUserDetailResult | null {
 export async function getUserDetailInfo(): Promise<MyBooksUserDetailResult | null> {
   const response = await fetchMyBooks('/user/info', { detail: 1 });
   updateSysInfo(response.sys);
+  updateUserPrefs(response.user);
   if (!response.user?.is_login && !response.user?.is_guest) return null;
   const result = { user: response.user as MyBooksUserDetailInfo, sys: response.sys ?? null };
   if (typeof window !== 'undefined') {
