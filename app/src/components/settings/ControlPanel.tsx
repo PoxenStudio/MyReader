@@ -68,7 +68,6 @@ const ControlPanel: React.FC<SettingsPanelPanelProp> = ({ bookKey, onRegisterRes
   const [screenWakeLock, setScreenWakeLock] = useState(settings.screenWakeLock);
   const [allowScript, setAllowScript] = useState(viewSettings.allowScript);
   const [isAutoCheckUpdates, setIsAutoCheckUpdates] = useState(settings.autoCheckUpdates);
-  const [isNightlyChannel, setIsNightlyChannel] = useState(settings.updateChannel === 'nightly');
 
   const resetToDefaults = useResetViewSettings();
   const pageTurnerResetRef = useRef<() => void>(() => {});
@@ -287,12 +286,6 @@ const ControlPanel: React.FC<SettingsPanelPanelProp> = ({ bookKey, onRegisterRes
     setIsAutoCheckUpdates(newValue);
   };
 
-  const toggleNightlyChannel = () => {
-    const newValue = !isNightlyChannel;
-    saveSysSettings(envConfig, 'updateChannel', newValue ? 'nightly' : 'stable');
-    setIsNightlyChannel(newValue);
-  };
-
   const getQuickActionOptions = () => {
     return [
       {
@@ -506,13 +499,6 @@ const ControlPanel: React.FC<SettingsPanelPanelProp> = ({ bookKey, onRegisterRes
             label={_('Check Updates on Start')}
             checked={isAutoCheckUpdates}
             onChange={toggleAutoCheckUpdates}
-          />
-          <SettingsSwitchRow
-            label={_('Nightly Builds')}
-            description={isNightlyChannel ? _('Early daily builds') : ''}
-            checked={isNightlyChannel}
-            onChange={toggleNightlyChannel}
-            data-setting-id='settings.control.nightlyChannel'
           />
         </BoxedList>
       )}
