@@ -75,7 +75,7 @@ const BookReviewDialog: React.FC<BookReviewDialogProps> = ({ isOpen, book, onClo
       isOpen={isOpen}
       onClose={onClose}
       title={_('Write a Review')}
-      boxClassName='sm:min-w-[420px]'
+      boxClassName='sm:!w-[320px] sm:!min-w-[320px] sm:!h-auto sm:!max-h-[80vh]'
     >
       <div className='flex flex-col gap-y-3 pb-4'>
         {loading ? (

@@ -24,8 +24,10 @@ import {
   formatTitle,
 } from '@/utils/book';
 import { saveSysSettings } from '@/helpers/settings';
+import { getMyBooksId } from '@/utils/bookConverter';
 import BookCover from '@/components/BookCover';
 import StarRating from '@/components/StarRating';
+import BookReviewList from '@/components/metadata/BookReviewList';
 
 interface BookDetailViewProps {
   book: Book;
@@ -264,6 +266,8 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
           )}
         </div>
       </div>
+
+      {book.storageType === 'cloud' && <BookReviewList bookId={getMyBooksId(book)} />}
     </div>
   );
 };

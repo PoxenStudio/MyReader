@@ -198,6 +198,7 @@ export interface MyBooksResponse<T = unknown> {
   book_id?: number;
   devices?: MyBooksDevice[];
   review?: MyBooksReview | null;
+  reviews?: MyBooksReview[];
   // /user/reading_stats — document/MyBooks_WebAPI.md §2.10
   enabled?: boolean;
   totals?: MyBooksReadingStatsTotals;
@@ -855,6 +856,18 @@ export async function submitReview(
     'application/json',
   );
   return response.review as MyBooksReview;
+}
+
+/**
+ * 获取某本书的评价列表（最近更新的最多 50 条，含自己未通过审核的评价）
+ */
+export async function getBookReviews(
+  id: number,
+): Promise<{ reviews: MyBooksReview[]; total: number }> {
+  const response = await fetchMyBooks<{ reviews: MyBooksReview[]; total: number }>(
+    `/book/${id}/reviews`,
+  );
+  return { reviews: response.reviews || [], total: response.total || 0 };
 }
 
 /**
