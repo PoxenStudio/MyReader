@@ -5,7 +5,7 @@ import { getOSPlatform, isValidURL } from '@/utils/misc';
 import { isSafariBrowser } from '@/utils/ua';
 import { RemoteFile } from '@/utils/file';
 import { detectViewTransitionGroup, detectViewTransitionsAPI } from '@/utils/viewTransition';
-import { isPWA } from './environment';
+import { isLocalDbDisabled, isPWA } from './environment';
 import { BaseAppService } from './appService';
 import {
   DATA_SUBDIR,
@@ -414,6 +414,14 @@ export class WebAppService extends BaseAppService {
     base: BaseDir,
     opts?: DatabaseOpts,
   ): Promise<DatabaseService> {
+    // The MyBooks-embedded reader build disables local persistence (see
+    // `isLocalDbDisabled`), so skip the turso wasm module entirely and hand
+    // back a no-op stub — this is what lets build-docker-dist.sh strip it
+    // out of that deployment's node_modules.
+    if (isLocalDbDisabled()) {
+      const { NoopDatabaseService } = await import('./database/noopDatabaseService');
+      return new NoopDatabaseService();
+    }
     const fullPath = await this.resolveFilePath(path, base);
     // OPFS `getFileHandle` rejects names containing path separators, and the
     // Turso WASM connector passes the whole string as a single OPFS handle

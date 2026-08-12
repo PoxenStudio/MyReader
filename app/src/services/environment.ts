@@ -10,6 +10,8 @@ declare global {
 
 export const isTauriAppPlatform = () => process.env['NEXT_PUBLIC_APP_PLATFORM'] === 'tauri';
 export const isWebAppPlatform = () => process.env['NEXT_PUBLIC_APP_PLATFORM'] === 'web';
+
+export const isLocalDbDisabled = () => process.env['NEXT_PUBLIC_DISABLE_LOCAL_DB'] === 'true';
 export const hasCli = () => window.__MYBOOKS_CLI_ACCESS === true;
 export const isPWA = () => window.matchMedia('(display-mode: standalone)').matches;
 export const getBaseUrl = () =>

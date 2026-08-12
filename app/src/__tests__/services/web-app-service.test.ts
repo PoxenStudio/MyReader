@@ -19,6 +19,25 @@ vi.mock('@/utils/misc', async (importOriginal) => {
 
 vi.mock('@/services/environment', () => ({
   isPWA: vi.fn().mockReturnValue(false),
+  isLocalDbDisabled: vi.fn().mockReturnValue(false),
+}));
+
+const openWebDatabaseServiceMock = vi.fn().mockResolvedValue({
+  execute: vi.fn(),
+  select: vi.fn(),
+  batch: vi.fn(),
+  close: vi.fn(),
+});
+vi.mock('@/services/database/webDatabaseService', () => ({
+  WebDatabaseService: { open: openWebDatabaseServiceMock },
+}));
+
+vi.mock('@/services/database/migrate', () => ({
+  migrate: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/services/database/migrations', () => ({
+  getMigrations: vi.fn().mockReturnValue([]),
 }));
 
 // Mock settingsService, bookService, etc. to avoid deep deps
@@ -76,7 +95,7 @@ vi.mock('@/utils/book', () => ({
 }));
 
 import { WebAppService } from '@/services/webAppService';
-import { isPWA } from '@/services/environment';
+import { isPWA, isLocalDbDisabled } from '@/services/environment';
 import { getOSPlatform } from '@/utils/misc';
 
 // Helper: resolvePath is a module-level function, extract it for direct testing
@@ -470,6 +489,26 @@ describe('WebAppService', () => {
     test('returns correct prefix for empty fp with None', async () => {
       const prefix = await service.fs.getPrefix('None');
       expect(prefix).toBe('');
+    });
+  });
+
+  describe('openDatabase', () => {
+    test('opens a real WebDatabaseService when local DB is not disabled', async () => {
+      vi.mocked(isLocalDbDisabled).mockReturnValue(false);
+      const db = await service.openDatabase('statistics', 'statistics.db', 'Data');
+      expect(openWebDatabaseServiceMock).toHaveBeenCalled();
+      expect(db.constructor.name).not.toBe('NoopDatabaseService');
+    });
+
+    test('returns a no-op DatabaseService without touching WebDatabaseService when local DB is disabled', async () => {
+      vi.mocked(isLocalDbDisabled).mockReturnValue(true);
+      const db = await service.openDatabase('statistics', 'statistics.db', 'Data');
+      expect(openWebDatabaseServiceMock).not.toHaveBeenCalled();
+      await expect(db.select('SELECT 1')).resolves.toEqual([]);
+      await expect(db.execute('INSERT INTO x VALUES (1)')).resolves.toEqual({
+        rowsAffected: 0,
+        lastInsertId: 0,
+      });
     });
   });
 });

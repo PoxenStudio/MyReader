@@ -53,15 +53,12 @@ rsync -a public/ "$DIST_DIR/app/public/"
 mkdir -p "$DIST_DIR/app/.next/static"
 rsync -a .next/static/ "$DIST_DIR/app/.next/static/"
 
-# sharp (and its platform-specific native binaries, @img/sharp-*, @img/sharp-libvips-*)
-# gets traced into node_modules even though we never call it: `images.unoptimized`
-# is set in next.config.mjs, so Next never invokes sharp for image optimization.
-# The native binaries are also built for this build machine's OS/arch (e.g.
-# darwin-arm64) and wouldn't load inside the Linux production container anyway.
-# Safe to drop; this leaves a few harmless dangling symlinks elsewhere in
-# node_modules/.pnpm (nothing require()s them since sharp is never invoked).
 echo "Removing unused sharp package and native binaries..."
 find "$DIST_DIR/node_modules/.pnpm" -maxdepth 1 -type d \( -name 'sharp@*' -o -name '@img+sharp*' \) -exec rm -rf {} +
+
+echo "Removing unused turso wasm database (local DB disabled for the embedded reader)..."
+find "$DIST_DIR/node_modules/.pnpm" -maxdepth 1 -type d -name '@readest+turso-database*' -exec rm -rf {} +
+find "$DIST_DIR/app/.next" -iname 'turso.wasm32-wasi.*.wasm' -delete
 
 echo "Done: $APP_DIR/$DIST_DIR"
 echo "Run it with: cd $DIST_DIR && node app/server.js"
