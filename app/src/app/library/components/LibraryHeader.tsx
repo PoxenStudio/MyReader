@@ -301,10 +301,8 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
           </button>
 
           {isMobile && !showMobileSearch && (
-            <span className='flex flex-1 items-center justify-center'>
-              <span className='bg-base-300/50 max-w-full truncate rounded-full px-3 py-1 text-sm font-medium'>
-                {currentBookshelfTitle}
-              </span>
+            <span className='bg-base-300/50 max-w-full truncate rounded-full px-3 py-1 text-sm font-medium'>
+              {currentBookshelfTitle}
             </span>
           )}
 
