@@ -49,7 +49,12 @@
       "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/services/mybooks-show-other-annotations-sync.test.ts)",
       "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/hooks/useNativeSync.test.tsx)",
       "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/components/user-settings-dialog-annotation-data.test.tsx)",
-      "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/components/BooknoteItem-ownership.test.tsx)"
+      "Bash(./node_modules/.bin/dotenv -e .env -e .env.test.local -- ./node_modules/.bin/vitest run src/__tests__/components/BooknoteItem-ownership.test.tsx)",
+      "Bash(pnpm build-docker-dist *)",
+      "Bash(PORT=39871 timeout 8 node app/server.js)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:39871/)",
+      "Bash(pnpm --filter . exec biome lint app/src/app/library/components/BookshelfItem.tsx app/src/app/library/components/Bookshelf.tsx app/src/app/library/components/BookReviewDialog.tsx app/src/components/StarRatingInput.tsx app/src/services/mybooksService.ts)",
+      "Bash(pnpm --filter . exec biome format --write app/src/app/library/components/BookshelfItem.tsx app/src/app/library/components/Bookshelf.tsx app/src/app/library/components/BookReviewDialog.tsx app/src/components/StarRatingInput.tsx app/src/services/mybooksService.ts)"
     ]
   }
 }

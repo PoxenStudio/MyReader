@@ -126,6 +126,19 @@ export interface MyBooksSendToDeviceParams {
   ftp_password?: string;
 }
 
+export interface MyBooksReview {
+  id: number;
+  book_id: number;
+  reader_id: number;
+  nickname: string;
+  avatar: string;
+  rating: number; // 0-10
+  comment: string;
+  status: string;
+  update_time: string | null;
+  is_own: boolean;
+}
+
 export interface MyBooksSysInfo {
   title: string;
   books: number;
@@ -144,6 +157,7 @@ export interface MyBooksSysInfo {
     physical_books?: boolean;
     read?: boolean;
     sync?: boolean;
+    book_review?: boolean;
   };
 }
 
@@ -183,6 +197,7 @@ export interface MyBooksResponse<T = unknown> {
   avatar_url?: string;
   book_id?: number;
   devices?: MyBooksDevice[];
+  review?: MyBooksReview | null;
   // /user/reading_stats — document/MyBooks_WebAPI.md §2.10
   enabled?: boolean;
   totals?: MyBooksReadingStatsTotals;
@@ -814,6 +829,32 @@ export async function sendBookToDevice(
     JSON.stringify(params),
     'application/json',
   );
+}
+
+/**
+ * 获取当前用户对某本书的评价（用于评价对话框预填充）
+ */
+export async function getOwnReview(id: number): Promise<MyBooksReview | null> {
+  const response = await fetchMyBooks<{ review: MyBooksReview | null }>(`/book/${id}/review`);
+  return response.review ?? null;
+}
+
+/**
+ * 提交（新建或更新）对某本书的评价
+ */
+export async function submitReview(
+  id: number,
+  rating: number,
+  comment: string,
+): Promise<MyBooksReview> {
+  const response = await fetchMyBooks<{ review: MyBooksReview }>(
+    `/book/${id}/review`,
+    undefined,
+    'POST',
+    JSON.stringify({ rating, comment }),
+    'application/json',
+  );
+  return response.review as MyBooksReview;
 }
 
 /**

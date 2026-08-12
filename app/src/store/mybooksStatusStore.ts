@@ -101,6 +101,14 @@ export const useMyBooksSyncAllowed = (): boolean => {
   return sysInfo?.allow?.sync !== false;
 };
 
+// Defaults to true (matches the server's own ENABLE_BOOK_REVIEW default —
+// see webserver/handlers/base.py) so the review menu item isn't hidden
+// before the first /user/info response lands.
+export const useMyBooksBookReviewAllowed = (): boolean => {
+  const sysInfo = useMyBooksStatusStore((state) => state.sysInfo);
+  return sysInfo?.allow?.book_review !== false;
+};
+
 // Whether `note` (a BookNote) belongs to the current mybooks account — notes
 // with no `userId` are local/not-yet-synced and treated as the user's own.
 export const useIsOwnBooknote = (userId: string | undefined): boolean => {

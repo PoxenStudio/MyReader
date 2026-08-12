@@ -59,6 +59,7 @@ import ModalPortal from '@/components/ModalPortal';
 import BookshelfItem, { generateBookshelfItems } from './BookshelfItem';
 import SelectModeActions from './SelectModeActions';
 import SendToDeviceDialog from './SendToDeviceDialog';
+import BookReviewDialog from './BookReviewDialog';
 import { useAuth } from '@/context/AuthContext';
 import GroupingModal from './GroupingModal';
 import SetStatusAlert from './SetStatusAlert';
@@ -700,6 +701,28 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     };
   }, [user, _]);
 
+  const [reviewBook, setReviewBook] = useState<Book | null>(null);
+
+  useEffect(() => {
+    const handleReviewIntent = (event: CustomEvent) => {
+      const book = (event.detail as { book?: Book } | undefined)?.book;
+      if (!book) return;
+      if (!user) {
+        eventDispatcher.dispatch('toast', {
+          type: 'info',
+          message: _('Sign in to review this book'),
+          timeout: 2500,
+        });
+        return;
+      }
+      setReviewBook(book);
+    };
+    eventDispatcher.on('show-book-review-dialog', handleReviewIntent);
+    return () => {
+      eventDispatcher.off('show-book-review-dialog', handleReviewIntent);
+    };
+  }, [user, _]);
+
   // OverlayScrollbars + Virtuoso integration: Virtuoso manages its own
   // scroller; OverlayScrollbars wraps it for overlay scrollbar rendering.
   const osRootRef = useRef<HTMLDivElement>(null);
@@ -1079,6 +1102,11 @@ const Bookshelf: React.FC<BookshelfProps> = ({
         isOpen={!!sendToDeviceBook}
         book={sendToDeviceBook}
         onClose={() => setSendToDeviceBook(null)}
+      />
+      <BookReviewDialog
+        isOpen={!!reviewBook}
+        book={reviewBook}
+        onClose={() => setReviewBook(null)}
       />
     </div>
   );

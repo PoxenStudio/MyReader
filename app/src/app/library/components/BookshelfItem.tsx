@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useEnv } from '@/context/EnvContext';
 import { useLibraryStore } from '@/store/libraryStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useMyBooksBookReviewAllowed } from '@/store/mybooksStatusStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useLongPress } from '@/hooks/useLongPress';
 import { useAppRouter } from '@/hooks/useAppRouter';
@@ -147,6 +148,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
   const { settings } = useSettingsStore();
   const { getBookByHash, updateBook } = useLibraryStore();
   const { isAdmin } = useAuth();
+  const bookReviewAllowed = useMyBooksBookReviewAllowed();
   const { openBook, makeBookAvailable } = useOpenBook({ setLoading, handleBookDownload });
 
   const showBookDetailsModal = useCallback(async (book: Book) => {
@@ -300,6 +302,12 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
         eventDispatcher.dispatch('delete-books', { ids: [book.hash] });
       },
     });
+    const writeReviewMenuItem = await MenuItem.new({
+      text: _('Write a Review'),
+      action: async () => {
+        eventDispatcher.dispatch('show-book-review-dialog', { book });
+      },
+    });
     const availableFormats = Array.from(new Set((book.files ?? []).map((f) => f.format)));
     const readInFormatMenuItem =
       isCloudBook(book) && availableFormats.length > 1
@@ -374,6 +382,10 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
       menu.append(deleteBookMenuItem);
     }
 
+    if (book.storageType === 'cloud' && (book.bookId ?? 0) > 0 && bookReviewAllowed) {
+      menu.append(writeReviewMenuItem);
+    }
+
     return menu;
   };
 
@@ -441,7 +453,15 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
       cachedMenuRef.current = null;
       cached?.then((menu) => menu.close()).catch(() => {});
     };
-  }, [item, itemSelected, isSelectMode, settings.localBooksDir, settings.allowDelCloudBook, _]);
+  }, [
+    item,
+    itemSelected,
+    isSelectMode,
+    settings.localBooksDir,
+    settings.allowDelCloudBook,
+    bookReviewAllowed,
+    _,
+  ]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleSelectItem = useCallback(

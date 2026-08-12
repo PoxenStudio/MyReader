@@ -173,7 +173,12 @@
     "title": "MyBooks",
     "books": 10000,
     "version": "v3.41.0",
-    "upgrable": ""
+    "upgrable": "",
+    "allow": {
+      "book_review": false,
+      "physical_books": false,
+      "upload": false,
+    }
   },
   "user": {
     "id": 1,
@@ -189,6 +194,7 @@
 ```
 未登录时返回基础系统信息，用户信息中is_login为false，登录时会返回完整用户信息。
 sys中为基础系统信息，title为网站标题, books为在库书籍数量，version为当前系统版本。其中upgrable代表是否有升级版本，如果为有值且与version不同代表有可升级版本。
+sys/allow下的book_review表示是否允许用户评论，physical_books代表是否支持实体书，upload代表是否允许上传。
 
 
 ### 1.6 更新用户资料
