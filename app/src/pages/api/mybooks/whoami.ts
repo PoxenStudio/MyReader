@@ -9,7 +9,7 @@ interface WhoamiResponse {
 
 /**
  * Server-to-server bridge for the embedded reader entry point
- * (pages/reader-embed/open.tsx): forwards the browser's MyBooks session
+ * (pages/readerx/open.tsx): forwards the browser's MyBooks session
  * cookie to MyBooks' `GET /api/user/whoami` and relays the identity back.
  * Runs on the Next.js server so the forwarded Cookie header never reaches
  * client JS. Only meaningful in the same-origin, single-Docker deployment

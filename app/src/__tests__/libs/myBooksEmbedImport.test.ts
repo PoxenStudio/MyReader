@@ -186,7 +186,7 @@ describe('ensureMyBooksBookLocal', () => {
   });
 
   describe('local-file streaming (bookId+format probe, no physical path ever sent to the browser)', () => {
-    test('probe succeeds, no prior entry: builds a transient streaming Book without downloading, without exposing a path, without persisting', async () => {
+    test('probe succeeds, no prior entry: builds a transient streaming Book, persisting its metadata (not bytes) so it survives the readerx/open → /reader navigation', async () => {
       const fetchSpy = vi
         .spyOn(global, 'fetch')
         .mockResolvedValue(new Response(null, { status: 200 }));
@@ -196,18 +196,30 @@ describe('ensureMyBooksBookLocal', () => {
 
       expect(result.hash).toBe(buildCloudBookHash(42, 'EPUB'));
       expect(result.bookId).toBe(42);
-      expect(result.url).toBe('/api/mybooks/local-file?bookId=42&format=epub');
+      // Must be absolute: resolveBookContentSource (bookContent.ts) only
+      // recognizes a book.url as an openable RemoteFile source when
+      // isValidURL(book.url) parses it as a full http(s) URL — a relative
+      // path silently falls through to `{ kind: 'missing' }`, throwing
+      // BookFileNotFoundError when the reader tries to open it.
+      expect(result.url).toBe('http://localhost:3000/api/mybooks/local-file?bookId=42&format=epub');
       expect(fetchSpy).toHaveBeenCalledWith(
-        '/api/mybooks/local-file?bookId=42&format=epub',
+        'http://localhost:3000/api/mybooks/local-file?bookId=42&format=epub',
         expect.objectContaining({ method: 'HEAD', credentials: 'include' }),
       );
       expect(appService.downloadBook).not.toHaveBeenCalled();
       expect(getBookDetail).not.toHaveBeenCalled();
-      expect(appService.saveLibraryBooks).not.toHaveBeenCalled();
+      // Metadata (title/hash/url, not the file's bytes) must be persisted:
+      // navigating from pages/readerx/open.tsx to /reader crosses a Pages
+      // Router ↔ App Router boundary, which Next.js falls back to a hard
+      // navigation for — an in-memory-only entry wouldn't survive that and
+      // the reader would throw "Book not found".
+      expect(appService.saveLibraryBooks).toHaveBeenCalledWith([
+        expect.objectContaining({ hash: result.hash, url: result.url }),
+      ]);
       expect(useLibraryStore.getState().getBookByHash(result.hash)).toBe(result);
     });
 
-    test('probe succeeds, entry exists without bytes: switches it to streaming instead of downloading', async () => {
+    test('probe succeeds, entry exists without bytes: switches it to streaming instead of downloading, and persists the updated url', async () => {
       vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
       const hash = buildCloudBookHash(42, 'EPUB');
       const localBook: Book = {
@@ -225,8 +237,11 @@ describe('ensureMyBooksBookLocal', () => {
       const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'epub', appService });
 
       expect(result).toBe(localBook);
-      expect(result.url).toBe('/api/mybooks/local-file?bookId=42&format=epub');
+      expect(result.url).toBe('http://localhost:3000/api/mybooks/local-file?bookId=42&format=epub');
       expect(appService.downloadBook).not.toHaveBeenCalled();
+      expect(appService.saveLibraryBooks).toHaveBeenCalledWith([
+        expect.objectContaining({ hash, url: result.url }),
+      ]);
     });
 
     test('probe fails (e.g. non-embedded deployment): falls back to the download flow unchanged', async () => {

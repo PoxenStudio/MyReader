@@ -44,6 +44,7 @@ import {
   ensureMainLibraryWindow,
   closeReaderWindowOrGoToLibrary,
 } from '@/utils/nav';
+import { setEmbedReturnUrl } from '@/utils/embedReturn';
 
 const WebviewWindowCtor = WebviewWindow as unknown as { getByLabel: ReturnType<typeof vi.fn> };
 
@@ -79,7 +80,7 @@ beforeEach(() => {
 
   // Reset window.location
   Object.defineProperty(window, 'location', {
-    value: { pathname: '/library', search: '?q=test' },
+    value: { pathname: '/library', search: '?q=test', assign: vi.fn() },
     writable: true,
   });
 
@@ -327,6 +328,35 @@ describe('closeReaderWindowOrGoToLibrary', () => {
 
     expect(router.replace).toHaveBeenCalledWith('/library', undefined);
     expect(WebviewWindowCtor.getByLabel).not.toHaveBeenCalled();
+  });
+
+  test('for a book opened via the embedded reader, goes back to MyBooks instead of /library', async () => {
+    vi.mocked(isTauriAppPlatform).mockReturnValue(false);
+    setEmbedReturnUrl('cloud-42-epub', '/book/42');
+
+    const router = mockRouter();
+    await closeReaderWindowOrGoToLibrary(
+      makeAppServiceWithWindow() as never,
+      router,
+      'cloud-42-epub',
+    );
+
+    expect(window.location.assign).toHaveBeenCalledWith('/book/42');
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  test('for a non-embedded book, falls back to /library as before', async () => {
+    vi.mocked(isTauriAppPlatform).mockReturnValue(false);
+
+    const router = mockRouter();
+    await closeReaderWindowOrGoToLibrary(
+      makeAppServiceWithWindow() as never,
+      router,
+      'local-book-hash',
+    );
+
+    expect(window.location.assign).not.toHaveBeenCalled();
+    expect(router.replace).toHaveBeenCalledWith('/library', undefined);
   });
 
   test('in Tauri main window, navigates the same window to /library', async () => {

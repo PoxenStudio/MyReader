@@ -5,6 +5,7 @@ import { isPWA, isTauriAppPlatform, isWebAppPlatform } from '@/services/environm
 import { BOOK_IDS_SEPARATOR } from '@/services/constants';
 import { AppService } from '@/types/system';
 import { useAuthUIStore } from '@/store/authUIStore';
+import { consumeEmbedReturnUrl } from '@/utils/embedReturn';
 
 let readerWindowsCount = 0;
 const createReaderWindow = (appService: AppService, url: string) => {
@@ -138,7 +139,19 @@ export const navigateToLibrary = (
 export const closeReaderWindowOrGoToLibrary = async (
   appService: AppService | null,
   router: ReturnType<typeof useRouter>,
+  bookHash?: string,
 ) => {
+  // A book opened via the embedded reader entry point (pages/readerx/open.tsx)
+  // has no local library to fall back to, and in the merged single-origin
+  // deployment `/library` isn't even routed to MyReader (see
+  // document/MyReader_Embedded_WebApp.md §12.3) — it silently hands the page
+  // to MyBooks instead. Only stashed by that embedded flow, so this is a
+  // no-op for every other app form.
+  const returnUrl = bookHash ? consumeEmbedReturnUrl(bookHash) : null;
+  if (returnUrl) {
+    window.location.assign(returnUrl);
+    return;
+  }
   if (isTauriAppPlatform() && appService?.hasWindow) {
     const currentWindow = getCurrentWindow();
     if (currentWindow.label !== 'main') {

@@ -20,6 +20,7 @@ import { isTauriAppPlatform } from '@/services/environment';
 import { uniqueId } from '@/utils/misc';
 import { getBookHash } from '@/utils/book';
 import { consumeEmbedReturnUrl } from '@/utils/embedReturn';
+import { reportEmbedError } from '@/utils/embedClientLog';
 import { throttle } from '@/utils/throttle';
 import { eventDispatcher } from '@/utils/event';
 import {
@@ -76,12 +77,13 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
       if (!getViewState(key)) {
         initViewState(envConfig, id, key, isPrimary).catch((error) => {
           console.log('Error initializing book', key, error);
+          reportEmbedError(id, String(error));
           setErrorLoading(true);
           eventDispatcher.dispatch('toast', {
             message: _('Unable to open book') + '(' + error + ')',
             callback: async () => {
               const service = await envConfig.getAppService();
-              await closeReaderWindowOrGoToLibrary(service, router);
+              await closeReaderWindowOrGoToLibrary(service, router, id);
             },
             timeout: 2000,
             type: 'error',

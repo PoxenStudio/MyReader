@@ -6,6 +6,7 @@ import { useEnv } from '@/context/EnvContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { parseWebViewInfo } from '@/utils/ua';
 import { handleGlobalError } from '@/utils/error';
+import { resolveEmbedReturnUrlFromLocation } from '@/utils/embedReturn';
 
 interface ErrorPageProps {
   error: Error & { digest?: string };
@@ -27,7 +28,16 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
   }, [appService, error]);
 
   const handleGoHome = () => {
-    window.location.href = '/library';
+    // A book opened via the embedded reader entry point (pages/readerx/open.tsx)
+    // has no local library to go back to — and in the merged single-origin
+    // deployment `/library` isn't even routed to MyReader (see
+    // document/MyReader_Embedded_WebApp.md §12.3), so it would silently hand
+    // the page over to MyBooks instead. Send those sessions back to MyBooks.
+    const returnUrl = resolveEmbedReturnUrlFromLocation(
+      window.location.pathname,
+      window.location.search,
+    );
+    window.location.href = returnUrl || '/library';
   };
 
   const handleGoBack = () => {
