@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('@/services/environment', () => ({
   isTauriAppPlatform: () => false,
@@ -88,6 +88,16 @@ describe('ensureMyBooksBookLocal', () => {
       hashIndex: new Map(),
       visibleLibrary: [],
     });
+    // Default: the local-file streaming probe fails (as it would on any
+    // non-embedded deployment, or when MyBooks can't resolve the path) —
+    // tests exercising the download flow rely on this so they aren't
+    // accidentally short-circuited by the streaming branch. Tests that want
+    // to exercise streaming override this per-test.
+    vi.spyOn(global, 'fetch').mockRejectedValue(new Error('no local-file service'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   test('book already local with bytes present: returns it without downloading', async () => {
@@ -112,7 +122,7 @@ describe('ensureMyBooksBookLocal', () => {
     expect(getBookDetail).not.toHaveBeenCalled();
   });
 
-  test('book already local but bytes missing: downloads bytes and persists', async () => {
+  test('book already local but bytes missing, streaming unavailable: downloads bytes and persists', async () => {
     const hash = buildCloudBookHash(42, 'EPUB');
     const localBook: Book = {
       hash,
@@ -133,7 +143,7 @@ describe('ensureMyBooksBookLocal', () => {
     expect(result.downloadedAt).toBeDefined();
   });
 
-  test('book not local: fetches metadata, builds a cloud Book with the deterministic hash, downloads it', async () => {
+  test('book not local, streaming unavailable: fetches metadata, builds a cloud Book with the deterministic hash, downloads it', async () => {
     getBookDetail.mockResolvedValue(makeCloudBook());
     const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(true) });
 
@@ -173,5 +183,84 @@ describe('ensureMyBooksBookLocal', () => {
     await expect(
       ensureMyBooksBookLocal({ bookId: 999, format: 'epub', appService }),
     ).rejects.toThrow('Book not found on MyBooks');
+  });
+
+  describe('local-file streaming (bookId+format probe, no physical path ever sent to the browser)', () => {
+    test('probe succeeds, no prior entry: builds a transient streaming Book without downloading, without exposing a path, without persisting', async () => {
+      const fetchSpy = vi
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(new Response(null, { status: 200 }));
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(false) });
+
+      const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'epub', appService });
+
+      expect(result.hash).toBe(buildCloudBookHash(42, 'EPUB'));
+      expect(result.bookId).toBe(42);
+      expect(result.url).toBe('/api/mybooks/local-file?bookId=42&format=epub');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        '/api/mybooks/local-file?bookId=42&format=epub',
+        expect.objectContaining({ method: 'HEAD', credentials: 'include' }),
+      );
+      expect(appService.downloadBook).not.toHaveBeenCalled();
+      expect(getBookDetail).not.toHaveBeenCalled();
+      expect(appService.saveLibraryBooks).not.toHaveBeenCalled();
+      expect(useLibraryStore.getState().getBookByHash(result.hash)).toBe(result);
+    });
+
+    test('probe succeeds, entry exists without bytes: switches it to streaming instead of downloading', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+      const hash = buildCloudBookHash(42, 'EPUB');
+      const localBook: Book = {
+        hash,
+        format: 'EPUB',
+        title: 'Test Book',
+        author: 'Author',
+        createdAt: 1000,
+        updatedAt: 1000,
+      };
+      useLibraryStore.getState().setLibrary([localBook]);
+
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(false) });
+
+      const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'epub', appService });
+
+      expect(result).toBe(localBook);
+      expect(result.url).toBe('/api/mybooks/local-file?bookId=42&format=epub');
+      expect(appService.downloadBook).not.toHaveBeenCalled();
+    });
+
+    test('probe fails (e.g. non-embedded deployment): falls back to the download flow unchanged', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(true) });
+      getBookDetail.mockResolvedValue(makeCloudBook());
+
+      const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'epub', appService });
+
+      expect(getBookDetail).toHaveBeenCalledWith(42);
+      expect(appService.downloadBook).toHaveBeenCalled();
+      expect(result.url).not.toContain('local-file');
+    });
+
+    test('a fully-downloaded local copy is preferred over streaming and never triggers a probe', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch');
+      const hash = buildCloudBookHash(42, 'EPUB');
+      const localBook: Book = {
+        hash,
+        format: 'EPUB',
+        title: 'Test Book',
+        author: 'Author',
+        downloadedAt: 1000,
+        createdAt: 1000,
+        updatedAt: 1000,
+      };
+      useLibraryStore.getState().setLibrary([localBook]);
+
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(true) });
+
+      const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'epub', appService });
+
+      expect(result).toBe(localBook);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
   });
 });

@@ -20,6 +20,27 @@ interface EnsureMyBooksBookLocalArgs {
   onProgress?: ProgressHandler;
 }
 
+const buildLocalFileStreamUrl = (bookId: number, format: BookFormat): string =>
+  `/api/mybooks/local-file?bookId=${bookId}&format=${format.toLowerCase()}`;
+
+/**
+ * Probe whether the same-container embedded deployment can stream this
+ * book's bytes on demand (see document/MyReader_Embedded_WebApp.md §13)
+ * instead of downloading the whole file into IndexedDB. A HEAD request never
+ * exposes the physical path to the browser — MyReader's server resolves it
+ * internally via a server-to-server call to MyBooks — and costs nothing more
+ * than one small round trip; any failure (non-embedded deployment, book not
+ * shared on disk, MyBooks down, …) just falls back to the download flow.
+ */
+const canStreamLocalFile = async (streamUrl: string): Promise<boolean> => {
+  try {
+    const response = await fetch(streamUrl, { method: 'HEAD', credentials: 'include' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Same three-branch shape as ensureSharedBookLocal (shareImport.ts), adapted for
  * MyBooks cloud books opened via the embedded reader entry point instead of a
@@ -60,7 +81,46 @@ export const ensureMyBooksBookLocal = async ({
 
   const resolvedFormat = resolveEmbedFormat(format);
   if (resolvedFormat) {
-    const existing = findByHash(buildCloudBookHash(bookId, resolvedFormat));
+    const hash = buildCloudBookHash(bookId, resolvedFormat);
+    const existing = findByHash(hash);
+
+    // A fully-downloaded local copy (from a prior bookId-flow open) is
+    // strictly better than streaming over Range — prefer it when present.
+    if (existing?.downloadedAt && (await appService.isBookAvailable(existing))) {
+      return existing;
+    }
+
+    const streamUrl = buildLocalFileStreamUrl(bookId, resolvedFormat);
+    if (await canStreamLocalFile(streamUrl)) {
+      if (existing) {
+        existing.url = streamUrl;
+        existing.updatedAt = Date.now();
+        useLibraryStore.getState().setLibrary(library);
+        return existing;
+      }
+      // No prior entry at all — build a transient one. Kept in-memory only
+      // (not saveLibraryBooks-persisted): nothing is written next to the
+      // source file, and progress still syncs via the deterministic hash.
+      // Title/author are placeholders; FoliateViewer refines book.sourceTitle
+      // from the parsed doc metadata once it actually opens the file.
+      const now = Date.now();
+      const book: Book = {
+        hash,
+        bookId,
+        format: resolvedFormat,
+        sourceFormat: resolvedFormat,
+        title: `Book ${bookId}`,
+        author: '',
+        storageType: 'cloud',
+        createdAt: now,
+        updatedAt: now,
+        url: streamUrl,
+      };
+      library.push(book);
+      useLibraryStore.getState().setLibrary(library);
+      return book;
+    }
+
     if (existing) return downloadExisting(existing);
   }
 
