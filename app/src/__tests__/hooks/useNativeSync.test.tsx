@@ -255,6 +255,38 @@ describe('useNativeSync', () => {
     );
   });
 
+  test('drops a locally-cached note the server no longer returns, once it was already synced', async () => {
+    // Bug: pullNow's merge only ever adds/updates ids present in the
+    // response — it never reconciles a local note whose id is *missing*
+    // from a full (since=0) snapshot. So a note deleted server-side (or
+    // never pushed by any device) stayed cached locally forever, re-saved
+    // on every pull. A note that hasn't been pushed yet (newer than the
+    // last successful sync) must NOT be swept away just because it isn't
+    // on the server yet.
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: [] } as unknown as Awaited<
+      ReturnType<typeof h.pullSyncMock>
+    >);
+    h.state.config = {
+      location: 'local-loc',
+      updatedAt: 1000,
+      lastSyncedAtNotes: 5000,
+      booknotes: [
+        { id: 'stale', userId: '1', updatedAt: 100, note: 'gone on server' } as BookNote,
+        { id: 'pending', updatedAt: 9000, note: 'not pushed yet' } as BookNote,
+      ],
+    } as unknown as typeof h.state.config;
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    expect(h.setConfigMock).toHaveBeenCalledWith(
+      'book-key',
+      expect.objectContaining({
+        booknotes: [expect.objectContaining({ id: 'pending' })],
+      }),
+    );
+  });
+
   test('does not push back a note that belongs to another user', async () => {
     h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
     h.state.config = {

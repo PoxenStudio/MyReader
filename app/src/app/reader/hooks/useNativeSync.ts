@@ -202,8 +202,36 @@ export const useNativeSync = (bookKey: string) => {
         : { ...config };
       mergedConfig.lastSyncedAtConfig = now;
 
+      // `pullSync` is always called with since=0 (see above), so `remoteNotes`
+      // is a full snapshot of what the server has for this query scope — not
+      // a delta. A local note missing from that snapshot means the server no
+      // longer has it (deleted elsewhere), and the stale local copy must be
+      // dropped; otherwise it survives every pull forever (only a full
+      // site-data wipe clears it, since the cache lives in IndexedDB).
+      //
+      // The one case that must NOT be swept away: a note edited/created here
+      // since the last successful sync but not pushed yet — the server
+      // simply doesn't know about it yet, that's not the same as "deleted".
+      // `lastSyncedAtNotes` (stamped after every successful push/pull) is the
+      // watermark: only notes at or before it are safe to reconcile against
+      // an authoritative snapshot.
+      //
+      // `own=1` pulls only cover this account's own notes, so a note pulled
+      // in earlier from another user (via showOtherAnnotations) is out of
+      // scope for that query and must be left alone.
+      const currentUserId = useMyBooksStatusStore.getState().currentUserId;
+      const remoteNoteIds = new Set(remoteNotes.map((n) => n.id));
+      const syncWatermark = config.lastSyncedAtNotes ?? 0;
+
       const byId = new Map<string, BookNote>();
-      for (const n of config.booknotes ?? []) byId.set(n.id, n);
+      for (const n of config.booknotes ?? []) {
+        const isOwn = !n.userId || n.userId === String(currentUserId);
+        const inScope = showOtherAnnotations || isOwn;
+        const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
+        const staleOnServer = inScope && !remoteNoteIds.has(n.id) && ts <= syncWatermark;
+        if (staleOnServer) continue;
+        byId.set(n.id, n);
+      }
       for (const remote of remoteNotes) {
         const local = byId.get(remote.id);
         const remoteTs = Math.max(remote.updatedAt ?? 0, remote.deletedAt ?? 0);
