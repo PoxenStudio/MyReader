@@ -18,6 +18,7 @@ import BookDetailView from './BookDetailView';
 import BookDetailEdit from './BookDetailEdit';
 import SourceSelector from './SourceSelector';
 import Spinner from '../Spinner';
+import BookReviewDialog from '@/app/library/components/BookReviewDialog';
 
 interface BookDetailModalProps {
   book: Book;
@@ -66,6 +67,7 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
   const [activeDeleteAction, setActiveDeleteAction] = useState<DeleteMenuAction | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [showReview, setShowReview] = useState(false);
   const [bookMeta, setBookMeta] = useState<BookMetadata | null>(null);
   const [fileSize, setFileSize] = useState<number | null>(null);
   // The parent owns the `book` prop and does not re-pass it after a metadata
@@ -213,6 +215,12 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
     }, 0);
   };
 
+  // Sign-in is enforced by BookDetailView itself (the review button only
+  // renders when a user is present), so no gating is needed here.
+  const handleReview = () => {
+    setShowReview(true);
+  };
+
   const currentDeleteConfig = activeDeleteAction ? deleteConfigs[activeDeleteAction] : null;
 
   return (
@@ -257,6 +265,7 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
                 onDownload={handleBookDownload ? handleDownload : undefined}
                 onUpload={handleBookUpload ? handleReupload : undefined}
                 onExport={handleBookExport}
+                onReview={handleReview}
               />
             )}
           </div>
@@ -277,6 +286,8 @@ const BookDetailModal: React.FC<BookDetailModalProps> = ({
             <Spinner loading />
           </div>
         )}
+
+        <BookReviewDialog isOpen={showReview} book={book} onClose={() => setShowReview(false)} />
 
         {activeDeleteAction && currentDeleteConfig && (
           <ModalPortal>

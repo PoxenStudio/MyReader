@@ -5,6 +5,7 @@ import {
   MdOutlineCloudDownload,
   MdOutlineDelete,
   MdOutlineEdit,
+  MdOutlineThumbUpOffAlt,
   MdSaveAlt,
   MdExpandMore,
   MdExpandLess,
@@ -13,8 +14,11 @@ import {
 import { Book } from '@/types/book';
 import { BookMetadata } from '@/libs/document';
 import { useTranslation } from '@/hooks/useTranslation';
+import { isTauriAppPlatform } from '@/services/environment';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useMyBooksBookReviewAllowed } from '@/store/mybooksStatusStore';
 import { useEnv } from '@/context/EnvContext';
+import { useAuth } from '@/context/AuthContext';
 import {
   formatAuthors,
   formatDate,
@@ -39,6 +43,7 @@ interface BookDetailViewProps {
   onDownload?: () => void;
   onUpload?: () => void;
   onExport?: () => void;
+  onReview?: () => void;
 }
 
 const BookDetailView: React.FC<BookDetailViewProps> = ({
@@ -51,10 +56,13 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
   onDownload,
   onUpload,
   onExport,
+  onReview,
 }) => {
   const _ = useTranslation();
   const { envConfig } = useEnv();
   const { settings } = useSettingsStore();
+  const reviewAllowed = useMyBooksBookReviewAllowed();
+  const { user } = useAuth();
 
   const toggleSeriesCollapse = () => {
     saveSysSettings(envConfig, 'metadataSeriesCollapsed', !settings.metadataSeriesCollapsed);
@@ -91,7 +99,7 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
             )}
           </div>
           <div className='flex flex-nowrap items-center gap-3 sm:gap-x-4'>
-            {onEdit && (
+            {book.storageType !== 'cloud' && onEdit && (
               <button
                 onClick={onEdit}
                 className={!metadata ? 'btn-disabled opacity-50' : ''}
@@ -124,6 +132,16 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
                 <MdSaveAlt className='fill-base-content' />
               </button>
             )}
+            {isTauriAppPlatform() &&
+              !!user &&
+              book.storageType === 'cloud' &&
+              (book.bookId ?? 0) > 0 &&
+              reviewAllowed &&
+              onReview && (
+                <button onClick={onReview} title={_('Write a Review')}>
+                  <MdOutlineThumbUpOffAlt className='fill-base-content' />
+                </button>
+              )}
           </div>
         </div>
       </div>

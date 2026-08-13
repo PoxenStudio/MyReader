@@ -36,6 +36,14 @@ vi.mock('@/context/EnvContext', () => ({
   useEnv: () => ({ envConfig: {}, appService: null }),
 }));
 
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
+vi.mock('@/services/environment', () => ({
+  isTauriAppPlatform: () => false,
+}));
+
 vi.mock('@/helpers/settings', () => ({
   saveSysSettings: vi.fn(),
 }));
