@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FaSearch, FaTimes } from 'react-icons/fa';
 
 import { useBookDataStore } from '@/store/bookDataStore';
+import { useEnv } from '@/context/EnvContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { BookNote } from '@/types/book';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
@@ -20,6 +21,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
   onSearchResultChange,
 }) => {
   const _ = useTranslation();
+  const { appService } = useEnv();
   const { getConfig } = useBookDataStore();
   const [searchTerm, setSearchTerm] = useState(term);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -40,10 +42,14 @@ const SearchBar: React.FC<SearchBarProps> = ({
   }, [term]);
 
   useEffect(() => {
-    if (isVisible && inputRef.current) {
+    // Auto-focusing on mobile pops the system keyboard, which then flashes
+    // briefly when the reader closes and this input unmounts. Only desktop
+    // benefits from the auto-focus, so skip it on mobile (see sidebar's
+    // SearchBar, which guards the same call).
+    if (isVisible && inputRef.current && !appService?.isMobile) {
       inputRef.current.focus();
     }
-  }, [isVisible]);
+  }, [isVisible, appService?.isMobile]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

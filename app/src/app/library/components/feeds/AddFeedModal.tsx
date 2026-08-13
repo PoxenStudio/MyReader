@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Dialog from '@/components/Dialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useFeedStore } from '@/store/feedStore';
@@ -18,12 +18,18 @@ const AddFeedModal: React.FC<AddFeedModalProps> = ({ isOpen, onClose, onSubmit }
   const [url, setUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     setUrl('');
     setSubmitting(false);
     setError(null);
+    // Dialog stays mounted while closed (only its `open` attribute
+    // toggles), so `autoFocus` would fire once on that initial mount
+    // regardless of `isOpen` and never again on subsequent opens. Focus
+    // explicitly on every open instead (see #keyboard-flash).
+    inputRef.current?.focus();
   }, [isOpen]);
 
   const submit = async () => {
@@ -66,8 +72,8 @@ const AddFeedModal: React.FC<AddFeedModalProps> = ({ isOpen, onClose, onSubmit }
           {_('Paste an RSS, Atom, or JSON Feed URL to subscribe.')}
         </p>
         <input
+          ref={inputRef}
           type='url'
-          autoFocus
           className='input input-bordered eink-bordered placeholder:text-base-content/35 w-full'
           placeholder='https://example.com/feed.xml'
           value={url}

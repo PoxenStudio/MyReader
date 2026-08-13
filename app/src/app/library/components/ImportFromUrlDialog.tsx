@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MdLink } from 'react-icons/md';
 import Dialog from '@/components/Dialog';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -22,6 +22,7 @@ const ImportFromUrlDialog: React.FC<ImportFromUrlDialogProps> = ({ isOpen, onClo
   const [url, setUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Reset transient state every time the dialog reopens.
   useEffect(() => {
@@ -29,6 +30,11 @@ const ImportFromUrlDialog: React.FC<ImportFromUrlDialogProps> = ({ isOpen, onClo
     setUrl('');
     setSubmitting(false);
     setError(null);
+    // Dialog stays mounted while closed (only its `open` attribute
+    // toggles), so `autoFocus` would fire once on that initial mount
+    // regardless of `isOpen` and never again on subsequent opens. Focus
+    // explicitly on every open instead (see #keyboard-flash).
+    inputRef.current?.focus();
   }, [isOpen]);
 
   const submit = async () => {
@@ -69,8 +75,8 @@ const ImportFromUrlDialog: React.FC<ImportFromUrlDialogProps> = ({ isOpen, onClo
           {_('Paste an article link. MyReader clips the page and saves it to your library.')}
         </p>
         <input
+          ref={inputRef}
           type='url'
-          autoFocus
           // Explicit placeholder colour — daisyUI's `input-bordered`
           // leaves placeholders too dark on light themes; the user
           // can mistake the example for actual content.
