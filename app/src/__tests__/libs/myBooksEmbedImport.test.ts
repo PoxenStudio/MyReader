@@ -190,6 +190,16 @@ describe('ensureMyBooksBookLocal', () => {
       const fetchSpy = vi
         .spyOn(global, 'fetch')
         .mockResolvedValue(new Response(null, { status: 200 }));
+      getBookDetail.mockResolvedValue(
+        makeCloudBook({
+          series: 'The Series',
+          series_index: 2,
+          publisher: 'Pub Co',
+          pubdate: '2020-01-01',
+          comments: 'A description',
+          rating: 8,
+        }),
+      );
       const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(false) });
 
       const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'epub', appService });
@@ -207,7 +217,26 @@ describe('ensureMyBooksBookLocal', () => {
         expect.objectContaining({ method: 'HEAD', credentials: 'include' }),
       );
       expect(appService.downloadBook).not.toHaveBeenCalled();
-      expect(getBookDetail).not.toHaveBeenCalled();
+      // Series/rating/publisher/published/description aren't in the
+      // bookId+format probe — only MyBooks' book-detail endpoint has them —
+      // so streaming still fetches this (cheap: JSON metadata, not bytes).
+      expect(getBookDetail).toHaveBeenCalledWith(42);
+      expect(result.rating).toBe(8);
+      expect(result.metadata?.series).toBe('The Series');
+      expect(result.metadata?.seriesIndex).toBe(2);
+      expect(result.metadata?.publisher).toBe('Pub Co');
+      expect(result.metadata?.published).toBe('2020-01-01');
+      expect(result.metadata?.description).toBe('A description');
+      // Points straight at MyBooks' own cover endpoint (same origin in the
+      // merged deployment — see document/MyReader_Embedded_WebApp.md) rather
+      // than a local file: this book's bytes were never downloaded, so
+      // there's no local cover to extract. Both fields matter: coverImageUrl
+      // for this page's own in-memory render, originCoverUrl because it's
+      // the one saveLibraryBooks doesn't strip — loadLibraryBooks
+      // (libraryService.ts) rebuilds coverImageUrl from it on every future
+      // reload instead of clobbering it with a broken local-file lookup.
+      expect(result.coverImageUrl).toBe('http://localhost:3000/get/cover/42.jpg');
+      expect(result.originCoverUrl).toBe('http://localhost:3000/get/cover/42.jpg');
       // Metadata (title/hash/url, not the file's bytes) must be persisted:
       // navigating from pages/readerx/open.tsx to /reader crosses a Pages
       // Router ↔ App Router boundary, which Next.js falls back to a hard
@@ -219,8 +248,9 @@ describe('ensureMyBooksBookLocal', () => {
       expect(useLibraryStore.getState().getBookByHash(result.hash)).toBe(result);
     });
 
-    test('probe succeeds, entry exists without bytes: switches it to streaming instead of downloading, and persists the updated url', async () => {
+    test('probe succeeds, entry exists without bytes: switches it to streaming instead of downloading, persists the updated url, and fills in metadata it never had', async () => {
       vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+      getBookDetail.mockResolvedValue(makeCloudBook({ publisher: 'Pub Co', rating: 6 }));
       const hash = buildCloudBookHash(42, 'EPUB');
       const localBook: Book = {
         hash,
@@ -238,10 +268,65 @@ describe('ensureMyBooksBookLocal', () => {
 
       expect(result).toBe(localBook);
       expect(result.url).toBe('http://localhost:3000/api/mybooks/local-file?bookId=42&format=epub');
+      expect(result.coverImageUrl).toBe('http://localhost:3000/get/cover/42.jpg');
+      expect(result.originCoverUrl).toBe('http://localhost:3000/get/cover/42.jpg');
+      expect(result.metadata?.publisher).toBe('Pub Co');
+      expect(result.rating).toBe(6);
       expect(appService.downloadBook).not.toHaveBeenCalled();
       expect(appService.saveLibraryBooks).toHaveBeenCalledWith([
         expect.objectContaining({ hash, url: result.url }),
       ]);
+    });
+
+    test('probe succeeds, entry already has metadata (e.g. user-edited via BookDetailEdit): leaves it alone', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+      const hash = buildCloudBookHash(42, 'EPUB');
+      const localBook: Book = {
+        hash,
+        format: 'EPUB',
+        title: 'Test Book',
+        author: 'Author',
+        rating: 10,
+        metadata: { title: 'Test Book', author: 'Author', publisher: 'My Own Edit' },
+        createdAt: 1000,
+        updatedAt: 1000,
+      };
+      useLibraryStore.getState().setLibrary([localBook]);
+
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(false) });
+
+      const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'epub', appService });
+
+      expect(getBookDetail).not.toHaveBeenCalled();
+      expect(result.metadata?.publisher).toBe('My Own Edit');
+      expect(result.rating).toBe(10);
+    });
+
+    test('probe succeeds, entry exists with a stale broken cover from before the coverImageUrl fix: corrects it', async () => {
+      // A book persisted by an older build of ensureMyBooksBookLocal (before
+      // it set coverImageUrl at all) can carry the broken local-file lookup
+      // result (see libraryService.ts) baked into disk. Since
+      // loadLibraryBooks now deliberately leaves a cloud/undownloaded book's
+      // coverImageUrl alone, nothing else will ever correct it — this must.
+      vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+      const hash = buildCloudBookHash(42, 'EPUB');
+      const localBook: Book = {
+        hash,
+        format: 'EPUB',
+        title: 'Test Book',
+        author: 'Author',
+        createdAt: 1000,
+        updatedAt: 1000,
+        coverImageUrl: 'MyReader/Books/cloud-42-epub/cover.png',
+      };
+      useLibraryStore.getState().setLibrary([localBook]);
+
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(false) });
+
+      const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'epub', appService });
+
+      expect(result.coverImageUrl).toBe('http://localhost:3000/get/cover/42.jpg');
+      expect(result.originCoverUrl).toBe('http://localhost:3000/get/cover/42.jpg');
     });
 
     test('probe fails (e.g. non-embedded deployment): falls back to the download flow unchanged', async () => {

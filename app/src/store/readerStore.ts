@@ -22,7 +22,13 @@ import type { FileSystem } from '@/types/system';
 import { isFeedBookUrl, parseFeedBookUrl } from '@/services/rss/feedBookUrl';
 import { openFeedBookDoc } from '@/services/rss/feedReader';
 import { BOOK_NAV_VERSION, computeBookNav, hydrateBookNav, updateToc } from '@/services/nav';
-import { formatTitle, getBookHash, getMetadataHash, getPrimaryLanguage } from '@/utils/book';
+import {
+  formatAuthors,
+  formatTitle,
+  getBookHash,
+  getMetadataHash,
+  getPrimaryLanguage,
+} from '@/utils/book';
 import { getBaseFilename } from '@/utils/path';
 import { SUPPORTED_LANGNAMES } from '@/services/constants';
 import { useSettingsStore } from './settingsStore';
@@ -266,6 +272,20 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
         bookDoc.metadata.title = getBaseFilename(file.name);
       }
       book.sourceTitle = formatTitle(bookDoc.metadata.title);
+      // A streamed cloud book (ensureMyBooksBookLocal's fast path — see
+      // myBooksEmbedImport.ts) never goes through the normal import flow
+      // (bookService.ts importBook), which is what normally fills in
+      // `title`/`author` from the parsed doc — it only has the placeholder
+      // `Book <bookId>` / '' set at stream time. `title`/`author` (unlike
+      // `sourceTitle`) are what BookCard/BookDetailView actually render, so
+      // without this they'd stay stuck on the placeholder even after the
+      // file opens and its real metadata is known.
+      if (book.storageType === 'cloud' && !book.downloadedAt) {
+        book.title = book.sourceTitle;
+        if (bookDoc.metadata.author) {
+          book.author = formatAuthors(bookDoc.metadata.author, bookDoc.metadata.language);
+        }
+      }
       // Correct language codes mistakenly set with language names
       if (typeof bookDoc.metadata?.language === 'string') {
         if (bookDoc.metadata.language in SUPPORTED_LANGNAMES) {

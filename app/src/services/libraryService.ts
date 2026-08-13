@@ -30,7 +30,21 @@ export async function loadLibraryBooks(
   const books = await safeLoadJSON<Book[]>(fs, libraryFilename, 'Books', []);
 
   await processInBatches(books, COVER_CONCURRENCY, async (book) => {
-    book.coverImageUrl = await generateCoverImageUrl(book);
+    // generateCoverImageUrl assumes the cover was extracted/downloaded next
+    // to a locally-stored copy of the book. A cloud book with no local bytes
+    // (e.g. the embedded reader's streaming Book — see
+    // ensureMyBooksBookLocal in myBooksEmbedImport.ts) has no such file, so
+    // calling it would silently produce a broken local-file lookup (an <img>
+    // pointed at it then resolves as a bogus path relative to the current
+    // page). Fall back to originCoverUrl instead — unlike coverImageUrl
+    // (normally an ephemeral blob: URL, stripped by saveLibraryBooks before
+    // every write), originCoverUrl survives disk round-trips, so this is the
+    // only signal still available after a reload.
+    if (book.storageType === 'cloud' && !book.downloadedAt) {
+      book.coverImageUrl = book.originCoverUrl ?? undefined;
+    } else {
+      book.coverImageUrl = await generateCoverImageUrl(book);
+    }
     book.updatedAt ??= book.lastUpdated || Date.now();
     book.bookId ??= 0;
   });

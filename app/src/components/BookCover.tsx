@@ -11,6 +11,7 @@ import { isRemoteImageUrl } from '@/utils/image';
 import { getOrCreateCoverObjectUrl, peekCachedCoverObjectUrl } from '@/utils/coverObjectUrlCache';
 import { useSettingsStore } from '@/store/settingsStore';
 import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
+import { reportEmbedError } from '@/utils/embedClientLog';
 
 const COVER_CACHE_NAME = 'myreader-book-covers-v1';
 
@@ -187,6 +188,14 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
 
     useEffect(() => {
       const coverUrl = resolveCoverUrl(book);
+      // Diagnostic only: reportEmbedError is a no-op unless `book` was opened
+      // via the embedded reader flow (see embedClientLog.ts), where it
+      // relays to docker logs — this pins down exactly what BookCover
+      // resolved a cover to without needing devtools access.
+      reportEmbedError(
+        book.hash,
+        `BookCover: resolved=${coverUrl ?? '(none)'} book.coverImageUrl=${book.coverImageUrl ?? '(none)'} metadata.coverImageUrl=${book.metadata?.coverImageUrl ?? '(none)'}`,
+      );
       if (!coverUrl) {
         toggleImageVisibility(false);
         return;

@@ -12,7 +12,7 @@ import { isTauriAppPlatform } from '@/services/environment';
  * 将 MyBooksBook 上的出版社/出版日期/丛书/简介等字段转换为本地 BookMetadata，
  * 使云端书籍在下载前也能在书籍详情中正确显示这些信息。
  */
-function buildMetadataFromCloudBook(cloudBook: MyBooksBook): BookMetadata {
+export function buildMetadataFromCloudBook(cloudBook: MyBooksBook): BookMetadata {
   return {
     title: cloudBook.title,
     author: cloudBook.author,
