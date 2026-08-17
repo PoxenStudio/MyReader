@@ -12,7 +12,12 @@
 
 ![MyReader UI](document/main_ui.jpg)
 
+Android UI
+
+![Android MainUI](document/android_mainui.jpeg)
+
 文档[MyReader API](document/MyBooks_WebAPI.md)中为MyBooks的API定义。
+
 
 主要变更包括：
 1. 实现MyBooks账户的登录与注销功能。
@@ -21,6 +26,7 @@
 3. 增加对MyBooks书籍的下载及阅读支持。 书籍信息分为本地和云端两类, 但不需要做自动同步的操作。之前的多云端同步的功能需要禁用，只做为MyBooks中书籍下载和本地阅读的功能。
 4. Library中的搜索区分当前书架为本地图书时即搜索本地图书，其它情况则为使用MyBooks的搜索接口进行搜索，并使用书架展示。
 5. 支持将阅读数据同步到MyBooks。
+注意：连接MyBooks服务不需要配置WebDAV同步数据，而是使用自定义协议自动同步阅读数据。
 
 ## 安装运行
 在Release中下载对应平台的安装包进行安装。所有安装包都没有进行签名，macOS下需要下载后对下载的dmg执行如下命令:
