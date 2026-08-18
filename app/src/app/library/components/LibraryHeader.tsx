@@ -258,6 +258,12 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
     (acc, item) => acc + ('books' in item ? item.books.length : 1),
     0,
   );
+  const searchPlaceholder =
+    searchCategory !== 'local'
+      ? _('Search in MyBooks...')
+      : currentBooksCount > 1
+        ? _('Search in {{count}} Book(s)...', { count: currentBooksCount })
+        : _('Search Books...');
 
   if (!insets) return null;
 
@@ -355,13 +361,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
                 <input
                   type='text'
                   value={searchQuery}
-                  placeholder={
-                    currentBooksCount > 1
-                      ? _('Search in {{count}} Book(s)...', {
-                          count: currentBooksCount,
-                        })
-                      : _('Search Books...')
-                  }
+                  placeholder={searchPlaceholder}
                   onChange={handleSearchChange}
                   spellCheck='false'
                   className={clsx(
@@ -569,13 +569,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
             <input
               type='text'
               value={searchQuery}
-              placeholder={
-                currentBooksCount > 1
-                  ? _('Search in {{count}} Book(s)...', {
-                      count: currentBooksCount,
-                    })
-                  : _('Search Books...')
-              }
+              placeholder={searchPlaceholder}
               onChange={handleSearchChange}
               spellCheck='false'
               autoFocus
