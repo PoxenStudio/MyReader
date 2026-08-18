@@ -206,12 +206,16 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   const groupId = searchParams?.get('group') || '';
   const queryTerm = searchParams?.get('q') || null;
   const viewMode = searchParams?.get('view') || settings.libraryViewMode;
-  // MyBooks search results come back in its own relevance order, and
-  // "Load more" only appends more pages of that same order — re-sorting on
-  // the client would reshuffle results already on screen every time more
-  // load in. So sorting is skipped entirely for search results, which are
-  // always shown in the order the server returned them.
-  const isSearchResults = source === 'cloud' && (searchParams?.get('type') || 'all') === 'search';
+  // Every MyBooks cloud listing (search, Favorites, a category, ...) comes
+  // back in the server's own order, and "Load more" only appends more pages
+  // of that same order. Browsed cloud books also get a fabricated
+  // createdAt/updatedAt of "now" at conversion time (see
+  // convertMyBooksToLocalBook), which drifts later with every page fetched —
+  // re-sorting on the client (the default sort is "Date Read" descending)
+  // would keep shoving each newly loaded page to the very front instead of
+  // appending it. So sorting is skipped entirely for cloud listings, which
+  // are always shown in the order the server returned them.
+  const isCloudListing = source === 'cloud';
   const storedSortBy = ensureLibrarySortByType(searchParams?.get('sort'), settings.librarySortBy);
   const sortOrder = searchParams?.get('order') || (settings.librarySortAscending ? 'asc' : 'desc');
   const groupBy = ensureLibraryGroupByType(searchParams?.get('groupBy'), settings.libraryGroupBy);
@@ -281,6 +285,16 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   }, [libraryBooks, queryTerm]);
 
   const currentBookshelfItems = useMemo(() => {
+    // Cloud listings must stay a flat, server-ordered list — both
+    // `generateBookshelfItems` (the default 'Group' mode) and
+    // `createBookGroups` re-sort their output by `updatedAt`/name, which is
+    // exactly the reordering `isCloudListing` is meant to prevent. Skipping
+    // grouping entirely here (not just the later sort in
+    // `sortedBookshelfItems`) is what actually keeps a "Load more" page
+    // appended instead of jumping to the front.
+    if (isCloudListing) {
+      return filteredBooks;
+    }
     if (groupBy === LibraryGroupByType.Group) {
       // Use existing generateBookshelfItems for group mode
       const groupName = getGroupName(groupId) || '';
@@ -307,7 +321,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
 
       return allItems;
     }
-  }, [filteredBooks, groupBy, groupId, getGroupName]);
+  }, [filteredBooks, groupBy, groupId, getGroupName, isCloudListing]);
 
   useEffect(() => {
     if (groupId && currentBookshelfItems.length === 0) {
@@ -318,7 +332,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   }, [searchParams, groupId, currentBookshelfItems.length, updateUrlParams]);
 
   const sortedBookshelfItems = useMemo(() => {
-    if (isSearchResults) {
+    if (isCloudListing) {
       return currentBookshelfItems;
     }
 
@@ -388,7 +402,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
 
     return allItems;
   }, [
-    isSearchResults,
+    isCloudListing,
     sortOrder,
     sortBy,
     sortBy2,

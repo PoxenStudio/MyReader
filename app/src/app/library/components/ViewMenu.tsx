@@ -27,13 +27,11 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
   const { envConfig } = useEnv();
   const { settings } = useSettingsStore();
 
-  // Search results come back in MyBooks' own relevance order, and paginating
-  // ("Load more") only appends to that order — re-sorting on the client
-  // would reshuffle already-visible results each time more load in. So sort
-  // is disabled while viewing search results; see Bookshelf's matching skip.
-  const isSearchResults =
-    (searchParams?.get('source') || 'local') === 'cloud' &&
-    (searchParams?.get('type') || 'all') === 'search';
+  // Every MyBooks cloud listing comes back in the server's own order, and
+  // paginating ("Load more") only appends to that order — re-sorting on the
+  // client would reshuffle already-visible results each time more load in.
+  // So sort is disabled for any cloud listing; see Bookshelf's matching skip.
+  const isCloudListing = (searchParams?.get('source') || 'local') === 'cloud';
 
   const viewMode = settings.libraryViewMode;
   const coverFit = settings.libraryCoverFit;
@@ -269,7 +267,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
         label={_('Sort by...')}
         detailsOpen={false}
         buttonClass='py-[4px]'
-        disabled={isSearchResults}
+        disabled={isCloudListing}
       >
         <ul className='ms-0 flex flex-col ps-0 before:hidden'>
           {sortByOptions.map((option) => {
@@ -306,7 +304,7 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
         label={_('Then by...')}
         detailsOpen={false}
         buttonClass='py-[4px]'
-        disabled={isSearchResults}
+        disabled={isCloudListing}
       >
         <ul className='ms-0 flex flex-col ps-0 before:hidden'>
           {sortBy2Options.map((option) => {

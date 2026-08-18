@@ -154,7 +154,7 @@ const baseProps = {
 // would visibly reorder them.
 const serverOrderedBooks = [makeBook('book-zzz', 'Zzz Title'), makeBook('book-aaa', 'Aaa Title')];
 
-describe('Bookshelf search results ignore the sort setting', () => {
+describe('Bookshelf cloud listings ignore the sort setting', () => {
   it('keeps MyBooks server order for cloud search results, ignoring the sort-by setting', () => {
     searchParamsValue = new URLSearchParams('source=cloud&type=search');
 
@@ -172,16 +172,36 @@ describe('Bookshelf search results ignore the sort setting', () => {
     expect(rendered).toEqual(['book-zzz', 'book-aaa']);
   });
 
-  it('still sorts a regular cloud browse listing (not search) by title', () => {
-    searchParamsValue = new URLSearchParams('source=cloud&type=all');
+  it(
+    'also keeps server order for a regular cloud browse listing (not search) — a Load More ' +
+      'page must append, not jump to the front',
+    () => {
+      searchParamsValue = new URLSearchParams('source=cloud&type=all');
+
+      render(
+        <Bookshelf
+          {...baseProps}
+          libraryBooks={serverOrderedBooks}
+          source='cloud'
+          isCloudLibrary
+          cloudBooksTotal={2}
+        />,
+      );
+
+      const rendered = screen.getAllByTestId('book-item').map((el) => el.textContent);
+      expect(rendered).toEqual(['book-zzz', 'book-aaa']);
+    },
+  );
+
+  it('still sorts the local library by title (unaffected — only cloud listings skip sorting)', () => {
+    searchParamsValue = new URLSearchParams();
 
     render(
       <Bookshelf
         {...baseProps}
         libraryBooks={serverOrderedBooks}
-        source='cloud'
-        isCloudLibrary
-        cloudBooksTotal={2}
+        source='local'
+        cloudBooksTotal={0}
       />,
     );
 
