@@ -395,10 +395,18 @@ jobs:
           echo "Uploading updated latest.json to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
 
-      # Unlike Android, app/src-tauri/gen/apple is committed to git (not
-      # gitignored), so there's no `tauri ios init` regeneration step needed
-      # here — the checked-in Xcode project is used as-is.
-      #
+      # app/src-tauri/gen/apple is gitignored (app/.gitignore ignores
+      # `src-tauri/gen` wholesale; only a handful of custom Swift files are
+      # force-committed as exceptions), so the .xcodeproj/project.yml/Podfile
+      # that xcodegen needs to build the project don't exist on a fresh
+      # checkout. Regenerate them the same way local dev does ("运行一次" in
+      # README.md) before building.
+      - name: ensure xcodegen and cocoapods are available
+        if: matrix.config.release == 'ios'
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          command -v pod >/dev/null || sudo gem install cocoapods
+
       # `--no-sign` skips codesigning entirely (including the plain
       # `xcodebuild build` sub-step that requires a device/simulator
       # destination) and has the CLI repackage the unsigned .app straight
@@ -412,6 +420,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd app/
+          pnpm tauri ios init --ci
           pnpm tauri ios build --no-sign
 
           version=${{ needs.get-release.outputs.release_version }}

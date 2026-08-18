@@ -1,0 +1,93 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  build-ios-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+
+      - name: initialize git submodules
+        run: git submodule update --init --recursive
+
+      - name: setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+
+      - name: setup node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: copy pdfjs-dist and simplecc-dist to public directory
+        run: pnpm --filter @poxenstudio/myreader setup-vendors
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ios-ipa-cargo
+
+      - name: create .env.local file for Next.js
+        run: |
+          echo "NEXT_PUBLIC_POSTHOG_KEY=${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}" >> .env.local
+          echo "NEXT_PUBLIC_POSTHOG_HOST=${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}" >> .env.local
+          echo "NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" >> .env.local
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" >> .env.local
+          echo "NEXT_PUBLIC_APP_PLATFORM=tauri" >> .env.local
+          cp .env.local app/.env.local
+
+      # app/src-tauri/gen/apple is gitignored (app/.gitignore ignores
+      # `src-tauri/gen` wholesale; only a handful of custom Swift files are
+      # force-committed as exceptions), so the .xcodeproj/project.yml/Podfile
+      # xcodegen needs to build the project don't exist on a fresh checkout.
+      # Regenerate them the same way local dev does ("运行一次" in README.md).
+      - name: ensure xcodegen and cocoapods are available
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          command -v pod >/dev/null || sudo gem install cocoapods
+
+      - name: init iOS project
+        run: |
+          cd app
+          pnpm tauri ios init --ci
+
+      # `--no-sign` skips codesigning entirely (including the plain
+      # `xcodebuild build` sub-step that requires a device/simulator
+      # destination) and has the CLI repackage the unsigned .app straight
+      # from the .xcarchive into an .ipa, so this works on a stock
+      # macos-latest runner with no Apple Developer certificate or
+      # provisioning profile configured. The resulting IPA is unsigned and
+      # is meant to be downloaded and signed by the user themselves.
+      - name: build unsigned iOS ipa
+        run: |
+          cd app
+          pnpm tauri ios build --no-sign
+
+      - name: locate ipa
+        id: locate-ipa
+        run: |
+          ipa_src=$(find app/src-tauri/gen/apple/build -name '*.ipa' | head -n1)
+          if [ -z "$ipa_src" ]; then
+            echo "::error::No .ipa file found under app/src-tauri/gen/apple/build after build"
+            exit 1
+          fi
+          echo "ipa_path=$ipa_src" >> "$GITHUB_OUTPUT"
+
+      - name: upload ipa artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: MyReader-ios-unsigned-ipa
+          path: ${{ steps.locate-ipa.outputs.ipa_path }}
+          if-no-files-found: error
