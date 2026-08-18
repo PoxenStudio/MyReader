@@ -6,6 +6,7 @@ import { TranslationFunc } from '@/hooks/useTranslation';
 import { createProgressThrottle, ProgressPayload } from '@/utils/transfer';
 import { eventDispatcher } from '@/utils/event';
 import { getTransferMessages } from './transferMessages';
+import { MyBooksApiError } from './mybooksService';
 
 const TRANSFER_QUEUE_KEY = 'readest_transfer_queue';
 const RETRY_DELAY_BASE_MS = 2000;
@@ -465,6 +466,15 @@ class TransferManager {
           });
         } else if (isQuotaError) {
           this.recordQuotaFailure();
+        } else if (transfer.type === 'upload' && error instanceof MyBooksApiError) {
+          // The server rejected the upload with a specific reason (e.g. a
+          // duplicate, a format it refuses, a moderation hold) — worth its
+          // own dialog with the server's own wording rather than a generic
+          // toast, since "why" varies a lot more here than for downloads.
+          eventDispatcher.dispatch('show-error-message-dialog', {
+            title: getTransferMessages(transfer, _).failure.upload,
+            message: errorMessage,
+          });
         } else {
           const errorMessages = getTransferMessages(transfer, _).failure;
 

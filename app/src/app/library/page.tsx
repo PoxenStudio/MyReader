@@ -112,6 +112,7 @@ import { useCustomFonts } from '@/hooks/useCustomFonts';
 import DropIndicator from '@/components/DropIndicator';
 import SettingsDialog from '@/components/settings/SettingsDialog';
 import ModalPortal from '@/components/ModalPortal';
+import ErrorMessageDialog from '@/components/ErrorMessageDialog';
 import TransferQueuePanel from './components/TransferQueuePanel';
 import LibraryDrawer from './components/LibraryDrawer';
 // MyBooks API imports
@@ -212,6 +213,10 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   const [isSelectAll, setIsSelectAll] = useState(false);
   const [isSelectNone, setIsSelectNone] = useState(false);
   const [showDetailsBook, setShowDetailsBook] = useState<Book | null>(null);
+  const [uploadErrorDialog, setUploadErrorDialog] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
   const [failedImportsModal, setFailedImportsModal] = useState<FailedImport[] | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const isDesktop = useMediaQuery({ minWidth: 1024 });
@@ -504,6 +509,21 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       eventDispatcher.off('import-book-directory', handleImportBookDirectory);
     };
   }, [handleImportBookFiles, handleImportBookDirectory]);
+
+  // Uploads are queued and run in the background (transferManager), so a
+  // failure surfaces well after the "Upload" action in BookshelfItem/
+  // BookDetailView has returned — a single listener here covers both.
+  useEffect(() => {
+    const handleUploadErrorDialog = (event: CustomEvent) => {
+      const detail = event.detail as { title?: string; message?: string } | undefined;
+      if (!detail?.message) return;
+      setUploadErrorDialog({ title: detail.title ?? _('Error'), message: detail.message });
+    };
+    eventDispatcher.on('show-error-message-dialog', handleUploadErrorDialog);
+    return () => {
+      eventDispatcher.off('show-error-message-dialog', handleUploadErrorDialog);
+    };
+  }, [_]);
 
   useEffect(() => {
     if (!libraryBooks.some((book) => !book.deletedAt)) {
@@ -1986,6 +2006,15 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
           {isTransferQueueOpen && (
             <ModalPortal>
               <TransferQueuePanel />
+            </ModalPortal>
+          )}
+          {uploadErrorDialog && (
+            <ModalPortal>
+              <ErrorMessageDialog
+                title={uploadErrorDialog.title}
+                message={uploadErrorDialog.message}
+                onClose={() => setUploadErrorDialog(null)}
+              />
             </ModalPortal>
           )}
           <AboutWindow />

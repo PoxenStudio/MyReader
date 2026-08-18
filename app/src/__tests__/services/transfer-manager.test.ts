@@ -16,6 +16,7 @@ vi.mock('@/utils/event', () => ({
 // After the module-level mock declarations, import the SUT
 import { transferManager } from '@/services/transferManager';
 import { eventDispatcher } from '@/utils/event';
+import { MyBooksApiError } from '@/services/mybooksService';
 import type { Book } from '@/types/book';
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -786,6 +787,37 @@ describe('TransferManager', () => {
 
       // The upload should not have been called because queue is paused
       expect(appService['uploadBook']).not.toHaveBeenCalled();
+    });
+
+    test('upload rejected by MyBooks dispatches an error dialog with the server message', async () => {
+      const book = makeBook({ hash: 'h1', title: 'Rejected Book' });
+      const appService = makeAppService();
+      (appService['uploadBook'] as Mock).mockRejectedValue(
+        new MyBooksApiError('duplicate', 'A book with this title already exists on your shelf'),
+      );
+
+      await transferManager.initialize(
+        appService as never,
+        () => [book],
+        vi.fn().mockResolvedValue(undefined),
+        translationFn,
+      );
+
+      transferManager.queueUpload(book);
+      await vi.advanceTimersByTimeAsync(10000);
+
+      expect(eventDispatcher.dispatch).toHaveBeenCalledWith(
+        'show-error-message-dialog',
+        expect.objectContaining({
+          message: 'A book with this title already exists on your shelf',
+        }),
+      );
+      // The generic upload-failure toast is superseded by the dialog for a
+      // server-reported reason — it should not also fire.
+      expect(eventDispatcher.dispatch).not.toHaveBeenCalledWith(
+        'toast',
+        expect.objectContaining({ type: 'error' }),
+      );
     });
 
     test('book not found in library dispatches error', async () => {

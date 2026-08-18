@@ -136,7 +136,7 @@ iOS:
 ```bash
 # 设置 iOS 环境（运行一次）
 pnpm tauri ios init
-pnpm tauri icon ../../data/icons/myreader-book.png
+pnpm tauri icon ../data/icons/myreader-book.png
 
 pnpm tauri ios dev
 # 或在真机上开发
