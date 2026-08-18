@@ -161,6 +161,13 @@ jobs:
               "manual": true
             },
             {
+              "os": "macos-latest",
+              "release": "ios",
+              "arch": "aarch64",
+              "rust_target": "aarch64-apple-ios",
+              "manual": true
+            },
+            {
               "os": "windows-latest",
               "release": "windows",
               "arch": "x86_64",
@@ -388,13 +395,44 @@ jobs:
           echo "Uploading updated latest.json to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
 
+      # Unlike Android, app/src-tauri/gen/apple is committed to git (not
+      # gitignored), so there's no `tauri ios init` regeneration step needed
+      # here — the checked-in Xcode project is used as-is.
+      #
+      # `--no-sign` skips codesigning entirely (including the plain
+      # `xcodebuild build` sub-step that requires a device/simulator
+      # destination) and has the CLI repackage the unsigned .app straight
+      # from the .xcarchive into an .ipa, so this works on a stock
+      # macos-latest runner with no Apple Developer certificate or
+      # provisioning profile configured. The resulting IPA is unsigned and
+      # is meant to be downloaded and signed by the user themselves.
+      - name: build and upload iOS unsigned ipa
+        if: matrix.config.release == 'ios'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd app/
+          pnpm tauri ios build --no-sign
+
+          version=${{ needs.get-release.outputs.release_version }}
+          ipa_src=$(find src-tauri/gen/apple/build -name '*.ipa' | head -n1)
+          if [ -z "$ipa_src" ]; then
+            echo "::error::No .ipa file found under src-tauri/gen/apple/build after build"
+            exit 1
+          fi
+          ipa_file="MyReader_${version}_ios_unsigned.ipa"
+          cp "$ipa_src" "$ipa_file"
+
+          echo "Uploading $ipa_file to GitHub release"
+          gh release upload ${{ needs.get-release.outputs.release_tag }} "$ipa_file" --clobber
+
       # tauri-bundler treats the mere *presence* of APPLE_CERTIFICATE (even
       # set to an empty string) as "a certificate was provided" and tries to
       # `security import` it, so this step must be split in two: the Apple
       # codesigning env vars can only be omitted entirely, not emptied, when
       # ENABLE_MACOS_SIGNING is false.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
-        if: matrix.config.release != 'android' && env.ENABLE_MACOS_SIGNING != 'true'
+        if: matrix.config.release != 'android' && matrix.config.release != 'ios' && env.ENABLE_MACOS_SIGNING != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
@@ -412,7 +450,7 @@ jobs:
           args: ${{ matrix.config.args || '' }} ${{ env.ENABLE_TAURI_SIGNING != 'true' && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
 
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
-        if: matrix.config.release != 'android' && env.ENABLE_MACOS_SIGNING == 'true'
+        if: matrix.config.release != 'android' && matrix.config.release != 'ios' && env.ENABLE_MACOS_SIGNING == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.ENABLE_TAURI_SIGNING == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
@@ -455,7 +493,7 @@ jobs:
       # patch latest.json's URLs too) when that TODO at the top of the file
       # gets flipped on.
       - name: rename release asset to include the OS name
-        if: matrix.config.release != 'android' && env.ENABLE_TAURI_SIGNING != 'true'
+        if: matrix.config.release != 'android' && matrix.config.release != 'ios' && env.ENABLE_TAURI_SIGNING != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash

@@ -57,6 +57,7 @@ result*
 .pnpm-store/
 
 .claude/worktrees
+.claude/settings.json
 .claude/settings.local.json
 
 .gradle
