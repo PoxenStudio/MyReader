@@ -206,6 +206,12 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   const groupId = searchParams?.get('group') || '';
   const queryTerm = searchParams?.get('q') || null;
   const viewMode = searchParams?.get('view') || settings.libraryViewMode;
+  // MyBooks search results come back in its own relevance order, and
+  // "Load more" only appends more pages of that same order — re-sorting on
+  // the client would reshuffle results already on screen every time more
+  // load in. So sorting is skipped entirely for search results, which are
+  // always shown in the order the server returned them.
+  const isSearchResults = source === 'cloud' && (searchParams?.get('type') || 'all') === 'search';
   const storedSortBy = ensureLibrarySortByType(searchParams?.get('sort'), settings.librarySortBy);
   const sortOrder = searchParams?.get('order') || (settings.librarySortAscending ? 'asc' : 'desc');
   const groupBy = ensureLibraryGroupByType(searchParams?.get('groupBy'), settings.libraryGroupBy);
@@ -312,6 +318,10 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   }, [searchParams, groupId, currentBookshelfItems.length, updateUrlParams]);
 
   const sortedBookshelfItems = useMemo(() => {
+    if (isSearchResults) {
+      return currentBookshelfItems;
+    }
+
     const sortOrderMultiplier = sortOrder === 'asc' ? 1 : -1;
 
     // Separate into ungrouped books and groups
@@ -377,7 +387,16 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     );
 
     return allItems;
-  }, [sortOrder, sortBy, sortBy2, groupBy, groupId, uiLanguage, currentBookshelfItems]);
+  }, [
+    isSearchResults,
+    sortOrder,
+    sortBy,
+    sortBy2,
+    groupBy,
+    groupId,
+    uiLanguage,
+    currentBookshelfItems,
+  ]);
 
   useEffect(() => {
     if (isImportingBook.current) return;

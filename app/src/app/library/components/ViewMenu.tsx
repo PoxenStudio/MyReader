@@ -27,6 +27,14 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
   const { envConfig } = useEnv();
   const { settings } = useSettingsStore();
 
+  // Search results come back in MyBooks' own relevance order, and paginating
+  // ("Load more") only appends to that order — re-sorting on the client
+  // would reshuffle already-visible results each time more load in. So sort
+  // is disabled while viewing search results; see Bookshelf's matching skip.
+  const isSearchResults =
+    (searchParams?.get('source') || 'local') === 'cloud' &&
+    (searchParams?.get('type') || 'all') === 'search';
+
   const viewMode = settings.libraryViewMode;
   const coverFit = settings.libraryCoverFit;
   const autoColumns = settings.libraryAutoColumns;
@@ -257,7 +265,12 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
 
       {/* Sort By - Collapsible */}
       <hr aria-hidden='true' className='border-base-200 my-1' />
-      <MenuItem label={_('Sort by...')} detailsOpen={false} buttonClass='py-[4px]'>
+      <MenuItem
+        label={_('Sort by...')}
+        detailsOpen={false}
+        buttonClass='py-[4px]'
+        disabled={isSearchResults}
+      >
         <ul className='ms-0 flex flex-col ps-0 before:hidden'>
           {sortByOptions.map((option) => {
             const isImplicit = primaryIsImplicit && option.value === primaryEffective;
@@ -289,7 +302,12 @@ const ViewMenu: React.FC<ViewMenuProps> = ({ setIsDropdownOpen }) => {
 
       {/* Then by - secondary sort, collapsible */}
       <hr aria-hidden='true' className='border-base-200 my-1' />
-      <MenuItem label={_('Then by...')} detailsOpen={false} buttonClass='py-[4px]'>
+      <MenuItem
+        label={_('Then by...')}
+        detailsOpen={false}
+        buttonClass='py-[4px]'
+        disabled={isSearchResults}
+      >
         <ul className='ms-0 flex flex-col ps-0 before:hidden'>
           {sortBy2Options.map((option) => {
             const isImplicit = secondaryIsImplicit && option.value === secondaryEffective;
