@@ -177,4 +177,55 @@ describe('LibraryHeader search category persistence', () => {
     expect(params.get('source')).toBe('cloud');
     expect(params.get('type')).toBe('search');
   });
+
+  it('immediately re-runs the search against MyBooks when a category is picked while the box already has text', () => {
+    // A fresh element (not a reused reference) on each call — reusing the
+    // same element object would make React bail out of re-rendering
+    // entirely, defeating the `rerender` below.
+    const ui = () => (
+      <DropdownProvider>
+        <LibraryHeader
+          isSelectMode={false}
+          isSelectAll={false}
+          isCloudLibrary={false}
+          isDrawerOpen={false}
+          onImportBooksFromFiles={noop}
+          onOpenCatalogManager={noop}
+          onOpenFeeds={noop}
+          onToggleSelectMode={noop}
+          onSelectAll={noop}
+          onDeselectAll={noop}
+          onToggleDrawer={noop}
+        />
+      </DropdownProvider>
+    );
+    const { rerender } = render(ui());
+
+    // Type first — still searching the current (local) bookshelf.
+    fireEvent.change(screen.getByPlaceholderText('Search Books...'), {
+      target: { value: 'dune' },
+    });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    // The debounced push landed on the mocked router/URL, but — unlike real
+    // Next.js, where useSearchParams is a live context every consumer
+    // re-renders from on navigation — this test's plain-function mock only
+    // reflects it on the next render. Force that render, mirroring what the
+    // real router would already have done by now.
+    rerender(ui());
+    pushMock.mockClear();
+
+    // Selecting a MyBooks category with text already in the box should fire
+    // the search against MyBooks right away, with no further typing needed.
+    fireEvent.click(screen.getByLabelText('Search Category'));
+    fireEvent.click(screen.getByText('Select Title Category'));
+
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    const params = new URLSearchParams(pushMock.mock.calls[0]![0] as string);
+    expect(params.get('q')).toBe('dune');
+    expect(params.get('cat')).toBe('title');
+    expect(params.get('source')).toBe('cloud');
+    expect(params.get('type')).toBe('search');
+  });
 });
