@@ -269,9 +269,23 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
     },
   ];
 
+  // A link whose source+type already match the current view won't actually
+  // navigate (e.g. clicking "Home" again while already on the local
+  // bookshelf) — nothing then triggers the searchParams-keyed effect that
+  // clears the optimistic loading flag `onNavigate` sets, so the bookshelf
+  // gets stuck showing only a spinner. Skip `onNavigate` for those no-op
+  // clicks so the flag is never set in the first place.
+  const isSameLibraryTarget = (href: string) => {
+    if (!isLibraryPath) return false;
+    const targetParams = new URLSearchParams(href.split('?')[1] ?? '');
+    const targetSource = targetParams.get('source') || 'local';
+    const targetType = targetParams.get('type') || 'all';
+    return currentSource === targetSource && currentType === targetType;
+  };
+
   // Helper to handle navigation click for library links
   const handleLibraryClick = (href: string) => {
-    if (href.startsWith('/library')) {
+    if (href.startsWith('/library') && !isSameLibraryTarget(href)) {
       onNavigate?.();
     }
     if (appService?.isMobile) onClose();
