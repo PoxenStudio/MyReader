@@ -160,6 +160,9 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
     setSearchCategory((searchParams?.get('cat') as SearchCategory) || 'local');
   }, [searchParams]);
 
+  const searchCategoryRef = useRef(searchCategory);
+  searchCategoryRef.current = searchCategory;
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const debouncedUpdateQueryParam = useCallback(
     debounce((value: string) => {
@@ -168,6 +171,20 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
         params.set('q', value);
       } else {
         params.delete('q');
+      }
+      // Reapply the currently selected category, since selecting a category
+      // while the query is empty doesn't touch the URL (see
+      // handleSelectCategory) and would otherwise be lost once typing pushes
+      // a new `q`-only URL.
+      const category = searchCategoryRef.current;
+      if (category === 'local') {
+        params.delete('source');
+        params.delete('type');
+        params.delete('cat');
+      } else {
+        params.set('source', 'cloud');
+        params.set('type', 'search');
+        params.set('cat', category);
       }
       router.push(`?${params.toString()}`);
     }, 500),

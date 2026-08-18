@@ -54,7 +54,8 @@
       "Bash(PORT=39871 timeout 8 node app/server.js)",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:39871/)",
       "Bash(pnpm --filter . exec biome lint app/src/app/library/components/BookshelfItem.tsx app/src/app/library/components/Bookshelf.tsx app/src/app/library/components/BookReviewDialog.tsx app/src/components/StarRatingInput.tsx app/src/services/mybooksService.ts)",
-      "Bash(pnpm --filter . exec biome format --write app/src/app/library/components/BookshelfItem.tsx app/src/app/library/components/Bookshelf.tsx app/src/app/library/components/BookReviewDialog.tsx app/src/components/StarRatingInput.tsx app/src/services/mybooksService.ts)"
+      "Bash(pnpm --filter . exec biome format --write app/src/app/library/components/BookshelfItem.tsx app/src/app/library/components/Bookshelf.tsx app/src/app/library/components/BookReviewDialog.tsx app/src/components/StarRatingInput.tsx app/src/services/mybooksService.ts)",
+      "Bash(dotenv -e .env -e .env.test.local -- npx vitest run src/__tests__/app/library/library-header-search-category-persist.test.tsx)"
     ]
   }
 }
