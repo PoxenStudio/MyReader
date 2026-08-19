@@ -117,7 +117,7 @@ import TransferQueuePanel from './components/TransferQueuePanel';
 import LibraryDrawer from './components/LibraryDrawer';
 // MyBooks API imports
 import { getBooksByType, searchBooks } from '@/services/mybooksService';
-import { convertMyBooksToLocalBooks } from '@/utils/bookConverter';
+import { convertMyBooksToLocalBooks, mergeUniqueBooksByHash } from '@/utils/bookConverter';
 import MetaList from './components/MetaList';
 import { useMetaList } from './hooks/useMetaList';
 
@@ -156,6 +156,11 @@ const LAST_IMPORT_FOLDER_MIN_SIZE_KEY = 'readest:lastImportFolderMinSizeKB';
  * dialog forces the toggle ON regardless of this value.
  */
 const LAST_IMPORT_FOLDER_READ_IN_PLACE_KEY = 'readest:lastImportFolderReadInPlace';
+/**
+ * Number of cloud books fetched per page (initial load and each "Load More"
+ * click). 20 felt too small — bumped to 30.
+ */
+const CLOUD_BOOKS_PAGE_SIZE = 30;
 
 const LibraryPageWithSearchParams = () => {
   const searchParams = useSearchParams();
@@ -252,6 +257,13 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   const [cloudBooksLoading, setCloudBooksLoading] = useState(false);
   const [cloudBooksTotal, setCloudBooksTotal] = useState(0);
   const [cloudBooksPage, setCloudBooksPage] = useState(1);
+  // Tracks the highest cloud-books page whose "load more" fetch has already
+  // been kicked off, so an unrelated re-run of the load-more effect (Strict
+  // Mode's double-invoke in dev, or searchParams changing reference without
+  // changing the params the fetch actually reads) doesn't re-fetch and
+  // re-append the same page — which duplicated books/keys, see issue report
+  // "刷新书架...向下划时不断出现重复的书籍".
+  const lastFetchedCloudPageRef = useRef(1);
 
   // Meta list state for cloud books
   const [selectedMetaType, setSelectedMetaType] = useState<
@@ -733,6 +745,12 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     const type = searchParams?.get('type') || 'all';
     const itemName = searchParams?.get('item');
 
+    // A fresh listing always starts at page 1; forget whichever "load more"
+    // page was last fetched for the previous listing so the load-more effect
+    // below doesn't mistake it for already having fetched this listing's
+    // page 1.
+    lastFetchedCloudPageRef.current = 1;
+
     if (source !== 'cloud') {
       // Reset cloud books state when switching to local
       setCloudBooks([]);
@@ -761,11 +779,13 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
           const category = (searchParams?.get('cat') as SearchCategory) || 'all';
           const query = searchParams?.get('q') || '';
           const fullQuery = buildSearchFullQuery(category, query);
-          result = fullQuery ? await searchBooks(fullQuery, 1, 20) : { books: [], total: 0 };
+          result = fullQuery
+            ? await searchBooks(fullQuery, 1, CLOUD_BOOKS_PAGE_SIZE)
+            : { books: [], total: 0 };
         } else {
           const bookType = type;
           const name = itemName ? itemName : undefined;
-          result = await getBooksByType(bookType, 1, 20, name);
+          result = await getBooksByType(bookType, 1, CLOUD_BOOKS_PAGE_SIZE, name);
         }
         const convertedBooks = convertMyBooksToLocalBooks(result.books);
         setCloudBooks(convertedBooks);
@@ -805,6 +825,16 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       return;
     }
 
+    // Guard against re-fetching the same page: this effect can re-run for
+    // the same cloudBooksPage value (Strict Mode's dev-only double-invoke,
+    // or searchParams getting a new reference from an unrelated navigation)
+    // and previously appended a second copy of every book on that page,
+    // producing duplicate hashes/React keys and duplicated cards on scroll.
+    if (lastFetchedCloudPageRef.current >= cloudBooksPage) {
+      return;
+    }
+    lastFetchedCloudPageRef.current = cloudBooksPage;
+
     const loadMoreCloudBooks = async () => {
       try {
         let result;
@@ -813,14 +843,16 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
           const query = searchParams?.get('q') || '';
           const fullQuery = buildSearchFullQuery(category, query);
           result = fullQuery
-            ? await searchBooks(fullQuery, cloudBooksPage, 20)
+            ? await searchBooks(fullQuery, cloudBooksPage, CLOUD_BOOKS_PAGE_SIZE)
             : { books: [], total: 0 };
         } else {
           const name = itemName ? itemName : undefined;
-          result = await getBooksByType(type, cloudBooksPage, 20, name);
+          result = await getBooksByType(type, cloudBooksPage, CLOUD_BOOKS_PAGE_SIZE, name);
         }
         const convertedBooks = convertMyBooksToLocalBooks(result.books);
-        setCloudBooks((prev) => [...prev, ...convertedBooks]);
+        // Belt-and-suspenders: even if the guard above ever races, never let
+        // a duplicate hash slip through onto the shelf.
+        setCloudBooks((prev) => mergeUniqueBooksByHash(prev, convertedBooks));
       } catch (error) {
         // Can't reach MyBooks — just stop paginating, no error shown.
         console.error('Failed to load more cloud books:', error);

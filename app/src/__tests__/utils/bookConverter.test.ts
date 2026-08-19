@@ -4,6 +4,7 @@ import {
   convertMyBooksToLocalBook,
   getCloudBookId,
   getFormatVariantBook,
+  mergeUniqueBooksByHash,
 } from '@/utils/bookConverter';
 import type { MyBooksBook } from '@/services/mybooksService';
 import { Book } from '@/types/book';
@@ -221,5 +222,40 @@ describe('getFormatVariantBook', () => {
   test('returns null when the book is not a cloud book', () => {
     const localBook: Book = { ...baseBook, hash: 'localhash123' };
     expect(getFormatVariantBook(localBook, 'PDF')).toBeNull();
+  });
+});
+
+describe('mergeUniqueBooksByHash', () => {
+  const makeBook = (hash: string): Book => ({
+    hash,
+    format: 'EPUB',
+    title: `Book ${hash}`,
+    author: 'Author',
+    createdAt: 1,
+    updatedAt: 1,
+    storageType: 'cloud',
+  });
+
+  test('appends incoming books that are not already present', () => {
+    const prev = [makeBook('cloud-1-epub'), makeBook('cloud-2-epub')];
+    const incoming = [makeBook('cloud-3-epub')];
+    const merged = mergeUniqueBooksByHash(prev, incoming);
+    expect(merged.map((b) => b.hash)).toEqual(['cloud-1-epub', 'cloud-2-epub', 'cloud-3-epub']);
+  });
+
+  // Reproduces the "Load More" duplicate-key bug: the same page gets fetched
+  // twice (e.g. a re-run effect or a double-invoked Strict Mode effect) and
+  // append naively concatenates, producing duplicate hashes/React keys.
+  test('drops incoming books whose hash already exists in prev', () => {
+    const prev = [makeBook('cloud-1-epub'), makeBook('cloud-2-epub')];
+    const incoming = [makeBook('cloud-2-epub'), makeBook('cloud-3-epub')];
+    const merged = mergeUniqueBooksByHash(prev, incoming);
+    expect(merged.map((b) => b.hash)).toEqual(['cloud-1-epub', 'cloud-2-epub', 'cloud-3-epub']);
+  });
+
+  test('does not mutate the prev array', () => {
+    const prev = [makeBook('cloud-1-epub')];
+    mergeUniqueBooksByHash(prev, [makeBook('cloud-2-epub')]);
+    expect(prev.map((b) => b.hash)).toEqual(['cloud-1-epub']);
   });
 });

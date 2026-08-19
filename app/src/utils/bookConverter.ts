@@ -260,6 +260,24 @@ export function buildCloudBookHash(id: number, format: BookFormat): string {
 }
 
 /**
+ * 合并两批书籍，按 hash 去重，保留 prev 中的顺序并在末尾追加 incoming 中未出现过的项
+ * 用于云端书籍分页加载（"加载更多"）时追加结果，避免同一页被重复请求/追加导致
+ * 列表中出现重复 hash，从而在虚拟列表中触发重复 key 警告并显示重复书籍
+ * @param prev - 已有的书籍列表
+ * @param incoming - 新加载的书籍列表
+ * @returns 去重后的合并列表（不修改 prev/incoming）
+ */
+export function mergeUniqueBooksByHash(prev: Book[], incoming: Book[]): Book[] {
+  const seen = new Set(prev.map((book) => book.hash));
+  const uniqueIncoming = incoming.filter((book) => {
+    if (seen.has(book.hash)) return false;
+    seen.add(book.hash);
+    return true;
+  });
+  return [...prev, ...uniqueIncoming];
+}
+
+/**
  * 基于一本云端书籍的某个格式记录，构造同一本书在另一格式下的本地 Book 记录
  * 新记录拥有独立的 hash/目录，不携带原记录的下载状态和阅读进度
  * @param book - 已有的云端书籍 Book 记录（任意格式）
