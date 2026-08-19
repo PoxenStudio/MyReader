@@ -89,6 +89,8 @@ interface BookshelfProps {
   isCloudLibrary?: boolean;
   cloudBooksTotal?: number;
   onLoadMoreCloudBooks?: () => void;
+  isLoadingMoreCloudBooks?: boolean;
+  cloudBooksLoadMoreFailed?: boolean;
   showCloudIcon?: boolean;
   showAllFormatsBadge?: boolean;
 }
@@ -193,6 +195,8 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   isCloudLibrary = false,
   cloudBooksTotal = 0,
   onLoadMoreCloudBooks,
+  isLoadingMoreCloudBooks = false,
+  cloudBooksLoadMoreFailed = false,
   showCloudIcon = false,
   showAllFormatsBadge = false,
 }) => {
@@ -931,11 +935,21 @@ const Bookshelf: React.FC<BookshelfProps> = ({
             )}
           >
             <button
-              aria-label={_('Load More')}
-              className='btn btn-primary btn-sm rounded-full px-4 text-xs text-primary-content'
+              aria-label={cloudBooksLoadMoreFailed ? _('Retry') : _('Load More')}
+              className={clsx(
+                'btn btn-sm rounded-full px-4 text-xs',
+                cloudBooksLoadMoreFailed
+                  ? 'btn-error text-error-content'
+                  : 'btn-primary text-primary-content',
+              )}
               onClick={onLoadMoreCloudBooks}
+              disabled={isLoadingMoreCloudBooks}
             >
-              {_('Load More')} ({libraryBooks.length}/{cloudBooksTotal})
+              {isLoadingMoreCloudBooks
+                ? _('Loading...')
+                : cloudBooksLoadMoreFailed
+                  ? `${_('Network error')} · ${_('Retry')}`
+                  : `${_('Load More')} (${libraryBooks.length}/${cloudBooksTotal})`}
             </button>
           </div>
         );
@@ -995,6 +1009,8 @@ const Bookshelf: React.FC<BookshelfProps> = ({
       showLoadMoreTile,
       loadMoreTileIndex,
       onLoadMoreCloudBooks,
+      isLoadingMoreCloudBooks,
+      cloudBooksLoadMoreFailed,
       libraryBooks,
       cloudBooksTotal,
       showTimeRemaining,

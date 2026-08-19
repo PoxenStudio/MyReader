@@ -117,7 +117,7 @@ import TransferQueuePanel from './components/TransferQueuePanel';
 import LibraryDrawer from './components/LibraryDrawer';
 // MyBooks API imports
 import { getBooksByType, searchBooks } from '@/services/mybooksService';
-import { convertMyBooksToLocalBooks, mergeUniqueBooksByHash } from '@/utils/bookConverter';
+import { convertMyBooksToLocalBooks, resolveCloudBooksPageAppend } from '@/utils/bookConverter';
 import MetaList from './components/MetaList';
 import { useMetaList } from './hooks/useMetaList';
 
@@ -158,9 +158,9 @@ const LAST_IMPORT_FOLDER_MIN_SIZE_KEY = 'readest:lastImportFolderMinSizeKB';
 const LAST_IMPORT_FOLDER_READ_IN_PLACE_KEY = 'readest:lastImportFolderReadInPlace';
 /**
  * Number of cloud books fetched per page (initial load and each "Load More"
- * click). 20 felt too small — bumped to 30.
+ * click).
  */
-const CLOUD_BOOKS_PAGE_SIZE = 30;
+const CLOUD_BOOKS_PAGE_SIZE = 20;
 
 const LibraryPageWithSearchParams = () => {
   const searchParams = useSearchParams();
@@ -257,6 +257,16 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   const [cloudBooksLoading, setCloudBooksLoading] = useState(false);
   const [cloudBooksTotal, setCloudBooksTotal] = useState(0);
   const [cloudBooksPage, setCloudBooksPage] = useState(1);
+  // True while a "load more" page request is in flight. Disables the Load
+  // More button so a fast double-click can't fire two concurrent page
+  // requests (which would otherwise race for cloudBooksPage and could let a
+  // stale response overwrite a newer total correction).
+  const [cloudBooksLoadingMore, setCloudBooksLoadingMore] = useState(false);
+  // True when the last "load more" page request failed (network error etc).
+  // Swaps the Load More button to a "Network error · Retry" affordance
+  // instead of silently reverting to normal and leaving the user unsure
+  // whether more books exist.
+  const [cloudBooksLoadMoreFailed, setCloudBooksLoadMoreFailed] = useState(false);
   // Tracks the highest cloud-books page whose "load more" fetch has already
   // been kicked off, so an unrelated re-run of the load-more effect (Strict
   // Mode's double-invoke in dev, or searchParams changing reference without
@@ -757,6 +767,8 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       setCloudBooksTotal(0);
       setCloudBooksPage(1);
       setCloudBooksLoading(false);
+      setCloudBooksLoadingMore(false);
+      setCloudBooksLoadMoreFailed(false);
       return;
     }
 
@@ -789,7 +801,10 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         }
         const convertedBooks = convertMyBooksToLocalBooks(result.books);
         setCloudBooks(convertedBooks);
-        setCloudBooksTotal(result.total);
+        // MyBooks' reported total can also be an undercount (as well as an
+        // overcount, handled separately for "load more") — never show a
+        // total smaller than what we actually just received.
+        setCloudBooksTotal(Math.max(result.total, convertedBooks.length));
         setCloudBooksPage(1);
       } catch (error) {
         // Can't reach MyBooks (offline, etc.) — degrade to an empty list
@@ -812,15 +827,81 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       setCloudBooksTotal(0);
       setCloudBooksPage(1);
       setCloudBooksLoading(false);
+      setCloudBooksLoadingMore(false);
+      setCloudBooksLoadMoreFailed(false);
     }
   }, [searchParams, _]);
+
+  // Fetches one cloud-books page and merges it into the shelf. Shared by the
+  // auto "load more" effect below (page increments) and the manual retry
+  // button (re-fetches the same page after a failure) — kept as one function
+  // so both paths apply the exact same merge/total-correction rules.
+  const fetchCloudBooksPage = useCallback(
+    async (page: number) => {
+      const source = searchParams?.get('source') || 'local';
+      const type = searchParams?.get('type') || 'all';
+      const itemName = searchParams?.get('item');
+      if (source !== 'cloud') return;
+
+      setCloudBooksLoadingMore(true);
+      setCloudBooksLoadMoreFailed(false);
+      try {
+        let result;
+        if (type === 'search') {
+          const category = (searchParams?.get('cat') as SearchCategory) || 'all';
+          const query = searchParams?.get('q') || '';
+          const fullQuery = buildSearchFullQuery(category, query);
+          result = fullQuery
+            ? await searchBooks(fullQuery, page, CLOUD_BOOKS_PAGE_SIZE)
+            : { books: [], total: 0 };
+        } else {
+          const name = itemName ? itemName : undefined;
+          result = await getBooksByType(type, page, CLOUD_BOOKS_PAGE_SIZE, name);
+        }
+        const convertedBooks = convertMyBooksToLocalBooks(result.books);
+        // `cloudBooks`/`cloudBooksTotal` are read from this render's closure
+        // rather than via a setCloudBooks functional updater on purpose:
+        // computing the corrected total needs the exact count of books
+        // already loaded, and folding that into the updater would mean
+        // calling setCloudBooksTotal from inside setCloudBooks's updater —
+        // an impure update that Strict Mode's double-invoke would run
+        // twice. The Load More button being disabled for the whole request
+        // (below) guarantees only one page is ever in flight, so this
+        // snapshot can't go stale before it's used.
+        const { books, total } = resolveCloudBooksPageAppend(
+          cloudBooks,
+          convertedBooks,
+          cloudBooksTotal,
+        );
+        setCloudBooks(books);
+        if (total !== null) {
+          // MyBooks' reported total can be wrong in both directions (seen
+          // for the "reading" status listing): a page coming back empty
+          // means there's actually less than reported, corrected down to
+          // what we have; a page coming back and pushing the loaded count
+          // past the reported total means there's actually more, corrected
+          // up to match. Either way the Load More tile's "X/Y" reflects
+          // reality instead of a stale server count.
+          setCloudBooksTotal(total);
+        }
+      } catch (error) {
+        // Network hiccup etc — surface it via the Load More button (turned
+        // into a "Network error · Retry" affordance) instead of silently
+        // reverting to normal and leaving the user unsure whether more
+        // books exist.
+        console.error('Failed to load more cloud books:', error);
+        setCloudBooksLoadMoreFailed(true);
+      } finally {
+        setCloudBooksLoadingMore(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchParams, cloudBooks, cloudBooksTotal],
+  );
 
   // Load more cloud books when page changes
   useEffect(() => {
     const source = searchParams?.get('source') || 'local';
-    const type = searchParams?.get('type') || 'all';
-    const itemName = searchParams?.get('item');
-
     if (source !== 'cloud' || cloudBooksPage <= 1) {
       return;
     }
@@ -830,36 +911,15 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     // or searchParams getting a new reference from an unrelated navigation)
     // and previously appended a second copy of every book on that page,
     // producing duplicate hashes/React keys and duplicated cards on scroll.
+    // A manual retry (see fetchCloudBooksPage callers below) intentionally
+    // bypasses this guard — it's calling fetchCloudBooksPage directly, not
+    // going through this effect.
     if (lastFetchedCloudPageRef.current >= cloudBooksPage) {
       return;
     }
     lastFetchedCloudPageRef.current = cloudBooksPage;
-
-    const loadMoreCloudBooks = async () => {
-      try {
-        let result;
-        if (type === 'search') {
-          const category = (searchParams?.get('cat') as SearchCategory) || 'all';
-          const query = searchParams?.get('q') || '';
-          const fullQuery = buildSearchFullQuery(category, query);
-          result = fullQuery
-            ? await searchBooks(fullQuery, cloudBooksPage, CLOUD_BOOKS_PAGE_SIZE)
-            : { books: [], total: 0 };
-        } else {
-          const name = itemName ? itemName : undefined;
-          result = await getBooksByType(type, cloudBooksPage, CLOUD_BOOKS_PAGE_SIZE, name);
-        }
-        const convertedBooks = convertMyBooksToLocalBooks(result.books);
-        // Belt-and-suspenders: even if the guard above ever races, never let
-        // a duplicate hash slip through onto the shelf.
-        setCloudBooks((prev) => mergeUniqueBooksByHash(prev, convertedBooks));
-      } catch (error) {
-        // Can't reach MyBooks — just stop paginating, no error shown.
-        console.error('Failed to load more cloud books:', error);
-      }
-    };
-
-    loadMoreCloudBooks();
+    fetchCloudBooksPage(cloudBooksPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudBooksPage, searchParams]);
 
   // Track current series/author group for navigation header
@@ -2005,7 +2065,16 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                           source={source}
                           isCloudLibrary={source === 'cloud'}
                           cloudBooksTotal={cloudBooksTotal}
+                          isLoadingMoreCloudBooks={cloudBooksLoadingMore}
+                          cloudBooksLoadMoreFailed={cloudBooksLoadMoreFailed}
                           onLoadMoreCloudBooks={() => {
+                            if (cloudBooksLoadingMore) return;
+                            if (cloudBooksLoadMoreFailed) {
+                              // Retry the same page rather than advancing —
+                              // the previous attempt never actually loaded it.
+                              fetchCloudBooksPage(cloudBooksPage);
+                              return;
+                            }
                             setCloudBooksPage((prev) => prev + 1);
                           }}
                           showCloudIcon={source === 'cloud'}

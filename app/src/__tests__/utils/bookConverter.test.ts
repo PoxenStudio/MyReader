@@ -5,6 +5,7 @@ import {
   getCloudBookId,
   getFormatVariantBook,
   mergeUniqueBooksByHash,
+  resolveCloudBooksPageAppend,
 } from '@/utils/bookConverter';
 import type { MyBooksBook } from '@/services/mybooksService';
 import { Book } from '@/types/book';
@@ -257,5 +258,72 @@ describe('mergeUniqueBooksByHash', () => {
     const prev = [makeBook('cloud-1-epub')];
     mergeUniqueBooksByHash(prev, [makeBook('cloud-2-epub')]);
     expect(prev.map((b) => b.hash)).toEqual(['cloud-1-epub']);
+  });
+});
+
+describe('resolveCloudBooksPageAppend', () => {
+  const makeBook = (hash: string): Book => ({
+    hash,
+    format: 'EPUB',
+    title: `Book ${hash}`,
+    author: 'Author',
+    createdAt: 1,
+    updatedAt: 1,
+    storageType: 'cloud',
+  });
+
+  test('appends a non-empty page within the reported total and leaves total unchanged (null)', () => {
+    const prev = [makeBook('cloud-1-epub')];
+    const incoming = [makeBook('cloud-2-epub')];
+    const result = resolveCloudBooksPageAppend(prev, incoming, 5);
+    expect(result.books.map((b) => b.hash)).toEqual(['cloud-1-epub', 'cloud-2-epub']);
+    expect(result.total).toBeNull();
+  });
+
+  // MyBooks can report a `total` larger than what a listing actually has
+  // (observed for the "reading" status filter) — once a "load more" page
+  // comes back empty there's nothing left, so the total must be corrected
+  // down to what was actually loaded instead of trusting the server's count.
+  test('an empty page corrects total to the number of books already loaded, leaving books untouched', () => {
+    const prev = [makeBook('cloud-1-epub'), makeBook('cloud-2-epub')];
+    const result = resolveCloudBooksPageAppend(prev, [], 10);
+    expect(result.books).toBe(prev);
+    expect(result.total).toBe(2);
+  });
+
+  test('dedupes an incoming page that repeats an already-loaded book', () => {
+    const prev = [makeBook('cloud-1-epub'), makeBook('cloud-2-epub')];
+    const incoming = [makeBook('cloud-2-epub'), makeBook('cloud-3-epub')];
+    const result = resolveCloudBooksPageAppend(prev, incoming, 3);
+    expect(result.books.map((b) => b.hash)).toEqual([
+      'cloud-1-epub',
+      'cloud-2-epub',
+      'cloud-3-epub',
+    ]);
+    expect(result.total).toBeNull();
+  });
+
+  // MyBooks can also report a `total` smaller than what it actually returns
+  // across pages — the loaded count overtaking the reported total means the
+  // total was an undercount, so it must be corrected up to match reality
+  // instead of hiding a Load More tile that still has more data behind it,
+  // or showing a nonsensical "3/2" count.
+  test('a page that pushes the loaded count past the reported total corrects total upward', () => {
+    const prev = [makeBook('cloud-1-epub'), makeBook('cloud-2-epub')];
+    const incoming = [makeBook('cloud-3-epub')];
+    const result = resolveCloudBooksPageAppend(prev, incoming, 2);
+    expect(result.books.map((b) => b.hash)).toEqual([
+      'cloud-1-epub',
+      'cloud-2-epub',
+      'cloud-3-epub',
+    ]);
+    expect(result.total).toBe(3);
+  });
+
+  test('a page that exactly meets the reported total leaves it unchanged (null)', () => {
+    const prev = [makeBook('cloud-1-epub')];
+    const incoming = [makeBook('cloud-2-epub')];
+    const result = resolveCloudBooksPageAppend(prev, incoming, 2);
+    expect(result.total).toBeNull();
   });
 });

@@ -278,6 +278,33 @@ export function mergeUniqueBooksByHash(prev: Book[], incoming: Book[]): Book[] {
 }
 
 /**
+ * 计算"加载更多"云端书籍分页后应有的书籍列表与（如需要）修正后的总数
+ *
+ * MyBooks 报告的 total 可能在两个方向上都不准（观察到的是"阅读状态"列表）：
+ * - 偏大：翻页翻到某一页返回空数组，说明数据已经全部返回完，此时不应再信任
+ *   原有 total（否则会一直展示"加载更多"、不断请求空页），而是把 total 修正
+ *   为当前已加载的数量，使"加载更多"入口自然消失
+ * - 偏小：某一页返回的数据使已加载数量超过了原 total，说明 total 是低估的，
+ *   需要把 total 上修为已加载数量，避免"加载更多"提前消失、或按钮上显示出
+ *   "3/2" 这种不合理的计数
+ * @param prev - 已加载的书籍列表
+ * @param incoming - 本次分页新加载的书籍列表
+ * @param currentTotal - 当前记录的 total（用于判断是否被已加载数量超过）
+ * @returns 合并后的书籍列表；total 为 null 表示无需修正，否则为应当写入的新总数
+ */
+export function resolveCloudBooksPageAppend(
+  prev: Book[],
+  incoming: Book[],
+  currentTotal: number,
+): { books: Book[]; total: number | null } {
+  if (incoming.length === 0) {
+    return { books: prev, total: prev.length };
+  }
+  const books = mergeUniqueBooksByHash(prev, incoming);
+  return { books, total: books.length > currentTotal ? books.length : null };
+}
+
+/**
  * 基于一本云端书籍的某个格式记录，构造同一本书在另一格式下的本地 Book 记录
  * 新记录拥有独立的 hash/目录，不携带原记录的下载状态和阅读进度
  * @param book - 已有的云端书籍 Book 记录（任意格式）

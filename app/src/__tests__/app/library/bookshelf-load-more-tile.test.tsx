@@ -141,6 +141,7 @@ const baseProps = {
   handleBookUpload: vi.fn(),
   handleBookDownload: vi.fn(),
   handleBookDelete: vi.fn(),
+  handleBookPurge: vi.fn(),
   handleSetSelectMode: vi.fn(),
   handleShowDetailsBook: vi.fn(),
   handleLibraryNavigation: vi.fn(),
@@ -169,6 +170,61 @@ describe('Bookshelf trailing Load More tile (cloud library)', () => {
     expect(loadMoreButton.className).toContain('rounded-full');
 
     fireEvent.click(loadMoreButton);
+    expect(onLoadMoreCloudBooks).toHaveBeenCalledTimes(1);
+  });
+
+  // Prevents a fast double-click from firing two concurrent page requests
+  // (which could race and clobber the total correction the page-level
+  // "empty page" fix applies).
+  it('disables the Load More button and swaps its label while a page request is in flight', () => {
+    const onLoadMoreCloudBooks = vi.fn();
+    render(
+      <Bookshelf
+        {...baseProps}
+        libraryBooks={[makeBook('book1'), makeBook('book2')]}
+        source='cloud'
+        isCloudLibrary
+        cloudBooksTotal={5}
+        onLoadMoreCloudBooks={onLoadMoreCloudBooks}
+        isLoadingMoreCloudBooks
+      />,
+    );
+
+    const loadMoreButton = screen.getByRole('button', {
+      name: /Load More/i,
+    }) as HTMLButtonElement;
+    expect(loadMoreButton.disabled).toBe(true);
+    expect(loadMoreButton.textContent).not.toContain('2/5');
+
+    fireEvent.click(loadMoreButton);
+    expect(onLoadMoreCloudBooks).not.toHaveBeenCalled();
+  });
+
+  // After a failed "load more" request, the tile turns into a visible retry
+  // affordance instead of silently reverting to a plain "Load More" button
+  // (which previously gave no indication that the last attempt failed).
+  it('shows a network-error retry affordance and still fires the click handler so the page-level retry can run', () => {
+    const onLoadMoreCloudBooks = vi.fn();
+    render(
+      <Bookshelf
+        {...baseProps}
+        libraryBooks={[makeBook('book1'), makeBook('book2')]}
+        source='cloud'
+        isCloudLibrary
+        cloudBooksTotal={5}
+        onLoadMoreCloudBooks={onLoadMoreCloudBooks}
+        cloudBooksLoadMoreFailed
+      />,
+    );
+
+    const retryButton = screen.getByRole('button', { name: /Retry/i }) as HTMLButtonElement;
+    expect(retryButton.disabled).toBe(false);
+    expect(retryButton.textContent).toContain('Network error');
+    expect(retryButton.textContent).toContain('Retry');
+    expect(retryButton.textContent).not.toContain('2/5');
+    expect(retryButton.className).toContain('btn-error');
+
+    fireEvent.click(retryButton);
     expect(onLoadMoreCloudBooks).toHaveBeenCalledTimes(1);
   });
 
