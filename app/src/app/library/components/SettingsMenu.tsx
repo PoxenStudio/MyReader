@@ -21,7 +21,6 @@ import { navigateToLogin } from '@/utils/nav';
 import { tauriHandleSetAlwaysOnTop, tauriHandleToggleFullScreen } from '@/utils/window';
 import { setAboutDialogVisible } from '@/components/AboutWindow';
 import { setMigrateDataDirDialogVisible } from '@/app/library/components/MigrateDataWindow';
-import { requestStoragePermission } from '@/utils/permission';
 import { saveSysSettings } from '@/helpers/settings';
 import { eventDispatcher } from '@/utils/event';
 import {
@@ -29,7 +28,6 @@ import {
   getBiometryLabelKey,
   isBiometricSupported,
 } from '@/services/biometric';
-import { selectDirectory } from '@/utils/bridge';
 import UserAvatar from '@/components/UserAvatar';
 import MenuItem from '@/components/MenuItem';
 import Menu from '@/components/Menu';
@@ -61,9 +59,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({
   const [isOpenLastBooks, setIsOpenLastBooks] = useState(settings.openLastBooks);
   const [isAutoImportBooksOnOpen, setIsAutoImportBooksOnOpen] = useState(
     settings.autoImportBooksOnOpen,
-  );
-  const [savedBookCoverForLockScreen, setSavedBookCoverForLockScreen] = useState(
-    settings.savedBookCoverForLockScreen || '',
   );
   const iconSize = useResponsiveSize(16);
 
@@ -209,20 +204,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({
     setSettingsDialogOpen(true);
   };
 
-  const handleSetSavedBookCoverForLockScreen = async () => {
-    if (!(await requestStoragePermission()) && appService?.distChannel === 'readest') return;
-
-    const newValue = settings.savedBookCoverForLockScreen ? '' : 'default';
-    if (newValue) {
-      const response = await selectDirectory();
-      if (response.path) {
-        saveSysSettings(envConfig, 'savedBookCoverForLockScreenPath', response.path);
-      }
-    }
-    saveSysSettings(envConfig, 'savedBookCoverForLockScreen', newValue);
-    setSavedBookCoverForLockScreen(newValue);
-  };
-
   const avatarUrl = user?.user_metadata?.['picture'] || user?.user_metadata?.['avatar_url'];
   const userFullName = user?.user_metadata?.['full_name'];
   const userDisplayName = userFullName ? userFullName.split(' ')[0] : null;
@@ -232,10 +213,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({
       : themeMode === 'light'
         ? _('Light Mode')
         : _('Auto Mode');
-
-  const savedBookCoverPath = settings.savedBookCoverForLockScreenPath;
-  const coverDir = savedBookCoverPath ? savedBookCoverPath.split('/').pop() : 'Images';
-  const savedBookCoverDescription = `💾 ${coverDir}/last-book-cover.png`;
 
   return (
     <Menu
@@ -401,15 +378,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({
               label={_('Unlock with {{biometry}}', { biometry: _(biometryLabelKey) })}
               toggled={!!settings.biometricUnlockEnabled}
               onClick={toggleBiometricUnlock}
-            />
-          )}
-          {appService?.isAndroidApp && appService?.distChannel !== 'playstore' && (
-            <MenuItem
-              label={_('Save Book Cover')}
-              tooltip={_('Auto-save last book cover')}
-              description={savedBookCoverForLockScreen ? savedBookCoverDescription : ''}
-              toggled={!!savedBookCoverForLockScreen}
-              onClick={handleSetSavedBookCoverForLockScreen}
             />
           )}
         </ul>

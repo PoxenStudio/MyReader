@@ -38,7 +38,6 @@ export const BACKUP_SETTINGS_BLACKLIST = [
   'customRootDir',
   'externalLibraryFolders',
   'autoImportFolders',
-  'savedBookCoverForLockScreenPath',
   // Per-device identity — restoring causes sync identity / HLC collisions.
   'replicaDeviceId',
   // Sync cursors — stale values make sync skip pulls or re-push everything.

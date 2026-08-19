@@ -29,8 +29,6 @@ function makeSettings(overrides: Partial<SystemSettings> = {}): SystemSettings {
     screenBrightness: 0.7,
     autoScreenBrightness: false,
     lastOpenBooks: ['book-1', 'book-2'],
-    savedBookCoverForLockScreen: 'cover',
-    savedBookCoverForLockScreenPath: '/Users/me/cover.png',
     libraryViewMode: 'grid',
     librarySortBy: 'title',
     libraryColumns: 4,
@@ -82,7 +80,6 @@ describe('sanitizeSettingsForBackup - blacklist', () => {
     expect(out['localBooksDir']).toBeUndefined();
     expect(out['customRootDir']).toBeUndefined();
     expect(out['externalLibraryFolders']).toBeUndefined();
-    expect(out['savedBookCoverForLockScreenPath']).toBeUndefined();
   });
 
   it('strips per-device identity fields', () => {

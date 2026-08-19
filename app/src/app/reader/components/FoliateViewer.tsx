@@ -66,7 +66,6 @@ import { TransformContext } from '@/services/transformers/types';
 import { transformContent } from '@/services/transformService';
 import { lockScreenOrientation, setTextSelectionSuppressed } from '@/utils/bridge';
 import { useTextTranslation } from '../hooks/useTextTranslation';
-import { useBookCoverAutoSave } from '../hooks/useAutoSaveBookCover';
 import { manageSyntaxHighlighting } from '@/utils/highlightjs';
 import { getViewInsets } from '@/utils/insets';
 import { footerReservesBand } from '../utils/footerBand';
@@ -163,7 +162,6 @@ const FoliateViewer: React.FC<{
 
   useUICSS(bookKey);
   useProgressAutoSave(bookKey);
-  useBookCoverAutoSave(bookKey);
   useWebDAVSync(bookKey);
   useNativeSync(bookKey);
   useTextTranslation(bookKey, viewRef.current);

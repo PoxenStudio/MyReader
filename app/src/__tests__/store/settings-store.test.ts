@@ -42,8 +42,6 @@ function makeSettings(overrides: Partial<SystemSettings> = {}): SystemSettings {
     openLastBooks: false,
     lastOpenBooks: [],
     autoImportBooksOnOpen: false,
-    savedBookCoverForLockScreen: '',
-    savedBookCoverForLockScreenPath: '',
     telemetryEnabled: false,
     libraryViewMode: 'grid',
     librarySortBy: 'updated',

@@ -363,8 +363,6 @@ export interface SystemSettings {
   openLastBooks: boolean;
   lastOpenBooks: string[];
   autoImportBooksOnOpen: boolean;
-  savedBookCoverForLockScreen: string;
-  savedBookCoverForLockScreenPath: string;
   telemetryEnabled: boolean;
   libraryViewMode: LibraryViewModeType;
   librarySortBy: LibrarySortByType;
