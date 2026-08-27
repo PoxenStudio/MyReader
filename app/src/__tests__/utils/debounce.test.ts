@@ -82,6 +82,82 @@ describe('debounce', () => {
   });
 
   // -----------------------------------------------------------------------
+  // maxWait
+  // -----------------------------------------------------------------------
+  describe('maxWait', () => {
+    it('never fires if calls keep resetting the delay and no maxWait is set', () => {
+      const fn = vi.fn();
+      const debounced = debounce(fn, 100);
+      // Simulate continuous activity (e.g. page-turn events) always arriving
+      // inside the delay window, forever resetting the trailing timer.
+      for (let i = 0; i < 20; i++) {
+        debounced(i);
+        vi.advanceTimersByTime(50);
+      }
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('forces a call once maxWait elapses, even if the delay keeps resetting', () => {
+      const fn = vi.fn();
+      const debounced = debounce(fn, 100, { maxWait: 200 });
+      for (let i = 0; i < 20; i++) {
+        debounced(i);
+        vi.advanceTimersByTime(50);
+      }
+      // 20 * 50ms = 1000ms of continuous activity; maxWait (200ms) must have
+      // forced at least one call despite the delay never getting a quiet gap.
+      expect(fn).toHaveBeenCalled();
+    });
+
+    it('fires with the latest pending args when maxWait forces the call', () => {
+      const fn = vi.fn();
+      const debounced = debounce(fn, 100, { maxWait: 200 });
+      debounced('a');
+      vi.advanceTimersByTime(50);
+      debounced('b');
+      vi.advanceTimersByTime(50);
+      debounced('c');
+      vi.advanceTimersByTime(100); // total 200ms since the first call
+      expect(fn).toHaveBeenCalledOnce();
+      expect(fn).toHaveBeenCalledWith('c');
+    });
+
+    it('does not fire before maxWait has elapsed', () => {
+      const fn = vi.fn();
+      const debounced = debounce(fn, 100, { maxWait: 200 });
+      debounced('a');
+      vi.advanceTimersByTime(50);
+      debounced('b');
+      vi.advanceTimersByTime(50);
+      // Only 100ms elapsed since the first call; maxWait is 200ms.
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('does not double-fire: the regular delay firing cancels the pending maxWait timer', () => {
+      const fn = vi.fn();
+      const debounced = debounce(fn, 100, { maxWait: 200 });
+      debounced('a');
+      vi.advanceTimersByTime(100); // delay elapses with no further calls
+      expect(fn).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(200); // maxWait window would have elapsed too
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it('resets the maxWait window after a call fires', () => {
+      const fn = vi.fn();
+      const debounced = debounce(fn, 100, { maxWait: 200 });
+      debounced('a');
+      vi.advanceTimersByTime(200); // forced by maxWait
+      expect(fn).toHaveBeenCalledOnce();
+
+      debounced('b');
+      vi.advanceTimersByTime(100); // quiet gap, fires via the normal delay
+      expect(fn).toHaveBeenCalledTimes(2);
+      expect(fn).toHaveBeenLastCalledWith('b');
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // flush
   // -----------------------------------------------------------------------
   describe('flush', () => {
