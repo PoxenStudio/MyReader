@@ -30,6 +30,7 @@ import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvent
  */
 
 const PUSH_DEBOUNCE_MS = 15_000;
+const PUSH_MAX_WAIT_MS = 20_000;
 const PULL_COOLDOWN_MS = 60_000;
 
 export const useNativeSync = (bookKey: string) => {
@@ -50,6 +51,14 @@ export const useNativeSync = (bookKey: string) => {
   const lastPulledAtRef = useRef(0);
   const hasPulledOnce = useRef(false);
   const initialPullDoneRef = useRef(false);
+  // Diagnostic only (see syncLogger.ts): timestamps how long a change has
+  // sat "dirty" and how many times the push debounce got reset before it
+  // actually fired — used to confirm/rule out debounce starvation (the
+  // timer never getting a 15s quiet gap because progress keeps changing)
+  // as the cause of reported 3+ minute gaps between pushes. Remove once
+  // confirmed and fixed.
+  const pendingSinceRef = useRef(0);
+  const debounceResetCountRef = useRef(0);
 
   const pushNow = useCallback(async () => {
     if (!isReady) return;
@@ -106,6 +115,8 @@ export const useNativeSync = (bookKey: string) => {
         })),
       });
       dirtyRef.current = false;
+      pendingSinceRef.current = 0;
+      debounceResetCountRef.current = 0;
       syncLog(bookKey, 'push:done', { elapsedMs: Date.now() - now });
 
       const latest = getConfig(bookKey);
@@ -304,21 +315,43 @@ export const useNativeSync = (bookKey: string) => {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const debouncedPush = useCallback(
-    debounce(() => {
-      if (!dirtyRef.current) {
-        syncLog(bookKey, 'push:debounce-fired', { dirty: false });
-        return;
-      }
-      syncLog(bookKey, 'push:debounce-fired', { dirty: true });
-      syncRefs.current.pushNow();
-    }, PUSH_DEBOUNCE_MS),
+    debounce(
+      () => {
+        if (!dirtyRef.current) {
+          syncLog(bookKey, 'push:debounce-fired', { dirty: false });
+          return;
+        }
+        syncLog(bookKey, 'push:debounce-fired', {
+          dirty: true,
+          pendingMs: pendingSinceRef.current ? Date.now() - pendingSinceRef.current : null,
+          resetCount: debounceResetCountRef.current,
+        });
+        syncRefs.current.pushNow();
+      },
+      PUSH_DEBOUNCE_MS,
+      { emitLast: true, maxWait: PUSH_MAX_WAIT_MS },
+    ),
     [],
   );
 
   const markDirtyAndSchedule = useCallback(() => {
+    // Diagnostic only (see pendingSinceRef/debounceResetCountRef comment
+    // above): a call while already dirty means the 15s debounce timer just
+    // got reset again before it could fire — track how long that's been
+    // going on and how many times, to confirm/rule out debounce starvation.
+    if (dirtyRef.current) {
+      debounceResetCountRef.current += 1;
+      syncLog(bookKey, 'push:debounce-reset', {
+        resetCount: debounceResetCountRef.current,
+        pendingMs: Date.now() - pendingSinceRef.current,
+      });
+    } else {
+      pendingSinceRef.current = Date.now();
+      debounceResetCountRef.current = 0;
+    }
     dirtyRef.current = true;
     debouncedPush();
-  }, [debouncedPush]);
+  }, [debouncedPush, bookKey]);
 
   // Pull once on book open.
   useEffect(() => {

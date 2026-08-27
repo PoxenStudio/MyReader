@@ -25,5 +25,6 @@
   },
   "[json]": {
     "editor.defaultFormatter": "biomejs.biome"
-  }
+  },
+  "cmake.sourceDirectory": "/Volumes/data/projects/poxenstudio/myreader/node_modules/.pnpm/bare-fs@4.7.1/node_modules/bare-fs"
 }

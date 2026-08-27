@@ -6,6 +6,7 @@
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
 import { BookRecord, BookNoteRecord, BookConfigRecord } from '@/types/book';
+import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
 
 export interface SyncEnvelope {
   books: BookRecord[] | null;
@@ -83,16 +84,39 @@ export async function pullSync(
   return parseSyncResponse(response);
 }
 
+// Diagnostic only (see syncLogger.ts): tracks the gap between consecutive
+// `pushSync` calls at the actual network boundary, independent of whatever
+// the caller's debounce/scheduling layer believes it's doing — used to
+// confirm/rule out debounce starvation as the cause of missed periodic
+// pushes (reports of 3+ minute gaps). Remove once confirmed and fixed.
+let lastPushRequestAt = 0;
+
 /**
  * `POST /api/sync` —— 推送本地变更，返回服务端合并后的最终状态。
  */
 export async function pushSync(payload: SyncPushPayload): Promise<SyncEnvelope> {
-  const { url, fetchFn } = buildSyncRequest();
-  const response = await fetchFn(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+  const bookHash = payload.configs?.[0]?.book_hash ?? payload.configs?.[0]?.id ?? 'unknown';
+  const now = Date.now();
+  const sinceLastPushMs = lastPushRequestAt ? now - lastPushRequestAt : null;
+  lastPushRequestAt = now;
+  syncLog(bookHash, 'net:push:request', {
+    sinceLastPushMs,
+    configsCount: payload.configs?.length ?? 0,
+    notesCount: payload.notes?.length ?? 0,
   });
-  return parseSyncResponse(response);
+  try {
+    const { url, fetchFn } = buildSyncRequest();
+    const response = await fetchFn(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await parseSyncResponse(response);
+    syncLog(bookHash, 'net:push:response', { elapsedMs: Date.now() - now });
+    return result;
+  } catch (e) {
+    syncWarn(bookHash, 'net:push:error', { elapsedMs: Date.now() - now, error: String(e) });
+    throw e;
+  }
 }
