@@ -91,7 +91,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const { systemUIVisible, statusBarHeight } = useThemeStore();
   const { currentBookshelf } = useLibraryStore();
   const connectionStatus = useMyBooksConnectionStatus();
-  const { status, isGuest, setIsAdmin, host } = useAuth();
+  const { status, isGuest, setIsAdmin, host, logout } = useAuth();
   const openLoginDialog = useAuthUIStore((state) => state.openLoginDialog);
   const { setSettingsDialogOpen, setRequestedPanel } = useSettingsStore();
   const [searchQuery, setSearchQuery] = useState(searchParams?.get('q') ?? '');
@@ -112,6 +112,10 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const fetchUserInfo = useCallback(async () => {
     try {
       const info = await getUserInfo();
+      if (status === 'logged_in' && info && !info.is_login) {
+        logout();
+        return;
+      }
       setUserInfo(info);
       setIsAdmin(info?.is_admin ?? false);
       const sysInfo = useMyBooksStatusStore.getState().sysInfo;
@@ -131,7 +135,7 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
         setShowAccessCodeDialog(true);
       }
     }
-  }, [setIsAdmin]);
+  }, [status, setIsAdmin, logout]);
 
   useEffect(() => {
     if (status === 'logged_in') {
