@@ -55,8 +55,10 @@ const MetaList: React.FC<MetaListProps> = ({
     const isActive = currentItem === item.name;
 
     if (type === 'rating') {
-      // Special display for rating - show stars
-      const rating = parseInt(item.name) || 0;
+      // Special display for rating - show stars. `item.name` carries
+      // MyBooks' raw 0-10 rating value (kept as-is for the filter query
+      // passed to onSelectItem); convert to a 0-5 star count for display only.
+      const rating = Math.round((parseInt(item.name) || 0) / 2);
       return (
         <button
           key={item.id}

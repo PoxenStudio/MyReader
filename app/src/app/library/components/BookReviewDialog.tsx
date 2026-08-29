@@ -15,8 +15,9 @@ interface BookReviewDialogProps {
   onClose: () => void;
 }
 
-// Default rating for a brand-new review — mirrors mybooks' BookReviewDialog.vue,
-// which pre-fills 8 stars so most users only need to hit submit.
+// Default rating (MyBooks' 0-10 scale) for a brand-new review — mirrors
+// mybooks' BookReviewDialog.vue, which pre-fills 8/10 so most users only
+// need to hit submit. Displayed as 4/5 stars by StarRatingInput.
 const DEFAULT_RATING = 8;
 const COMMENT_MAX_LENGTH = 500;
 
