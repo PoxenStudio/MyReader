@@ -32,6 +32,7 @@ import { getMyBooksId } from '@/utils/bookConverter';
 import BookCover from '@/components/BookCover';
 import StarRating from '@/components/StarRating';
 import BookReviewList from '@/components/metadata/BookReviewList';
+import BookReadingStatsBanner from '@/components/metadata/BookReadingStatsBanner';
 
 interface BookDetailViewProps {
   book: Book;
@@ -147,6 +148,9 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
       </div>
 
       <div className='text-base-content my-4'>
+        {book.storageType === 'cloud' && (book.bookId ?? 0) > 0 && (
+          <BookReadingStatsBanner bookId={book.bookId!} format={book.format} />
+        )}
         <div className='metadata-others'>
           <button
             className={clsx(

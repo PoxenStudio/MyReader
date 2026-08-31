@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/plugin-http', () => ({
   fetch: vi.fn(),
 }));
 
-import { getReadingStats } from '@/services/mybooksService';
+import { getBookReadingStats, getReadingStats } from '@/services/mybooksService';
 
 describe('getReadingStats', () => {
   beforeEach(() => {
@@ -64,5 +64,66 @@ describe('getReadingStats', () => {
     const stats = await getReadingStats();
 
     expect(stats).toBeNull();
+  });
+});
+
+describe('getBookReadingStats', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem('mybooks_host', 'http://mybooks.local');
+    vi.restoreAllMocks();
+  });
+
+  it('GETs /book/<id>/reading_stats with the format filter applied', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      json: async () => ({
+        err: 'ok',
+        stats: [
+          {
+            format: 'epub',
+            state: 0,
+            total_seconds: 5460,
+            progress_current: 128,
+            progress_total: 320,
+            progress_percent: 40.0,
+            start_time: '2026-08-20T09:12:33Z',
+            finish_time: null,
+            start_count: 2,
+            update_time: '2026-08-30T13:05:11Z',
+          },
+        ],
+      }),
+    } as Response);
+
+    const stats = await getBookReadingStats(42, 'epub');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url] = fetchSpy.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/book\/42\/reading_stats/);
+    expect(String(url)).toContain('format=epub');
+    expect(stats).toEqual([
+      {
+        format: 'epub',
+        state: 0,
+        total_seconds: 5460,
+        progress_current: 128,
+        progress_total: 320,
+        progress_percent: 40.0,
+        start_time: '2026-08-20T09:12:33Z',
+        finish_time: null,
+        start_count: 2,
+        update_time: '2026-08-30T13:05:11Z',
+      },
+    ]);
+  });
+
+  it('returns an empty array when the format has no stats', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      json: async () => ({ err: 'ok', stats: [] }),
+    } as Response);
+
+    const stats = await getBookReadingStats(42, 'pdf');
+
+    expect(stats).toEqual([]);
   });
 });

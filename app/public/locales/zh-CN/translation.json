@@ -2061,5 +2061,8 @@
   "Submit Review": "提交评价",
   "Reviews": "评价",
   "Pending Review": "待审核",
-  "Search in MyBooks...": "在MyBooks书库中搜索..."
+  "Search in MyBooks...": "在MyBooks书库中搜索...",
+  "Read {{hours}} hr {{minutes}} min": "已读{{hours}}小时{{minutes}}分钟",
+  "Read {{minutes}} min": "已读{{minutes}}分钟",
+  "Started {{date}}": "开始于 {{date}}"
 }

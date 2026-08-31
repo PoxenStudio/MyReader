@@ -1527,6 +1527,97 @@ sys/allow下的book_review表示是否允许用户评论，physical_books代表�
 }
 ```
 
+### 3.49 获取图书分格式阅读统计
+
+- **路径**：`/api/book/<id>/reading_stats`
+- **方法**：GET
+- **认证**：需要登录
+- **参数**：
+  - `id` (path, 必填): 图书ID
+  - `format` (query, 可选): 只查询指定格式（epub/pdf/mobi/azw3/txt 等，大小写不敏感，内部统一转小写）的统计数据；不传则返回该书籍下所有格式的统计
+- **说明**：
+  - 返回当前登录用户在该书籍下、按格式分别统计的阅读时长/进度/状态，与 `BookDetail` 接口内嵌的 `book["reading_stats"]` 同源
+  - 只返回 `total_seconds > 10`（累计阅读时长超过10秒）的格式，按 `format` 字母序排列；从未产生有效阅读时长的格式不会出现在结果里。传了 `format` 但该格式尚无有效统计数据（或格式不存在）时，返回 `stats: []`，不会报错
+  - 与本接口对应的 POST 方法用于手动补记/纠正某个格式的统计数据（例如导入历史阅读记录，或网页阅读器等没有自动心跳上报的场景），不在此文档展开
+- **响应示例**：
+
+```json
+{
+  "err": "ok",
+  "stats": [
+    {
+      "format": "epub",
+      "state": 0,
+      "total_seconds": 5460,
+      "progress_current": 128,
+      "progress_total": 320,
+      "progress_percent": 40.0,
+      "start_time": "2026-08-20T09:12:33Z",
+      "finish_time": null,
+      "start_count": 2,
+      "update_time": "2026-08-30T13:05:11Z"
+    },
+    {
+      "format": "pdf",
+      "state": 1,
+      "total_seconds": 9800,
+      "progress_current": 200,
+      "progress_total": 200,
+      "progress_percent": 100.0,
+      "start_time": "2026-07-01T02:00:00Z",
+      "finish_time": "2026-07-10T11:30:00Z",
+      "start_count": 1,
+      "update_time": "2026-07-10T11:30:00Z"
+    }
+  ]
+}
+```
+
+**字段说明**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `err` | string | 固定为 `"ok"` |
+| `stats` | array | 按 `format` 字母序排列的分格式统计列表 |
+| `stats[].format` | string | 书籍格式，统一小写（epub/pdf/mobi/azw3/txt 等） |
+| `stats[].state` | integer | 阅读状态：`0`=在读，`1`=已完成 |
+| `stats[].total_seconds` | integer | 该格式的累计阅读时长，单位：秒，跨轮次累加 |
+| `stats[].progress_current` | integer \| null | 最近一次上报的阅读进度当前值（如当前页码），未上报过为 `null` |
+| `stats[].progress_total` | integer \| null | 最近一次上报的阅读进度总量（如总页数），未上报过为 `null` |
+| `stats[].progress_percent` | number \| null | 阅读进度百分比（0~100，两位小数）；`state` 为已完成（`1`）时固定返回 `100.0`，否则为最近一次上报换算得到的值，未上报过为 `null` |
+| `stats[].start_time` | string (ISO8601, UTC, 以 `Z` 结尾) \| null | 当前/最近一轮阅读的开始时间；未开始过为 `null` |
+| `stats[].finish_time` | string (ISO8601, UTC, 以 `Z` 结尾) \| null | 当前/最近一轮阅读的完成时间；重新开始阅读时会被清空为 `null` |
+| `stats[].start_count` | integer | 开始阅读的次数（含首次） |
+| `stats[].update_time` | string (ISO8601, UTC, 以 `Z` 结尾) | 该格式统计数据最后一次写入时间（心跳上报或手动更新） |
+
+- **按格式过滤示例**（`GET /api/book/123/reading_stats?format=epub`，只返回 `stats` 中 `format` 为 `epub` 的一项，数组长度最多为 1）：
+
+```json
+{
+  "err": "ok",
+  "stats": [
+    {
+      "format": "epub",
+      "state": 0,
+      "total_seconds": 5460,
+      "progress_current": 128,
+      "progress_total": 320,
+      "progress_percent": 40.0,
+      "start_time": "2026-08-20T09:12:33Z",
+      "finish_time": null,
+      "start_count": 2,
+      "update_time": "2026-08-30T13:05:11Z"
+    }
+  ]
+}
+```
+
+- **错误响应示例**：
+
+```json
+{ "err": "user.need_login", "msg": "请先登录" }
+```
+
 ---
 
 ## 4. 元数据接口（作者、出版社、标签等）
