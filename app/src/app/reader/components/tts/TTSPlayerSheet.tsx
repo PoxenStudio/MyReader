@@ -256,9 +256,10 @@ const TTSPlayerSheet = ({
   };
 
   const timeoutOptions = getTTSTimeoutOptions(_);
-  const currentVoiceName = voiceGroups
+  const currentVoiceNameKey = voiceGroups
     .flatMap((group) => group.voices)
     .find((voice) => voice.id === selectedVoice)?.name;
+  const currentVoiceName = currentVoiceNameKey ? _(currentVoiceNameKey) : undefined;
   // Armed timer shows its live countdown on the button; otherwise the button
   // just names itself (the alarm icon already carries the affordance).
   const timerCaption = timeoutOption > 0 && timerLabel ? timerLabel : _('Sleep Timer');
