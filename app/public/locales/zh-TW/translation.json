@@ -2061,5 +2061,8 @@
   "Submit Review": "提交評價",
   "Reviews": "評價",
   "Pending Review": "待審核",
-  "Search in MyBooks...": "在MyBooks書庫中搜索..."
+  "Search in MyBooks...": "在MyBooks書庫中搜索...",
+  "Read {{hours}} hr {{minutes}} min": "已讀{{hours}}小時{{minutes}}分鐘",
+  "Read {{minutes}} min": "已讀{{minutes}}分鐘",
+  "Started {{date}}": "開始於 {{date}}"
 }

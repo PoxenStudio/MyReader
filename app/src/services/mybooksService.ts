@@ -180,6 +180,20 @@ export interface MyBooksReadingStatsBookStatus {
   finished: number;
 }
 
+// /book/<id>/reading_stats — document/MyBooks_WebAPI.md §3.49
+export interface MyBooksBookReadingStat {
+  format: string;
+  state: 0 | 1;
+  total_seconds: number;
+  progress_current: number | null;
+  progress_total: number | null;
+  progress_percent: number | null;
+  start_time: string | null;
+  finish_time: string | null;
+  start_count: number;
+  update_time: string;
+}
+
 export interface MyBooksResponse<T = unknown> {
   err: string;
   msg?: string;
@@ -204,6 +218,8 @@ export interface MyBooksResponse<T = unknown> {
   totals?: MyBooksReadingStatsTotals;
   weekly?: MyBooksReadingStatsWeek[];
   book_status?: MyBooksReadingStatsBookStatus;
+  // /book/<id>/reading_stats — document/MyBooks_WebAPI.md §3.49
+  stats?: MyBooksBookReadingStat[];
 }
 
 // Thrown when MyReader responded but reported a logical error (e.g. not logged
@@ -868,6 +884,21 @@ export async function getBookReviews(
     `/book/${id}/reviews`,
   );
   return { reviews: response.reviews || [], total: response.total || 0 };
+}
+
+/**
+ * 获取某本书按格式分别统计的阅读数据，参见 document/MyBooks_WebAPI.md 3.49
+ * @param format - 只查询指定格式，不传则返回该书籍下所有格式的统计
+ */
+export async function getBookReadingStats(
+  id: number,
+  format?: string,
+): Promise<MyBooksBookReadingStat[]> {
+  const response = await fetchMyBooks<{ stats: MyBooksBookReadingStat[] }>(
+    `/book/${id}/reading_stats`,
+    format ? { format } : undefined,
+  );
+  return response.stats || [];
 }
 
 /**
