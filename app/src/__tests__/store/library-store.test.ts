@@ -206,12 +206,34 @@ describe('libraryStore', () => {
       expect(updateReadState).not.toHaveBeenCalled();
     });
 
-    test('does not sync when autoSetReadState setting is disabled', () => {
+    test('still syncs "finished" even when autoSetReadState setting is disabled', () => {
+      // Finishing a book always syncs — the toggle only guards automatic
+      // "unread"/"reading" transitions, not completion.
       useSettingsStore.setState({ settings: { autoSetReadState: false } as SystemSettings });
       const books = [makeBook({ hash: 'a', bookId: 42, readingStatus: undefined })];
       useLibraryStore.getState().setLibrary(books);
 
       useLibraryStore.getState().updateBookProgress('a', [100, 100], 'finished');
+
+      expect(updateReadState).toHaveBeenCalledWith(42, 2);
+    });
+
+    test('does not sync "reading" when autoSetReadState setting is disabled', () => {
+      useSettingsStore.setState({ settings: { autoSetReadState: false } as SystemSettings });
+      const books = [makeBook({ hash: 'a', bookId: 42, readingStatus: undefined })];
+      useLibraryStore.getState().setLibrary(books);
+
+      useLibraryStore.getState().updateBookProgress('a', [50, 100], 'reading');
+
+      expect(updateReadState).not.toHaveBeenCalled();
+    });
+
+    test('does not sync "unread" when autoSetReadState setting is disabled', () => {
+      useSettingsStore.setState({ settings: { autoSetReadState: false } as SystemSettings });
+      const books = [makeBook({ hash: 'a', bookId: 42, readingStatus: 'reading' })];
+      useLibraryStore.getState().setLibrary(books);
+
+      useLibraryStore.getState().updateBookProgress('a', [0, 100], 'unread');
 
       expect(updateReadState).not.toHaveBeenCalled();
     });
