@@ -21,6 +21,39 @@ interface WhoamiResponse {
   isActive?: boolean;
 }
 
+// Resolves the MyBooks origin the user actually used to get here, without
+// relying on a `host` URL parameter (see document/MyReader_Embedded_WebApp.md
+// §14). Correct by construction when MyReader and MyBooks share one origin
+// (the only deployment implemented today); the Referer/returnUrl fallbacks
+// only matter if MyReader ever becomes a shared deployment fronting several
+// different MyBooks instances.
+const resolveMyBooksOrigin = (returnUrl?: string): string => {
+  // 1) Referer: browsers attach it automatically on a cross-origin full-page
+  // navigation, and the default Referrer-Policy (strict-origin-when-cross-origin)
+  // exposes just the origin cross-origin — exactly the address the user used
+  // to reach MyBooks (LAN IP, external domain, any port), with no cooperation
+  // needed from MyBooks or its reverse proxy.
+  if (document.referrer) {
+    try {
+      const refOrigin = new URL(document.referrer).origin;
+      if (refOrigin !== window.location.origin) return refOrigin;
+    } catch {
+      // Ignore an unparsable Referer and fall through.
+    }
+  }
+  // 2) returnUrl: an existing §4 parameter MyBooks already controls, and can
+  // be a full URL — not a new parameter introduced for this purpose.
+  if (returnUrl) {
+    try {
+      return new URL(returnUrl, window.location.href).origin;
+    } catch {
+      // Ignore and fall through.
+    }
+  }
+  // 3) Same-origin deployment (the only one implemented today): correct as-is.
+  return window.location.origin;
+};
+
 const ReaderEmbedOpen = () => {
   const _ = useTranslation();
   const router = useRouter();
@@ -61,7 +94,7 @@ const ReaderEmbedOpen = () => {
           return;
         }
 
-        const host = window.location.origin;
+        const host = resolveMyBooksOrigin(returnUrl);
         const sessionToken = btoa(`mybooks:${identity.userId}:${Date.now()}`);
         const mockUser = {
           id: String(identity.userId),
