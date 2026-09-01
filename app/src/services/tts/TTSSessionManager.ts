@@ -10,6 +10,7 @@
 
 import env from '@/services/environment';
 import { stubTranslation as _ } from '@/utils/misc';
+import { getBookHash } from '@/utils/book';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { eventDispatcher } from '@/utils/event';
@@ -33,7 +34,10 @@ export type TTSSessionStopReason =
   | 'deleted'
   | 'quit';
 
-export const getBookHashFromKey = (bookKey: string): string => bookKey.split('-')[0]!;
+// bookKey is `${hash}-${uniqueId()}`, and hash may itself contain dashes, so
+// delegate to the canonical suffix-stripping helper instead of splitting on
+// the first '-'.
+export const getBookHashFromKey = getBookHash;
 
 // Headless position writes hit the disk at most this often; stopActive
 // flushes the final position regardless.

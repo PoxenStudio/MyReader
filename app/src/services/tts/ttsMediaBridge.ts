@@ -13,6 +13,7 @@
 
 import { buildTTSMediaMetadata } from '@/utils/ttsMetadata';
 import { fetchImageAsBase64 } from '@/utils/image';
+import { getBookHash } from '@/utils/book';
 import { getMediaSession, TauriMediaSession } from '@/libs/mediaSession';
 import { isTauriAppPlatform } from '@/services/environment';
 import { getOSPlatform } from '@/utils/misc';
@@ -156,7 +157,7 @@ export class TTSMediaBridge {
         active: true,
         // bookKey is `${hash}-${uniqueId()}`; the hash alone addresses the book
         // for a readest://book/{hash} resume deep link from the car.
-        bookHash: meta.bookKey.split('-')[0],
+        bookHash: getBookHash(meta.bookKey),
         bookTitle: meta.title,
         bookAuthor: meta.author,
       });

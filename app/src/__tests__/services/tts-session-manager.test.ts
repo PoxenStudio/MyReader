@@ -67,7 +67,11 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('getBookHashFromKey', () => {
   test('extracts the hash prefix from an ephemeral bookKey', () => {
-    expect(getBookHashFromKey('c9f7c5aa-1a2b3c')).toBe('c9f7c5aa');
+    expect(getBookHashFromKey('c9f7c5aa-1a2b3c4')).toBe('c9f7c5aa');
+  });
+
+  test('keeps a dash that belongs to the hash itself', () => {
+    expect(getBookHashFromKey('c9f7-c5aa-1a2b3c4')).toBe('c9f7-c5aa');
   });
 });
 
@@ -80,7 +84,7 @@ describe('TTSSessionManager', () => {
     playbackStates.push(e.detail as { bookKey: string; state: string });
   };
 
-  const claim = (bookKey = 'hashA-r1', ctrl = controller) =>
+  const claim = (bookKey = 'hashA-0000001', ctrl = controller) =>
     manager.claim(bookKey, ctrl as unknown as TTSController, meta(bookKey));
 
   beforeEach(() => {
@@ -102,7 +106,7 @@ describe('TTSSessionManager', () => {
 
   test('claim registers a hash-keyed session and binds the bridge', () => {
     claim();
-    expect(manager.getSessionByHash('hashA')?.bookKey).toBe('hashA-r1');
+    expect(manager.getSessionByHash('hashA')?.bookKey).toBe('hashA-0000001');
     expect(manager.getActiveSession()?.bookHash).toBe('hashA');
     expect(bridgeBind).toHaveBeenCalled();
     expect(sessionEvents.at(-1)?.reason).toBe('claimed');
@@ -111,7 +115,7 @@ describe('TTSSessionManager', () => {
   test('claim for the same hash replaces the controller without stopping the slot', async () => {
     claim();
     const second = new FakeController();
-    claim('hashA-r2', second);
+    claim('hashA-0000002', second);
     await flush();
     // Old controller unsubscribed and shut down by the manager; no bar-level stop.
     expect(controller.shutdown).toHaveBeenCalled();
@@ -126,7 +130,7 @@ describe('TTSSessionManager', () => {
   test('claim for a DIFFERENT hash stops the prior session first', async () => {
     claim();
     const other = new FakeController();
-    claim('hashB-r1', other);
+    claim('hashB-0000003', other);
     await flush();
     expect(controller.shutdown).toHaveBeenCalled();
     expect(bridgeUnbind).toHaveBeenCalled();
@@ -182,7 +186,7 @@ describe('TTSSessionManager', () => {
     manager.detach('hashA');
     controller.emitMark('epubcfi(/6/8!/4/2)');
     expect(setConfig).toHaveBeenCalledWith(
-      'hashA-r1',
+      'hashA-0000001',
       expect.objectContaining({
         viewSettings: expect.objectContaining({ ttsLocation: 'epubcfi(/6/8!/4/2)' }),
       }),
