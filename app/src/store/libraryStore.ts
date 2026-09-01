@@ -24,7 +24,10 @@ function toMyBooksReadState(status: ReadingStatus | undefined): 0 | 1 | 2 {
 function syncReadingStatusToMyBooks(book: Book, prevStatus: ReadingStatus | undefined): void {
   if (book.readingStatus === prevStatus) return;
   const status = toMyBooksReadState(book.readingStatus);
-  if (!useSettingsStore.getState().settings.autoSetReadState && status != 1) return;
+  // Finishing a book always syncs — completion shouldn't be gated by this
+  // setting. It only guards automatic "unread"/"reading" transitions (e.g.
+  // a casual open shouldn't flood the shelf with "reading" books).
+  if (!useSettingsStore.getState().settings.autoSetReadState && status !== 2) return;
   const bookId = getMyBooksId(book);
   if (!bookId) return;
   updateReadState(bookId, status).catch((error) => {

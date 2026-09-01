@@ -338,8 +338,12 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
                       <span>{subItem.text}</span>
                     </button>
                   ) : (
+                    // `replace` overwrites the current /library history entry instead of
+                    // pushing a new one, so switching between bookshelves doesn't leave a
+                    // trail the back button has to click through shelf by shelf.
                     <Link
                       href={subItem.href ?? ''}
+                      replace
                       className={clsx(
                         itemClassName,
                         (subItem.source
@@ -393,6 +397,7 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
       <li key={idx} className='w-full'>
         <Link
           href={link.href}
+          replace
           className={clsx(
             'flex items-center justify-between p-2 rounded-md transition-colors text-sm w-full',
             isActive

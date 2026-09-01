@@ -47,6 +47,34 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+// next/link swallows non-DOM props like `replace` before rendering the <a>,
+// so stub it to surface that prop as a data attribute the tests can assert on.
+vi.mock('next/link', () => ({
+  __esModule: true,
+  default: ({
+    href,
+    replace,
+    className,
+    onClick,
+    children,
+  }: {
+    href: string;
+    replace?: boolean;
+    className?: string;
+    onClick?: () => void;
+    children: React.ReactNode;
+  }) => (
+    <a
+      href={href}
+      data-replace={replace ? 'true' : undefined}
+      className={className}
+      onClick={onClick}
+    >
+      {children}
+    </a>
+  ),
+}));
+
 afterEach(() => {
   cleanup();
   mockAuthStatus = 'logged_out';
@@ -95,5 +123,19 @@ describe('LibraryDrawer', () => {
     fireEvent.click(screen.getByText('My Favorites'));
 
     expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses history-replacing links when switching bookshelves, so back does not step through shelves', () => {
+    mockPathname = '/library';
+    mockAuthStatus = 'logged_in';
+    mockConnectionStatus = 'connected';
+    render(<LibraryDrawer isOpen onClose={vi.fn()} />);
+
+    expect(screen.getByText('Home').closest('a')?.getAttribute('data-replace')).toBe('true');
+
+    fireEvent.click(screen.getByText('Reading Information'));
+    expect(screen.getByText('My Favorites').closest('a')?.getAttribute('data-replace')).toBe(
+      'true',
+    );
   });
 });
