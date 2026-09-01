@@ -2,8 +2,8 @@ import { describe, test, expect, beforeEach, vi } from 'vitest';
 
 // ── Mocks for constants ──────────────────────────────────────────
 vi.mock('@/services/constants', () => ({
-  MYBOOKS_WEB_BASE_URL: 'https://web.readest.com',
-  MYBOOKS_NODE_BASE_URL: 'https://node.readest.com',
+  MYBOOKS_WEB_BASE_URL: 'https://web.mybooks.top',
+  MYBOOKS_NODE_BASE_URL: 'https://node.mybooks.top',
 }));
 
 // We need to reset modules between tests to pick up env var changes,

@@ -40,6 +40,12 @@ async function proxyRequest(request: NextRequest, method: string): Promise<Respo
   const ct = upstream.headers.get('content-type');
   if (ct) responseHeaders.set('content-type', ct);
 
+  // Edge TTS word-boundary timings (see @/libs/edgeTTS.ts WORD_BOUNDARIES_HEADER)
+  // ride this header alongside the streamed audio body; without forwarding
+  // it here, TTS still plays but read-aloud highlighting silently breaks.
+  const boundaries = upstream.headers.get('x-tts-word-boundaries');
+  if (boundaries) responseHeaders.set('x-tts-word-boundaries', boundaries);
+
   // Forward Set-Cookie headers, stripping Domain so the cookie is scoped to
   // the Readest origin instead of the MyReader server origin.
   type HeadersWithGetSetCookie = Headers & { getSetCookie(): string[] };

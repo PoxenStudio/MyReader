@@ -1,5 +1,6 @@
 import { md5 } from 'js-md5';
 import WebSocket from 'isomorphic-ws';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { randomMd5, stubTranslation as _ } from '@/utils/misc';
 import { LRUCache } from '@/utils/lru';
 import { genSSML } from '@/utils/ssml';
@@ -675,20 +676,43 @@ export class EdgeSpeechTTS {
   }
 
   async #fetchEdgeSpeechHttp({ lang, text, voice, rate }: EdgeTTSPayload): Promise<Response> {
-    const url = getAPIBaseUrl() + '/tts/edge';
+    const body = JSON.stringify({ input: text, voice, rate, lang });
 
-    const response = await fetchWithAuth(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        input: text,
-        voice,
-        rate,
-        lang,
-      }),
-    });
+    // Prefer the connected MyBooks server's own `/api/tts/edge` proxy (see
+    // document/MyReader_Embedded_WebApp.md §14.3) over MyReader's own route:
+    // it's the same server-side-proxy trick (real headers, no browser
+    // Origin/CORS limits), and keeps TTS on whichever backend the user is
+    // actually using instead of a separate, unrelated one.
+    const host = typeof window !== 'undefined' ? localStorage.getItem('mybooks_host') : null;
+
+    let response: Response;
+    if (host && isTauriAppPlatform()) {
+      const normalizedHost = host.endsWith('/') ? host.slice(0, -1) : host;
+      response = await (tauriFetch as unknown as typeof fetch)(`${normalizedHost}/api/tts/edge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    } else if (host) {
+      // Web: route through the same-origin Next.js proxy so the browser's
+      // MyBooks cookie is forwarded server-to-server (avoids CORS/cross-site
+      // cookie issues), same pattern as `fetchMyBooks` in mybooksService.ts.
+      const url = `/api/mybooks/proxy/tts/edge?host=${encodeURIComponent(host)}`;
+      response = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    } else {
+      // No MyBooks connection: fall back to MyReader's own `/api/tts/edge`.
+      const url = getAPIBaseUrl() + '/tts/edge';
+      response = await fetchWithAuth(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    }
 
     if (!response.ok) {
       throw new Error(`Edge TTS HTTP request failed: ${response.status} ${response.statusText}`);
