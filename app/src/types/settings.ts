@@ -237,7 +237,7 @@ export interface WebDAVSyncLogEntry {
 export const WEBDAV_SYNC_LOG_LIMIT = 10;
 
 /** NAS device manufacturer, used only as a display label — no vendor-specific logic. */
-export type NasVendorType = 'feiniu' | 'ugreen' | 'synology' | 'other';
+export type NasVendorType = 'feiniu' | 'ugreen' | 'synology' | 'zspace' | 'other';
 
 /** Minimum allowed value for {@link NasDeviceSettings.expiryMinutes}. */
 export const NAS_MIN_EXPIRY_MINUTES = 10;

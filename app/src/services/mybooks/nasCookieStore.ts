@@ -12,9 +12,7 @@
  * Cookies are stored with their `domain` scope (see `NasCookieEntry`) so a
  * lookup for a *different* host than the one they were captured at (e.g. a
  * dynamic NAS relay subdomain) only replays the cookies that would actually
- * apply there — a host-only cookie captured at `horkynas.fnos.net` must not
- * be sent to `<id>.horkynas.fnos.net`, only a domain cookie scoped to
- * `.horkynas.fnos.net` (or broader) should be.
+ * apply there.
  */
 
 import { NasCookieEntry } from '@/utils/bridge';

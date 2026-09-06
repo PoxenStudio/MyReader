@@ -134,6 +134,7 @@ const NasDeviceForm: React.FC<NasDeviceFormProps> = ({ onBack }) => {
                     { value: 'fnos', label: _('fnOS') },
                     { value: 'ugreen', label: _('UGREEN') },
                     { value: 'synology', label: _('Synology') },
+                    { value: 'zspace', label: _('ZSpace') },
                     { value: 'other', label: _('Other') },
                   ]}
                 />
