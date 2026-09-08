@@ -10,11 +10,15 @@
 ## Introduction
 当前项目是基于[Readest](https://github.com/readest/readest)实现的个人书库[MyBooks](https://github.com/PoxenStudio/mybooks)阅读客户端，不是MyBooks的管理工具，只提供用户登录、个人账号管理及多种形式的搜索及查询功能、从MyBooks中下载并阅读的功能、将阅读数据同步到MyBooks等功能。
 
-![MyReader UI](document/main_ui.jpg)
+<p align="center">
+  <img src="document/main_ui.jpg" alt="MyReader Desktop"></a>
+</p>
 
 Android UI
 
-![Android MainUI](document/android_mainui.jpeg)
+<p align="center">
+  <img src="document/android_mainui.jpeg" alt="MyReader Mobile"></a>
+</p>
 
 文档[MyReader API](document/MyBooks_WebAPI.md)中为MyBooks的API定义。
 
