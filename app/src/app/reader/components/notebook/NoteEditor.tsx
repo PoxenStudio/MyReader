@@ -1,4 +1,6 @@
+import clsx from 'clsx';
 import React, { useEffect, useRef, useState } from 'react';
+import { MdLibraryAddCheck } from 'react-icons/md';
 import { useNotebookStore } from '@/store/notebookStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
@@ -10,7 +12,7 @@ import TextEditor, { TextEditorRef } from '@/components/TextEditor';
 import TextButton from '@/components/TextButton';
 
 interface NoteEditorProps {
-  onSave: (selection: TextSelection, note: string) => void;
+  onSave: (selection: TextSelection, note: string, global: boolean) => void;
   onEdit: (annotation: BookNote) => void;
 }
 
@@ -27,16 +29,23 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ onSave, onEdit }) => {
 
   const editorRef = useRef<TextEditorRef>(null);
   const [note, setNote] = useState('');
+  // Whether this note should also be shown wherever its selected text
+  // recurs elsewhere in the book (see globalAnnotations.ts). Note-only
+  // annotations previously had no way to opt into this — only the
+  // highlight-color popup exposed the toggle.
+  const [isGlobal, setIsGlobal] = useState(false);
   const separatorWidth = useResponsiveSize(3);
 
   useEffect(() => {
     if (notebookEditAnnotation) {
       const noteText = notebookEditAnnotation.note;
       setNote(noteText);
+      setIsGlobal(!!notebookEditAnnotation.global);
       editorRef.current?.setValue(noteText);
       editorRef.current?.focus();
     } else if (notebookNewAnnotation) {
       const noteText = getAnnotationText();
+      setIsGlobal(false);
       if (noteText) {
         const draftNote = getNotebookAnnotationDraft(md5Fingerprint(noteText)) || '';
         setNote(draftNote);
@@ -69,9 +78,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ onSave, onEdit }) => {
     const currentValue = editorRef.current?.getValue();
     if (currentValue) {
       if (notebookNewAnnotation) {
-        onSave(notebookNewAnnotation, currentValue);
+        onSave(notebookNewAnnotation, currentValue, isGlobal);
       } else if (notebookEditAnnotation) {
         notebookEditAnnotation.note = currentValue;
+        notebookEditAnnotation.global = isGlobal;
         onEdit(notebookEditAnnotation);
       }
     }
@@ -127,11 +137,28 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ onSave, onEdit }) => {
         </div>
       </div>
 
-      <div className='flex justify-end space-x-3 p-2' dir='ltr'>
-        <TextButton onClick={handleEscape}>{_('Cancel')}</TextButton>
-        <TextButton onClick={handleSaveNote} disabled={!canSave}>
-          {_('Save')}
-        </TextButton>
+      <div className='flex items-center justify-between space-x-3 p-2' dir='ltr'>
+        <button
+          type='button'
+          aria-label={_('Apply to every occurrence in the book')}
+          aria-pressed={isGlobal}
+          title={_('Apply to every occurrence in the book')}
+          onClick={() => setIsGlobal((prev) => !prev)}
+          className={clsx(
+            'eink-bordered flex items-center gap-1 rounded-full p-1',
+            isGlobal
+              ? 'not-eink:text-blue-400'
+              : 'not-eink:text-gray-400 hover:not-eink:text-gray-200',
+          )}
+        >
+          <MdLibraryAddCheck size={16} />
+        </button>
+        <div className='flex justify-end space-x-3'>
+          <TextButton onClick={handleEscape}>{_('Cancel')}</TextButton>
+          <TextButton onClick={handleSaveNote} disabled={!canSave}>
+            {_('Save')}
+          </TextButton>
+        </div>
       </div>
     </div>
   );
