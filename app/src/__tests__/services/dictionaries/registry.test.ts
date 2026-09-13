@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getEnabledProviders, __resetRegistryForTests } from '@/services/dictionaries/registry';
 import { BUILTIN_PROVIDER_IDS, BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
 import type {
@@ -161,5 +161,36 @@ describe('dictionary registry', () => {
       BUILTIN_PROVIDER_IDS.wiktionary,
       'mdict:available',
     ]);
+  });
+
+  describe('MyBooks / Baidu Baike — Tauri-only (no CORS on either upstream)', () => {
+    const settings: DictionarySettings = {
+      providerOrder: [BUILTIN_PROVIDER_IDS.myBooks, BUILTIN_PROVIDER_IDS.baiduBaike],
+      providerEnabled: {
+        [BUILTIN_PROVIDER_IDS.myBooks]: true,
+        [BUILTIN_PROVIDER_IDS.baiduBaike]: true,
+      },
+    };
+    const originalPlatform = process.env['NEXT_PUBLIC_APP_PLATFORM'];
+
+    afterEach(() => {
+      if (originalPlatform === undefined) delete process.env['NEXT_PUBLIC_APP_PLATFORM'];
+      else process.env['NEXT_PUBLIC_APP_PLATFORM'] = originalPlatform;
+    });
+
+    it('are skipped (no working provider) on a non-Tauri build', () => {
+      delete process.env['NEXT_PUBLIC_APP_PLATFORM'];
+      const providers = getEnabledProviders({ settings, dictionaries: [] });
+      expect(providers).toEqual([]);
+    });
+
+    it('resolve to working providers on a Tauri build', () => {
+      process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'tauri';
+      const providers = getEnabledProviders({ settings, dictionaries: [] });
+      expect(providers.map((p) => p.id)).toEqual([
+        BUILTIN_PROVIDER_IDS.myBooks,
+        BUILTIN_PROVIDER_IDS.baiduBaike,
+      ]);
+    });
   });
 });

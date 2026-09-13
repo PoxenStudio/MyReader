@@ -2065,5 +2065,8 @@
   "Search in MyBooks...": "在MyBooks書庫中搜索...",
   "Read {{hours}} hr {{minutes}} min": "已讀{{hours}}小時{{minutes}}分鐘",
   "Read {{minutes}} min": "已讀{{minutes}}分鐘",
-  "Started {{date}}": "開始於 {{date}}"
+  "Started {{date}}": "開始於 {{date}}",
+  "MyBooks Dictionary": "MyBooks 詞典",
+  "Baidu Baike": "百度百科",
+  "Read on Baidu Baike →": "在百度百科上查看 →"
 }

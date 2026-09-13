@@ -195,6 +195,18 @@ export const BUILTIN_PROVIDER_IDS = {
    * (system only).
    */
   systemDictionary: 'builtin:system',
+  /**
+   * MyBooks self-hosted dictionary API (ECDICT + Chinese dictionaries).
+   * Tauri-only: the API sends no CORS headers, so a web-build `fetch` would
+   * be blocked; native builds reach it via `@tauri-apps/plugin-http`, which
+   * bypasses the browser network stack entirely.
+   */
+  myBooks: 'builtin:mybooks',
+  /**
+   * Baidu Baike (百度百科) entry lookup, scraped from the mobile item page.
+   * Tauri-only for the same CORS reason as {@link BUILTIN_PROVIDER_IDS.myBooks}.
+   */
+  baiduBaike: 'builtin:baidu-baike',
 } as const;
 
 export type BuiltinProviderId = (typeof BUILTIN_PROVIDER_IDS)[keyof typeof BUILTIN_PROVIDER_IDS];
