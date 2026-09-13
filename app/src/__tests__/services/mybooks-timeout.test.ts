@@ -27,21 +27,23 @@ describe('MyBooks request timeout', () => {
     vi.useRealTimers();
   });
 
-  it('aborts a hung request after 5s and reports offline', async () => {
+  it('aborts a hung request after 5s and reports offline once retries are exhausted', async () => {
     vi.useFakeTimers();
-    vi.spyOn(global, 'fetch').mockImplementation((_url, opts) => {
+    const fetchMock = vi.fn((_url, opts) => {
       return new Promise((_resolve, reject) => {
         (opts as RequestInit)?.signal?.addEventListener('abort', () => {
           reject(new DOMException('Aborted', 'AbortError'));
         });
       });
     });
+    vi.spyOn(global, 'fetch').mockImplementation(fetchMock);
 
     const promise = fetchMyBooks('/anything');
     const assertion = expect(promise).rejects.toThrow();
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(30000);
     await assertion;
 
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(useMyBooksStatusStore.getState().isOffline).toBe(true);
   });
 });
