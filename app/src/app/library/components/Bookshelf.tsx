@@ -87,6 +87,9 @@ interface BookshelfProps {
   // Cloud library props
   source?: string;
   isCloudLibrary?: boolean;
+  // The "有声书" shelf (source=cloud&type=audiobooks): tapping a card opens
+  // the audiobook player instead of the ebook reader (see design doc §5.2).
+  isAudiobookShelf?: boolean;
   cloudBooksTotal?: number;
   onLoadMoreCloudBooks?: () => void;
   isLoadingMoreCloudBooks?: boolean;
@@ -193,6 +196,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   booksTransferProgress,
   source,
   isCloudLibrary = false,
+  isAudiobookShelf = false,
   cloudBooksTotal = 0,
   onLoadMoreCloudBooks,
   isLoadingMoreCloudBooks = false,
@@ -981,6 +985,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
           showCloudIcon={showCloudIcon}
           showAllFormatsBadge={showAllFormatsBadge}
           isCloudLibrary={isCloudLibrary}
+          isAudiobookShelf={isAudiobookShelf}
           showTimeRemaining={showTimeRemaining}
         />
       );
@@ -1014,6 +1019,7 @@ const Bookshelf: React.FC<BookshelfProps> = ({
       libraryBooks,
       cloudBooksTotal,
       showTimeRemaining,
+      isAudiobookShelf,
     ],
   );
 

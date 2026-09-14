@@ -33,6 +33,8 @@ import BookItem from './BookItem';
 import GroupItem from './GroupItem';
 import { useAuth } from '@/context/AuthContext';
 import { useOpenBook } from '../hooks/useOpenBook';
+import { audiobookSessionManager } from '@/services/audiobook/audiobookSessionManager';
+import { useAudiobookUIStore } from '@/store/audiobookUIStore';
 
 export const generateBookshelfItems = (
   books: Book[],
@@ -118,6 +120,7 @@ interface BookshelfItemProps {
   showCloudIcon?: boolean;
   showAllFormatsBadge?: boolean;
   isCloudLibrary?: boolean;
+  isAudiobookShelf?: boolean;
   showTimeRemaining: boolean;
 }
 
@@ -140,6 +143,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
   showCloudIcon = false,
   showAllFormatsBadge = false,
   isCloudLibrary = false,
+  isAudiobookShelf = false,
   showTimeRemaining,
 }) => {
   const _ = useTranslation();
@@ -162,9 +166,23 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
         toggleSelection(book.hash);
         return;
       }
+      // The "有声书" shelf: open the global audiobook player instead of the
+      // ebook reader (see design doc §5.2) — an audiobook-only entry has no
+      // readable file to open, and openBook() would try to download one.
+      if (isAudiobookShelf) {
+        const bookId = getMyBooksId(book);
+        if (!bookId) return;
+        await audiobookSessionManager.openBook(bookId, {
+          title: book.title,
+          author: book.author,
+          coverImageUrl: book.coverImageUrl ?? null,
+        });
+        useAudiobookUIStore.getState().openSheet();
+        return;
+      }
       await openBook(book);
     },
-    [isSelectMode, openBook, toggleSelection],
+    [isSelectMode, openBook, toggleSelection, isAudiobookShelf],
   );
 
   const handleReadInFormat = useCallback(

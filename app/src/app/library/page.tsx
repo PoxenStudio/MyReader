@@ -2064,6 +2064,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                           booksTransferProgress={booksTransferProgress}
                           source={source}
                           isCloudLibrary={source === 'cloud'}
+                          isAudiobookShelf={source === 'cloud' && type === 'audiobooks'}
                           cloudBooksTotal={cloudBooksTotal}
                           isLoadingMoreCloudBooks={cloudBooksLoadingMore}
                           cloudBooksLoadMoreFailed={cloudBooksLoadMoreFailed}
