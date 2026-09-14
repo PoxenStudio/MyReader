@@ -14,7 +14,7 @@ import { getLocale } from '@/utils/misc';
 import { useTranslation } from './useTranslation';
 
 export function useTranslator({
-  provider = 'deepl',
+  provider = 'azure',
   sourceLang = 'AUTO',
   targetLang = 'EN',
   enablePolishing = true,
