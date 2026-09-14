@@ -293,12 +293,6 @@ describe('provider registry disabled handling', () => {
     expect(isTranslatorAvailable(authed, true)).toBe(true);
   });
 
-  it('isTranslatorAvailable returns false when quota is exceeded', async () => {
-    const { isTranslatorAvailable } = await import('@/services/translators/providers');
-    const exhausted = { name: 'x', label: 'X', quotaExceeded: true, translate: async () => [] };
-    expect(isTranslatorAvailable(exhausted, true)).toBe(false);
-  });
-
   it('getTranslatorDisplayLabel returns the plain label for healthy providers', async () => {
     const { getTranslator, getTranslatorDisplayLabel } = await import(
       '@/services/translators/providers'

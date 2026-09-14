@@ -46,7 +46,6 @@ export const isTranslatorAvailable = (
   hasToken: boolean,
 ): boolean => {
   if (translator.disabled) return false;
-  if (translator.quotaExceeded) return false;
   if (translator.authRequired && !hasToken) return false;
   return true;
 };
@@ -68,9 +67,6 @@ export const getTranslatorDisplayLabel = (
   }
   if (translator.authRequired && !hasToken) {
     return `${translator.label} (${_('Login Required')})`;
-  }
-  if (translator.quotaExceeded) {
-    return `${translator.label} (${_('Quota Exceeded')})`;
   }
   return translator.label;
 };
