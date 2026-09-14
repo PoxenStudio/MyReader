@@ -1,14 +1,19 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+const isTauriAppPlatformMock = vi.fn().mockReturnValue(false);
 vi.mock('@/services/environment', () => ({
-  isTauriAppPlatform: () => false,
+  isTauriAppPlatform: () => isTauriAppPlatformMock(),
 }));
 
 vi.mock('@tauri-apps/plugin-http', () => ({
   fetch: vi.fn(),
 }));
 
-import { getAudiobooks, getAudioBookDetail } from '@/services/audiobook/audiobookService';
+import {
+  getAudiobooks,
+  getAudioBookDetail,
+  resolveAudioTrackUrl,
+} from '@/services/audiobook/audiobookService';
 
 describe('getAudiobooks', () => {
   beforeEach(() => {
@@ -68,5 +73,31 @@ describe('getAudioBookDetail', () => {
     const detail = await getAudioBookDetail(5);
 
     expect(detail).toEqual({ audios: [], total_files: 0, is_paid: true });
+  });
+});
+
+describe('resolveAudioTrackUrl', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    isTauriAppPlatformMock.mockReturnValue(false);
+  });
+
+  it('returns the url unchanged when no mybooks host is configured', () => {
+    expect(resolveAudioTrackUrl('/api/audio/5/ch1.mp3')).toBe('/api/audio/5/ch1.mp3');
+  });
+
+  it('routes through the same-origin proxy on web', () => {
+    localStorage.setItem('mybooks_host', 'http://mybooks.local/');
+    expect(resolveAudioTrackUrl('/api/audio/5/ch1.mp3')).toBe(
+      '/api/mybooks/proxy/audio/5/ch1.mp3?host=' + encodeURIComponent('http://mybooks.local/'),
+    );
+  });
+
+  it('resolves directly against the host on Tauri', () => {
+    isTauriAppPlatformMock.mockReturnValue(true);
+    localStorage.setItem('mybooks_host', 'http://mybooks.local');
+    expect(resolveAudioTrackUrl('/api/audio/5/ch1.mp3')).toBe(
+      'http://mybooks.local/api/audio/5/ch1.mp3',
+    );
   });
 });

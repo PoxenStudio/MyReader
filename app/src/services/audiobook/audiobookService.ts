@@ -11,6 +11,7 @@
 import { fetchMyBooks } from '@/services/mybooksService';
 import type { MyBooksBook } from '@/services/mybooksService';
 import { getBooksByType } from '@/services/mybooksService';
+import { isTauriAppPlatform } from '@/services/environment';
 
 export interface AudioTrack {
   filename: string;
@@ -58,4 +59,31 @@ export async function getAudioBookDetail(bookId: number): Promise<AudioBookDetai
     total_files: data.total_files ?? 0,
     is_paid: data.is_paid ?? true,
   };
+}
+
+/**
+ * 把后端返回的曲目 `url`（形如 `/api/audio/<id>/<filename>`，相对于 MyBooks
+ * 主机根路径）解析成当前平台可以直接播放/下载的完整地址：
+ * - Tauri：直接拼接 `mybooks_host`（Tauri 原生 WebView 加载 <audio>/下载器均
+ *   可正常带上会话 Cookie，同 cloudService.ts 里封面/正文下载的处理方式）。
+ * - Web：走已有的 `/api/mybooks/proxy/<path>` 通用代理（同源，自动带上
+ *   Cookie，避免 CORS）。注意：该通用代理目前不转发 Range 请求/响应头，
+ *   因此"在线流式播放时拖动到尚未缓冲的位置"在浏览器端体验会打折扣——这不
+ *   影响已下载到本地离线播放的场景，仅影响在线试听的拖动体验，本期先接受
+ *   这个已知限制。
+ * 没有配置 `mybooks_host`（理论上不会发生，音频功能本身依赖已登录的
+ * MyBooks 连接）时原样返回，交给调用方兜底。
+ */
+export function resolveAudioTrackUrl(url: string): string {
+  const host = typeof window !== 'undefined' ? localStorage.getItem('mybooks_host') : null;
+  if (!host) return url;
+  const normalizedHost = host.endsWith('/') ? host.slice(0, -1) : host;
+
+  if (isTauriAppPlatform()) {
+    return url.startsWith('http')
+      ? url
+      : `${normalizedHost}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+  const apiPath = url.replace(/^\/?api\//, '');
+  return `/api/mybooks/proxy/${apiPath}?host=${encodeURIComponent(host)}`;
 }

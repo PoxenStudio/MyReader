@@ -15,7 +15,12 @@
 // See document/MyReader_Audiobook_Feature_Design.md §5.3/§5.7/§5.8.
 
 import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
-import { getAudioBookDetail, type AudioBookDetail, type AudioTrack } from './audiobookService';
+import {
+  getAudioBookDetail,
+  resolveAudioTrackUrl,
+  type AudioBookDetail,
+  type AudioTrack,
+} from './audiobookService';
 
 export interface AudiobookSessionMeta {
   title: string;
@@ -266,7 +271,7 @@ export class AudiobookSessionManager extends EventTarget {
       audio.currentTime = targetTime;
     } else {
       const resolved = await this.#resolvePlaybackUrl?.(session.bookId, track);
-      const src = resolved || track.url;
+      const src = resolved || resolveAudioTrackUrl(track.url);
       audio.src = src;
       this.#loadedUrl = track.url;
       audio.playbackRate = this.#rate;
