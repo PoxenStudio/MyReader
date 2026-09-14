@@ -358,7 +358,7 @@ the user's inbox so that the in-app `Send` page can pick them up via the
 
 `src/app/runtime-config.js/route.ts` is a server route that builds a small JSON
 object — `supabaseUrl`, `supabaseAnonKey`, `apiBaseUrl`, `objectStorageType`,
-`storageFixedQuota`, `translationFixedQuota` — from `process.env` at request
+`storageFixedQuota` — from `process.env` at request
 time and serializes it as a JS payload. The client reads it through
 `getRuntimeConfig()` in `src/services/runtimeConfig.ts` (browser) or
 `getServerRuntimeConfig()` (server). This is the mechanism that makes the same

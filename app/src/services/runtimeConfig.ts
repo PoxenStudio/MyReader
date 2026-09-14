@@ -4,7 +4,6 @@ export interface MyBooksRuntimeConfig {
   apiBaseUrl?: string;
   objectStorageType?: string;
   storageFixedQuota?: number;
-  translationFixedQuota?: number;
 }
 
 declare global {
@@ -35,11 +34,6 @@ export const getServerRuntimeConfig = (): MyBooksRuntimeConfig => ({
   storageFixedQuota: (() => {
     const raw =
       process.env['STORAGE_FIXED_QUOTA'] ?? process.env['NEXT_PUBLIC_STORAGE_FIXED_QUOTA'];
-    return raw ? parseInt(raw, 10) : undefined;
-  })(),
-  translationFixedQuota: (() => {
-    const raw =
-      process.env['TRANSLATION_FIXED_QUOTA'] ?? process.env['NEXT_PUBLIC_TRANSLATION_FIXED_QUOTA'];
     return raw ? parseInt(raw, 10) : undefined;
   })(),
 });
