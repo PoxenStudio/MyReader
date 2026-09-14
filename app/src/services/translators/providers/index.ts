@@ -1,5 +1,5 @@
 import { TranslationProvider } from '../types';
-import { azureProvider } from './azure';
+import { edgeProvider } from './edge';
 import { yandexProvider } from './yandex';
 
 function createTranslator<T extends string>(
@@ -14,11 +14,11 @@ function createTranslator<T extends string>(
   return implementation as TranslationProvider & { name: T };
 }
 
-const azureTranslator = createTranslator('azure', azureProvider);
+const edgeTranslator = createTranslator('edge', edgeProvider);
 const yandexTranslator = createTranslator('yandex', yandexProvider);
 
 const availableTranslators = [
-  azureTranslator,
+  edgeTranslator,
   yandexTranslator,
   // Add more translators here
 ];

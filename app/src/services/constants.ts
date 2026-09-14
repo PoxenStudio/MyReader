@@ -227,7 +227,7 @@ export const DEFAULT_READSETTINGS: ReadSettings = {
   isNotebookPinned: false,
   notebookActiveTab: 'notes',
   autohideCursor: true,
-  translationProvider: 'azure',
+  translationProvider: 'edge',
   translateTargetLang: 'EN',
   wordLensAutoDownload: true,
 
@@ -407,7 +407,7 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
 
 export const DEFAULT_TRANSLATOR_CONFIG: TranslatorConfig = {
   translationEnabled: false,
-  translationProvider: 'azure',
+  translationProvider: 'edge',
   translateTargetLang: '',
   showTranslateSource: true,
   ttsReadAloudText: 'both',

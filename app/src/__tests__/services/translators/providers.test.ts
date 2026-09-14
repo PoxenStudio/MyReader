@@ -158,100 +158,89 @@ describe('yandexProvider', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Azure Translator Provider
+// Edge Translator Provider
 // ---------------------------------------------------------------------------
-describe('azureProvider', () => {
+describe('edgeProvider', () => {
   beforeEach(() => {
     mockFetch.mockReset();
-    // Suppress expected error noise from token fetch failure tests.
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    // Reset the module-level token cache between tests by re-importing
-    vi.resetModules();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  /** Helper: mock fetch to handle token + translation in sequence */
-  function mockTokenAndTranslation(translationResponse: unknown) {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => 'mock-token',
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => translationResponse,
-      });
-  }
-
   it('returns empty array for empty input', async () => {
-    const { azureProvider } = await import('@/services/translators/providers/azure');
-    const result = await azureProvider.translate([], 'en', 'fr');
+    const { edgeProvider } = await import('@/services/translators/providers/edge');
+    const result = await edgeProvider.translate([], 'en', 'fr');
     expect(result).toEqual([]);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('translates text with token authentication', async () => {
-    mockTokenAndTranslation([{ translations: [{ text: 'Bonjour' }] }]);
-
-    const { azureProvider } = await import('@/services/translators/providers/azure');
-    const result = await azureProvider.translate(['Hello'], 'en', 'fr');
-    expect(result).toEqual(['Bonjour']);
-  });
-
-  it('preserves empty strings', async () => {
-    mockTokenAndTranslation([{ translations: [{ text: 'Monde' }] }]);
-
-    const { azureProvider } = await import('@/services/translators/providers/azure');
-    const result = await azureProvider.translate(['', 'World'], 'en', 'fr');
-    expect(result[0]).toBe('');
-    expect(result[1]).toBe('Monde');
-  });
-
-  it('throws when token fetch fails', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 403,
+  it('translates all texts in a single batched request without a token', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { translations: [{ text: 'Bonjour' }] },
+        { translations: [{ text: 'Monde' }] },
+      ],
     });
 
-    const { azureProvider } = await import('@/services/translators/providers/azure');
-    await expect(azureProvider.translate(['Hello'], 'en', 'fr')).rejects.toThrow(
-      'Failed to get auth token: 403',
-    );
+    const { edgeProvider } = await import('@/services/translators/providers/edge');
+    const result = await edgeProvider.translate(['Hello', 'World'], 'en', 'fr');
+    expect(result).toEqual(['Bonjour', 'Monde']);
+    // A single request for the whole batch — no separate auth call.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    const [translateUrl, translateOpts] = mockFetch.mock.calls[0]!;
+    expect(translateUrl).toContain('https://edge.microsoft.com/translate/translatetext');
+    expect(translateOpts.headers['Authorization']).toBeUndefined();
+    const body = JSON.parse(translateOpts.body);
+    expect(body).toEqual(['Hello', 'World']);
   });
 
-  it('throws when translation request fails', async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => 'token',
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        json: async () => ({}),
-      });
+  it('preserves empty strings without sending them to the API', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [{ translations: [{ text: 'Monde' }] }],
+    });
 
-    const { azureProvider } = await import('@/services/translators/providers/azure');
-    await expect(azureProvider.translate(['Hello'], 'en', 'fr')).rejects.toThrow(
+    const { edgeProvider } = await import('@/services/translators/providers/edge');
+    const result = await edgeProvider.translate(['', 'World'], 'en', 'fr');
+    expect(result[0]).toBe('');
+    expect(result[1]).toBe('Monde');
+
+    const [, translateOpts] = mockFetch.mock.calls[0]!;
+    const body = JSON.parse(translateOpts.body);
+    expect(body).toEqual(['World']);
+  });
+
+  it('throws when the translation request fails', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+
+    const { edgeProvider } = await import('@/services/translators/providers/edge');
+    await expect(edgeProvider.translate(['Hello'], 'en', 'fr')).rejects.toThrow(
       'Translation failed with status 500',
     );
   });
 
   it('falls back to original text when response format is unexpected', async () => {
-    mockTokenAndTranslation([]);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
 
-    const { azureProvider } = await import('@/services/translators/providers/azure');
-    const result = await azureProvider.translate(['Hello'], 'en', 'fr');
+    const { edgeProvider } = await import('@/services/translators/providers/edge');
+    const result = await edgeProvider.translate(['Hello'], 'en', 'fr');
     expect(result).toEqual(['Hello']);
   });
 
   it('has correct provider metadata', async () => {
-    const { azureProvider } = await import('@/services/translators/providers/azure');
-    expect(azureProvider.name).toBe('azure');
-    expect(azureProvider.label).toBe('Azure Translator');
+    const { edgeProvider } = await import('@/services/translators/providers/edge');
+    expect(edgeProvider.name).toBe('edge');
+    expect(edgeProvider.label).toBe('Edge Translator');
   });
 });
 
@@ -297,7 +286,7 @@ describe('provider registry disabled handling', () => {
     const { getTranslator, getTranslatorDisplayLabel } = await import(
       '@/services/translators/providers'
     );
-    const azure = getTranslator('azure')!;
-    expect(getTranslatorDisplayLabel(azure, true, (s) => s)).toBe('Azure Translator');
+    const edge = getTranslator('edge')!;
+    expect(getTranslatorDisplayLabel(edge, true, (s) => s)).toBe('Edge Translator');
   });
 });
