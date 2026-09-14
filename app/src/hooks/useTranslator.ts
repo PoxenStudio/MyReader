@@ -1,11 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import {
-  getTranslator,
-  getTranslators,
-  isTranslatorAvailable,
-  TranslatorName,
-} from '@/services/translators';
+import { getTranslators, isTranslatorAvailable } from '@/services/translators';
 import { getFromCache, storeInCache, UseTranslatorOptions } from '@/services/translators';
 import { polish, preprocess } from '@/services/translators';
 import { getLocale } from '@/utils/misc';
@@ -19,23 +14,11 @@ export function useTranslator({
 }: UseTranslatorOptions = {}) {
   const { token } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState(provider);
-  const [translator, setTransltor] = useState(() => getTranslator(provider));
   const [translators] = useState(() => getTranslators());
 
   useEffect(() => {
     setLoading(false);
   }, [provider, sourceLang, targetLang]);
-
-  useEffect(() => {
-    const availableTranslators = getTranslators().filter((t) => isTranslatorAvailable(t, !!token));
-    const selectedTranslator =
-      availableTranslators.find((t) => t.name === provider) || availableTranslators[0]!;
-    const selectedProviderName = selectedTranslator.name as TranslatorName;
-    setTransltor(getTranslator(selectedProviderName));
-    setSelectedProvider(selectedProviderName);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider]);
 
   const translate = useCallback(
     async (
@@ -51,6 +34,20 @@ export function useTranslator({
         return textsToTranslate;
       }
 
+      // Resolve the active translator fresh on every call instead of reading
+      // it back from state a prior effect corrected asynchronously. `provider`
+      // may name a translator that is unavailable or no longer registered at
+      // all (e.g. a persisted setting pointing at a provider that was since
+      // removed) — always fall back to the first available one rather than
+      // trusting it blindly.
+      const availableTranslators = translators.filter((t) => isTranslatorAvailable(t, !!token));
+      const activeTranslator =
+        availableTranslators.find((t) => t.name === provider) || availableTranslators[0];
+      if (!activeTranslator) {
+        throw new Error('No translation provider is available');
+      }
+      const activeProvider = activeTranslator.name;
+
       const textsNeedingTranslation: string[] = [];
       const indicesNeedingTranslation: number[] = [];
 
@@ -62,7 +59,7 @@ export function useTranslator({
             text,
             sourceLanguage,
             targetLanguage,
-            selectedProvider,
+            activeProvider,
           );
           if (cachedTranslation) return;
 
@@ -74,7 +71,7 @@ export function useTranslator({
       if (textsNeedingTranslation.length === 0) {
         const results = await Promise.all(
           textsToTranslate.map((text) =>
-            getFromCache(text, sourceLanguage, targetLanguage, selectedProvider).then(
+            getFromCache(text, sourceLanguage, targetLanguage, activeProvider).then(
               (cached) => cached || text,
             ),
           ),
@@ -86,11 +83,7 @@ export function useTranslator({
       setLoading(true);
 
       try {
-        const translator = translators.find((t) => t.name === selectedProvider);
-        if (!translator) {
-          throw new Error(`No translator found for provider: ${selectedProvider}`);
-        }
-        const translatedTexts = await translator.translate(
+        const translatedTexts = await activeTranslator.translate(
           textsNeedingTranslation,
           sourceLanguage,
           targetLanguage,
@@ -105,7 +98,7 @@ export function useTranslator({
               translatedTexts[index] || '',
               sourceLanguage,
               targetLanguage,
-              selectedProvider,
+              activeProvider,
             );
           }),
         );
@@ -125,7 +118,7 @@ export function useTranslator({
                 originalText,
                 sourceLanguage,
                 targetLanguage,
-                selectedProvider,
+                activeProvider,
               );
 
               if (cachedTranslation) {
@@ -142,13 +135,11 @@ export function useTranslator({
         throw err instanceof Error ? err : new Error(String(err));
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedProvider, sourceLang, targetLang, translator, token],
+    [provider, sourceLang, targetLang, translators, token, enablePolishing, enablePreprocessing],
   );
 
   return {
     translate,
-    translator,
     translators,
     loading,
   };
