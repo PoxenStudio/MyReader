@@ -278,7 +278,7 @@ Mostly frontend/domain logic, sometimes paired with server proxy routes.
 
 Translation provider integration.
 
-- provider adapters for DeepL, Google, Azure, Yandex
+- provider adapters (currently Edge Translator)
 - preprocessing, cache, polish, and translator utilities
 
 Mixed integration code. Some providers are used via server APIs to avoid exposing secrets.

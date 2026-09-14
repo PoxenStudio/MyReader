@@ -1,6 +1,5 @@
 import { TranslationProvider } from '../types';
 import { edgeProvider } from './edge';
-import { yandexProvider } from './yandex';
 
 function createTranslator<T extends string>(
   name: T,
@@ -15,11 +14,9 @@ function createTranslator<T extends string>(
 }
 
 const edgeTranslator = createTranslator('edge', edgeProvider);
-const yandexTranslator = createTranslator('yandex', yandexProvider);
 
 const availableTranslators = [
   edgeTranslator,
-  yandexTranslator,
   // Add more translators here
 ];
 
