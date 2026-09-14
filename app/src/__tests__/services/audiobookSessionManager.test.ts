@@ -225,3 +225,94 @@ describe('AudiobookSessionManager', () => {
     localManager.stop();
   });
 });
+
+describe('AudiobookSessionManager subtitles', () => {
+  const SRT = [
+    '1',
+    '00:00:00,000 --> 00:00:02,000',
+    'Hello',
+    '',
+    '2',
+    '00:00:02,000 --> 00:00:05,000',
+    'World',
+    '',
+  ].join('\n');
+
+  it('fetches and parses the track subtitle, syncing to playback position', async () => {
+    const audio = new FakeAudioElement();
+    const fetchAudioDetail = vi.fn().mockResolvedValue({
+      audios: [track({ subtitle: '/api/audio/5/ch1.srt' })],
+      total_files: 1,
+      is_paid: true,
+    });
+    const fetchSubtitle = vi.fn().mockResolvedValue(SRT);
+    const manager = new AudiobookSessionManager({
+      createAudioElement: () => audio,
+      fetchAudioDetail,
+      fetchSubtitle,
+    });
+
+    await manager.openBook(5, { title: 'Dune' });
+    // Subtitle load is fire-and-forget from #loadTrack; flush microtasks.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchSubtitle).toHaveBeenCalledWith('/api/audio/5/ch1.srt');
+    audio.currentTime = 0.5;
+    expect(manager.getPlaybackInfo()?.currentSubtitle).toBe('Hello');
+    audio.currentTime = 3;
+    expect(manager.getPlaybackInfo()?.currentSubtitle).toBe('World');
+    audio.currentTime = 10;
+    expect(manager.getPlaybackInfo()?.currentSubtitle).toBeNull();
+
+    manager.stop();
+  });
+
+  it('clears subtitles for a track with none, without crashing', async () => {
+    const audio = new FakeAudioElement();
+    const fetchAudioDetail = vi.fn().mockResolvedValue({
+      audios: [track({ subtitle: undefined })],
+      total_files: 1,
+      is_paid: true,
+    });
+    const fetchSubtitle = vi.fn();
+    const manager = new AudiobookSessionManager({
+      createAudioElement: () => audio,
+      fetchAudioDetail,
+      fetchSubtitle,
+    });
+
+    await manager.openBook(5, { title: 'Dune' });
+    await Promise.resolve();
+
+    expect(fetchSubtitle).not.toHaveBeenCalled();
+    expect(manager.getPlaybackInfo()?.currentSubtitle).toBeNull();
+
+    manager.stop();
+  });
+
+  it('a failed subtitle fetch does not break playback', async () => {
+    const audio = new FakeAudioElement();
+    const fetchAudioDetail = vi.fn().mockResolvedValue({
+      audios: [track({ subtitle: '/api/audio/5/ch1.srt' })],
+      total_files: 1,
+      is_paid: true,
+    });
+    const fetchSubtitle = vi.fn().mockRejectedValue(new Error('network error'));
+    const manager = new AudiobookSessionManager({
+      createAudioElement: () => audio,
+      fetchAudioDetail,
+      fetchSubtitle,
+    });
+
+    await manager.openBook(5, { title: 'Dune' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(manager.getPlaybackInfo()?.currentSubtitle).toBeNull();
+    manager.play();
+    expect(audio.play).toHaveBeenCalled();
+
+    manager.stop();
+  });
+});

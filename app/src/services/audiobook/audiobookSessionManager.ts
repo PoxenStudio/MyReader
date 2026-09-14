@@ -21,6 +21,7 @@ import {
   type AudioBookDetail,
   type AudioTrack,
 } from './audiobookService';
+import { findActiveCueIndex, parseSubtitle, type SubtitleCue } from './audioSubtitle';
 
 export interface AudiobookSessionMeta {
   title: string;
@@ -41,6 +42,7 @@ export interface AudiobookPlaybackInfo {
   duration: number; // seconds
   isPlaying: boolean;
   rate: number;
+  currentSubtitle: string | null;
 }
 
 // The subset of HTMLAudioElement the manager depends on — narrow enough that
@@ -74,6 +76,9 @@ export interface AudiobookSessionManagerDeps {
     track: AudioTrack,
   ) => Promise<string | null> | string | null;
   now?: () => number;
+  // Injectable so tests don't depend on a real network fetch; defaults to a
+  // credentialed fetch of the (already host-resolved) subtitle URL.
+  fetchSubtitle?: (url: string) => Promise<string>;
 }
 
 const PROGRESS_SAVE_INTERVAL_MS = 5000;
@@ -87,6 +92,7 @@ export class AudiobookSessionManager extends EventTarget {
   #createAudioElement: () => AudioElementLike;
   #fetchAudioDetail: (bookId: number) => Promise<AudioBookDetail>;
   #resolvePlaybackUrl?: AudiobookSessionManagerDeps['resolvePlaybackUrl'];
+  #fetchSubtitle: (url: string) => Promise<string>;
   #now: () => number;
 
   #audio: AudioElementLike | null = null;
@@ -95,6 +101,10 @@ export class AudiobookSessionManager extends EventTarget {
   #rate = 1;
   #saveTimer: ReturnType<typeof setInterval> | null = null;
   #openGeneration = 0;
+  #subtitleCache = new Map<string, SubtitleCue[]>();
+  #subtitleCues: SubtitleCue[] = [];
+  #subtitleUrl: string | null = null;
+  #subtitleGeneration = 0;
 
   #onTimeUpdate = () => this.#handleTimeUpdate();
   #onEnded = () => this.#handleTrackEnded();
@@ -110,6 +120,13 @@ export class AudiobookSessionManager extends EventTarget {
       deps.createAudioElement ?? (() => new Audio() as unknown as AudioElementLike);
     this.#fetchAudioDetail = deps.fetchAudioDetail ?? getAudioBookDetail;
     this.#resolvePlaybackUrl = deps.resolvePlaybackUrl;
+    this.#fetchSubtitle =
+      deps.fetchSubtitle ??
+      (async (url) => {
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) throw new Error(`Failed to fetch subtitle: ${res.status}`);
+        return res.text();
+      });
     this.#now = deps.now ?? Date.now;
   }
 
@@ -124,12 +141,14 @@ export class AudiobookSessionManager extends EventTarget {
     const track = session.tracks[session.currentTrackIndex];
     if (!track) return null;
     const position = Math.max(0, audio.currentTime - (track.start_time ?? 0));
+    const cueIndex = findActiveCueIndex(this.#subtitleCues, audio.currentTime);
     return {
       trackIndex: session.currentTrackIndex,
       position,
       duration: trackDuration(track, audio.duration || 0),
       isPlaying: !audio.paused,
       rate: this.#rate,
+      currentSubtitle: cueIndex >= 0 ? this.#subtitleCues[cueIndex]!.text : null,
     };
   }
 
@@ -251,6 +270,9 @@ export class AudiobookSessionManager extends EventTarget {
     this.#audio = null;
     this.#session = null;
     this.#loadedUrl = null;
+    this.#subtitleCues = [];
+    this.#subtitleUrl = null;
+    this.#subtitleGeneration++;
     this.dispatchEvent(new CustomEvent('session-changed', { detail: { active: false } }));
   }
 
@@ -285,7 +307,39 @@ export class AudiobookSessionManager extends EventTarget {
         audio.load();
       });
     }
+    void this.#loadSubtitle(track.subtitle);
     this.dispatchEvent(new CustomEvent('session-changed', { detail: { active: true } }));
+  }
+
+  // Subtitle cues are keyed by the raw (unresolved) subtitle URL so the
+  // cache survives host reconfiguration between loads. A generation guard
+  // discards a slow fetch that resolves after the user has already skipped
+  // to a track with a different (or no) subtitle.
+  async #loadSubtitle(url: string | undefined): Promise<void> {
+    const generation = ++this.#subtitleGeneration;
+    this.#subtitleUrl = url ?? null;
+    if (!url) {
+      this.#subtitleCues = [];
+      return;
+    }
+    const cached = this.#subtitleCache.get(url);
+    if (cached) {
+      this.#subtitleCues = cached;
+      return;
+    }
+    try {
+      const content = await this.#fetchSubtitle(resolveAudioTrackUrl(url));
+      const cues = parseSubtitle(content);
+      this.#subtitleCache.set(url, cues);
+      if (generation === this.#subtitleGeneration && this.#subtitleUrl === url) {
+        this.#subtitleCues = cues;
+      }
+    } catch {
+      // Subtitle is a nice-to-have; a fetch failure must not affect playback.
+      if (generation === this.#subtitleGeneration && this.#subtitleUrl === url) {
+        this.#subtitleCues = [];
+      }
+    }
   }
 
   #handleTimeUpdate(): void {
