@@ -57,107 +57,6 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 // ---------------------------------------------------------------------------
-// Yandex Translate Provider
-// ---------------------------------------------------------------------------
-describe('yandexProvider', () => {
-  beforeEach(() => {
-    mockFetch.mockReset();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('returns empty array for empty input', async () => {
-    const { yandexProvider } = await import('@/services/translators/providers/yandex');
-    const result = await yandexProvider.translate([], 'en', 'fr');
-    expect(result).toEqual([]);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it('translates text using yandexgpt service', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        translations: ['Bonjour'],
-      }),
-    });
-
-    const { yandexProvider } = await import('@/services/translators/providers/yandex');
-    const result = await yandexProvider.translate(['Hello'], 'en', 'fr');
-    expect(result).toEqual(['Bonjour']);
-
-    // Verify request format
-    const [url, opts] = mockFetch.mock.calls[0]!;
-    expect(url).toBe('https://translate.toil.cc/v2/translate/');
-    expect(opts.method).toBe('POST');
-    const body = JSON.parse(opts.body);
-    expect(body.service).toBe('yandexgpt');
-    expect(body.lang).toBe('en-fr');
-  });
-
-  it('uses "en" when source language is AUTO', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        translations: ['Bonjour'],
-      }),
-    });
-
-    const { yandexProvider } = await import('@/services/translators/providers/yandex');
-    await yandexProvider.translate(['Hello'], 'AUTO', 'fr');
-
-    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
-    expect(body.lang).toBe('en-fr');
-  });
-
-  it('throws on non-OK response', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 429,
-      json: async () => ({ error: 'rate limited' }),
-    });
-
-    const { yandexProvider } = await import('@/services/translators/providers/yandex');
-    await expect(yandexProvider.translate(['Hello'], 'en', 'fr')).rejects.toThrow(
-      'yandexgpt failed with status 429',
-    );
-  });
-
-  it('falls back to original text when translations array is missing', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    });
-
-    const { yandexProvider } = await import('@/services/translators/providers/yandex');
-    const result = await yandexProvider.translate(['Hello'], 'en', 'fr');
-    expect(result).toEqual(['Hello']);
-  });
-
-  it('has correct provider metadata', async () => {
-    const { yandexProvider } = await import('@/services/translators/providers/yandex');
-    expect(yandexProvider.name).toBe('yandex');
-    expect(yandexProvider.label).toBe('Yandex Translate');
-    expect(yandexProvider.authRequired).toBe(false);
-  });
-
-  it('translates multiple texts in parallel', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        translations: ['Translated'],
-      }),
-    });
-
-    const { yandexProvider } = await import('@/services/translators/providers/yandex');
-    const result = await yandexProvider.translate(['Hello', 'World'], 'en', 'fr');
-    expect(result).toEqual(['Translated', 'Translated']);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Edge Translator Provider
 // ---------------------------------------------------------------------------
 describe('edgeProvider', () => {
@@ -253,26 +152,11 @@ describe('provider registry disabled handling', () => {
   // each test would re-evaluate the full import chain and churn module
   // state for no benefit.
 
-  it('keeps yandex in getTranslators() so the UI can render it', async () => {
-    const { getTranslators } = await import('@/services/translators/providers');
-    const names = getTranslators().map((t) => t.name);
-    expect(names).toContain('yandex');
-  });
-
-  it('exposes yandex as disabled so callers can grey it out', async () => {
-    const { getTranslator } = await import('@/services/translators/providers');
-    const yandex = getTranslator('yandex');
-    expect(yandex).toBeDefined();
-    expect(yandex!.disabled).toBe(true);
-  });
-
   it('isTranslatorAvailable returns false for disabled providers', async () => {
-    const { getTranslator, isTranslatorAvailable } = await import(
-      '@/services/translators/providers'
-    );
-    const yandex = getTranslator('yandex')!;
-    expect(isTranslatorAvailable(yandex, true)).toBe(false);
-    expect(isTranslatorAvailable(yandex, false)).toBe(false);
+    const { isTranslatorAvailable } = await import('@/services/translators/providers');
+    const disabled = { name: 'x', label: 'X', disabled: true, translate: async () => [] };
+    expect(isTranslatorAvailable(disabled, true)).toBe(false);
+    expect(isTranslatorAvailable(disabled, false)).toBe(false);
   });
 
   it('isTranslatorAvailable returns false for authRequired without token', async () => {
