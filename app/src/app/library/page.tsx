@@ -103,6 +103,8 @@ import ImportFromFolderDialog, {
 } from './components/ImportFromFolderDialog';
 import ImportFromUrlDialog from './components/ImportFromUrlDialog';
 import NowPlayingBar from './components/NowPlayingBar';
+import AudiobookMiniBar from './components/audiobook/AudiobookMiniBar';
+import AudiobookPlayerSheet from './components/audiobook/AudiobookPlayerSheet';
 import { ttsSessionManager } from '@/services/tts';
 import { convertToEpubWithWorker } from '@/services/send/conversion/conversionWorker';
 import { getClipOptions } from '@/services/send/clipOptions';
@@ -2088,6 +2090,8 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
             </div>
           )}
           <NowPlayingBar isSelectMode={isSelectMode} />
+          <AudiobookMiniBar isSelectMode={isSelectMode} />
+          <AudiobookPlayerSheet />
           {showDetailsBook && (
             <BookDetailModal
               isOpen={!!showDetailsBook}
