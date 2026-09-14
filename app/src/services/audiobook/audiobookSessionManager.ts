@@ -22,6 +22,8 @@ import {
   type AudioTrack,
 } from './audiobookService';
 import { findActiveCueIndex, parseSubtitle, type SubtitleCue } from './audioSubtitle';
+import { resolveLocalPlaybackUrl } from './audiobookDownloader';
+import type { AppService } from '@/types/system';
 
 export interface AudiobookSessionMeta {
   title: string;
@@ -105,6 +107,10 @@ export class AudiobookSessionManager extends EventTarget {
   #subtitleCues: SubtitleCue[] = [];
   #subtitleUrl: string | null = null;
   #subtitleGeneration = 0;
+  // Set once from the library page root (see AudiobookPlayerSheet's mount)
+  // so #loadTrack can prefer an already-downloaded local file over the
+  // remote URL without every test needing to inject resolvePlaybackUrl.
+  #appService: AppService | null = null;
 
   #onTimeUpdate = () => this.#handleTimeUpdate();
   #onEnded = () => this.#handleTrackEnded();
@@ -128,6 +134,13 @@ export class AudiobookSessionManager extends EventTarget {
         return res.text();
       });
     this.#now = deps.now ?? Date.now;
+  }
+
+  // Called once from the library page root so local-first playback works
+  // without every caller having to pass resolvePlaybackUrl (that hook stays
+  // available for tests/overrides and takes priority when set).
+  configureAppService(appService: AppService | null): void {
+    this.#appService = appService;
   }
 
   getActiveSession(): AudiobookSession | null {
@@ -292,7 +305,10 @@ export class AudiobookSessionManager extends EventTarget {
     if (sameFile) {
       audio.currentTime = targetTime;
     } else {
-      const resolved = await this.#resolvePlaybackUrl?.(session.bookId, track);
+      const resolved =
+        (await this.#resolvePlaybackUrl?.(session.bookId, track)) ||
+        (this.#appService &&
+          (await resolveLocalPlaybackUrl(this.#appService, session.bookId, track)));
       const src = resolved || resolveAudioTrackUrl(track.url);
       audio.src = src;
       this.#loadedUrl = track.url;
