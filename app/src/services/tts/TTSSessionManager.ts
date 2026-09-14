@@ -220,6 +220,15 @@ export class TTSSessionManager extends EventTarget {
       if (!mapped || mapped === this.#lastRelayedState) return;
       this.#lastRelayedState = mapped;
       eventDispatcher.dispatch('tts-playback-state', { bookKey: session.bookKey, state: mapped });
+      // Mutual exclusion with audiobook playback (design doc §5.7/§6.1):
+      // only one system media-session slot exists. Dynamic import avoids a
+      // static circular dependency (audiobookSessionManager imports '@/services/tts'
+      // the same way, for the opposite direction).
+      if (mapped === 'playing') {
+        void import('@/services/audiobook/audiobookSessionManager').then(
+          ({ audiobookSessionManager }) => audiobookSessionManager.stop(),
+        );
+      }
     };
     this.#onSessionEnded = (e: Event) => {
       const { reason } = (e as CustomEvent<{ reason: 'ended' | 'error' }>).detail;

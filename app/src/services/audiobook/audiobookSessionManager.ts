@@ -23,6 +23,7 @@ import {
 } from './audiobookService';
 import { findActiveCueIndex, parseSubtitle, type SubtitleCue } from './audioSubtitle';
 import { resolveLocalPlaybackUrl } from './audiobookDownloader';
+import { audiobookMediaBridge } from './audiobookMediaBridge';
 import type { AppService } from '@/types/system';
 
 export interface AudiobookSessionMeta {
@@ -193,6 +194,7 @@ export class AudiobookSessionManager extends EventTarget {
     await this.#loadTrack(startIndex, saved?.trackIndex === startIndex ? saved.currentTime : 0);
 
     this.#emitSessionChanged();
+    audiobookMediaBridge.bind(this);
   }
 
   play(): void {
@@ -286,6 +288,7 @@ export class AudiobookSessionManager extends EventTarget {
     this.#subtitleCues = [];
     this.#subtitleUrl = null;
     this.#subtitleGeneration++;
+    audiobookMediaBridge.unbind();
     this.dispatchEvent(new CustomEvent('session-changed', { detail: { active: false } }));
   }
 

@@ -36,6 +36,7 @@ import UserAvatar from '@/components/UserAvatar';
 import NasRemoteWebview from '@/components/nas/NasRemoteWebview';
 import NasRemoteLoginIconButton from '@/components/nas/NasRemoteLoginIconButton';
 import ReadingStatsCard from '@/components/user/ReadingStatsCard';
+import AudiobookStorageSection from '@/components/user/AudiobookStorageSection';
 
 type RefreshStatus = 'idle' | 'loading' | 'error';
 
@@ -367,6 +368,9 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
                 </div>
               </SettingsRow>
             </BoxedList>
+
+            {/* Audiobook Storage — only rendered once something is downloaded */}
+            <AudiobookStorageSection />
 
             {/* Annotation Data */}
             <BoxedList title={_('Annotation Data')}>
