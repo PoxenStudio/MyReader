@@ -2,8 +2,8 @@
  * TranslatorPopup error message — regardless of provider or login state, a
  * failed translation should always show the generic "try again later"
  * message. The message used to branch on whether the user was logged in and
- * claim "please log in first", which was misleading for providers (Azure,
- * Google) that never required a login in the first place.
+ * claim "please log in first", which was misleading for providers that never
+ * required a login in the first place.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
@@ -26,7 +26,7 @@ vi.mock('@/context/AuthContext', () => ({
 
 vi.mock('@/store/settingsStore', () => ({
   useSettingsStore: () => ({
-    settings: { globalReadSettings: { translateTargetLang: 'EN', translationProvider: 'azure' } },
+    settings: { globalReadSettings: { translateTargetLang: 'EN', translationProvider: 'edge' } },
     setSettings: vi.fn(),
   }),
 }));
@@ -35,7 +35,7 @@ const mockTranslate = vi.fn();
 // Must be a stable reference — TranslatorPopup's effect depends on `translators`
 // by identity, so a fresh array literal on every render would re-trigger the
 // effect forever.
-const mockTranslators = [{ name: 'azure', label: 'Azure Translator', disabled: false }];
+const mockTranslators = [{ name: 'edge', label: 'Edge Translator', disabled: false }];
 vi.mock('@/hooks/useTranslator', () => ({
   useTranslator: () => ({
     translate: mockTranslate,

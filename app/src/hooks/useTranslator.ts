@@ -11,7 +11,7 @@ import { polish, preprocess } from '@/services/translators';
 import { getLocale } from '@/utils/misc';
 
 export function useTranslator({
-  provider = 'azure',
+  provider = 'edge',
   sourceLang = 'AUTO',
   targetLang = 'EN',
   enablePolishing = true,

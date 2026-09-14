@@ -521,7 +521,7 @@ const languagePanelItems = [
   {
     id: 'settings.language.translationProvider',
     labelKey: _('Translation Service'),
-    keywords: ['translation', 'provider', 'azure', 'yandex', 'service'],
+    keywords: ['translation', 'provider', 'edge', 'yandex', 'service'],
     section: 'Translation',
   },
   {
