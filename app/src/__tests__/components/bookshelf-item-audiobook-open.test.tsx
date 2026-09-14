@@ -103,6 +103,7 @@ describe('BookshelfItem on the audiobook shelf', () => {
         handleShowDetailsBook={vi.fn()}
         handleLibraryNavigation={vi.fn()}
         handleUpdateReadingStatus={vi.fn()}
+        showTimeRemaining={false}
         isAudiobookShelf
       />,
     );
@@ -139,6 +140,7 @@ describe('BookshelfItem on the audiobook shelf', () => {
         handleShowDetailsBook={vi.fn()}
         handleLibraryNavigation={vi.fn()}
         handleUpdateReadingStatus={vi.fn()}
+        showTimeRemaining={false}
         isAudiobookShelf
       />,
     );

@@ -59,7 +59,7 @@ const detail = (audios: AudioTrack[]): AudioBookDetail => ({
 describe('AudiobookSessionManager', () => {
   let audio: FakeAudioElement;
   let manager: AudiobookSessionManager;
-  let fetchAudioDetail: ReturnType<typeof vi.fn>;
+  let fetchAudioDetail: ReturnType<typeof vi.fn<(bookId: number) => Promise<AudioBookDetail>>>;
 
   beforeEach(() => {
     localStorage.clear();
