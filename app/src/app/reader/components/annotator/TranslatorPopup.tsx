@@ -119,11 +119,7 @@ const TranslatorPopup: React.FC<TranslatorPopupProps> = ({
         }
       } catch (err) {
         console.error(err);
-        if (!token) {
-          setError(_('Unable to fetch the translation. Please log in first and try again.'));
-        } else {
-          setError(_('Unable to fetch the translation. Try again later.'));
-        }
+        setError(_('Unable to fetch the translation. Try again later.'));
       } finally {
         setLoading(false);
       }

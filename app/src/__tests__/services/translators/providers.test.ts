@@ -42,10 +42,9 @@ vi.mock('@tauri-apps/plugin-http', () => ({
   fetch: vi.fn(),
 }));
 
-// Stub Supabase so importing the full providers registry (which pulls in
-// deepl.ts → @/utils/access → @/utils/supabase) doesn't instantiate a real
-// GoTrueClient on every `vi.resetModules()` round. Without this, each test
-// that dynamically imports the registry logs a "Multiple GoTrueClient
+// Stub Supabase so importing the full providers registry doesn't instantiate
+// a real GoTrueClient on every `vi.resetModules()` round. Without this, each
+// test that dynamically imports the registry logs a "Multiple GoTrueClient
 // instances" warning from the real Supabase client.
 vi.mock('@/utils/supabase', () => ({
   supabase: {
@@ -56,79 +55,6 @@ vi.mock('@/utils/supabase', () => ({
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
-
-// ---------------------------------------------------------------------------
-// Google Translate Provider
-// ---------------------------------------------------------------------------
-describe('googleProvider', () => {
-  beforeEach(() => {
-    mockFetch.mockReset();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('returns empty array for empty input', async () => {
-    const { googleProvider } = await import('@/services/translators/providers/google');
-    const result = await googleProvider.translate([], 'en', 'fr');
-    expect(result).toEqual([]);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it('translates text array', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => [[['Bonjour', 'Hello']]],
-    });
-
-    const { googleProvider } = await import('@/services/translators/providers/google');
-    const result = await googleProvider.translate(['Hello'], 'en', 'fr');
-    expect(result).toEqual(['Bonjour']);
-    expect(mockFetch).toHaveBeenCalledOnce();
-  });
-
-  it('preserves empty strings in input', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => [[['translated', 'original']]],
-    });
-
-    const { googleProvider } = await import('@/services/translators/providers/google');
-    const result = await googleProvider.translate(['', 'Hello'], 'en', 'fr');
-    expect(result[0]).toBe('');
-    expect(result[1]).toBe('translated');
-  });
-
-  it('throws on non-OK response', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-    });
-
-    const { googleProvider } = await import('@/services/translators/providers/google');
-    await expect(googleProvider.translate(['Hello'], 'en', 'fr')).rejects.toThrow(
-      'Translation failed with status 500',
-    );
-  });
-
-  it('falls back to original text when response format is unexpected', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    });
-
-    const { googleProvider } = await import('@/services/translators/providers/google');
-    const result = await googleProvider.translate(['Hello'], 'en', 'fr');
-    expect(result).toEqual(['Hello']);
-  });
-
-  it('has correct provider metadata', async () => {
-    const { googleProvider } = await import('@/services/translators/providers/google');
-    expect(googleProvider.name).toBe('google');
-    expect(googleProvider.label).toBe('Google Translate');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Yandex Translate Provider
@@ -377,7 +303,7 @@ describe('provider registry disabled handling', () => {
     const { getTranslator, getTranslatorDisplayLabel } = await import(
       '@/services/translators/providers'
     );
-    const google = getTranslator('google')!;
-    expect(getTranslatorDisplayLabel(google, true, (s) => s)).toBe('Google Translate');
+    const azure = getTranslator('azure')!;
+    expect(getTranslatorDisplayLabel(azure, true, (s) => s)).toBe('Azure Translator');
   });
 });
