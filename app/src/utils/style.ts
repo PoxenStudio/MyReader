@@ -414,12 +414,16 @@ const getPageLayoutStyles = (
     display: table !important;
     max-width: 100%;
   }
-  pre, code, math {
+  /* MathML is usually pretty-printed: with pre-wrap the newlines and
+     indentation between the tokens become rendered line breaks, and every
+     inline formula ends up on its own line. */
+  pre, code {
     white-space: pre-wrap !important;
     scrollbar-width: none;
   }
   math {
     overflow: auto;
+    scrollbar-width: none;
   }
   table, math {
     max-width: calc(var(--available-width) * 1px);

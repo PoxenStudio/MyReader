@@ -903,3 +903,29 @@ describe('instant-highlight selection suppression stays out of getStyles', () =>
     expect(css).not.toContain('user-select: none !important');
   });
 });
+
+// ---------------------------------------------------------------------------
+// MathML layout
+// ---------------------------------------------------------------------------
+// MathML markup is normally pretty-printed, so the whitespace between
+// <mi>/<mo> tokens is real text; forcing `pre-wrap` on `math` turns it into
+// line breaks and pushes every inline formula onto a line of its own. `pre` and
+// `code` still need it — only `math` has to stay out of that selector.
+describe('math rules in getStyles', () => {
+  const theme = makeThemeCode();
+
+  it('does not force pre-wrap white-space onto MathML', () => {
+    const css = getStyles(makeViewSettings(), theme);
+
+    expect(css).toMatch(/pre,\s*code\s*\{[^}]*white-space:\s*pre-wrap\s*!important/);
+    expect(css).not.toMatch(/pre,\s*code,\s*math\s*\{/);
+    expect(css).not.toMatch(/math\s*\{[^}]*white-space/);
+  });
+
+  it('still lets an oversized formula scroll inside one page', () => {
+    const css = getStyles(makeViewSettings(), theme);
+
+    expect(css).toMatch(/math\s*\{[^}]*overflow:\s*auto/);
+    expect(css).toMatch(/math\s*\{[^}]*scrollbar-width:\s*none/);
+  });
+});
