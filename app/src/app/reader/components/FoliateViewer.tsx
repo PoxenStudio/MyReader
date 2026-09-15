@@ -276,11 +276,17 @@ const FoliateViewer: React.FC<{
               content: data,
               sectionHref: detail.name,
               transformers: [
+                // MathML first: later stages (and foliate's own HTML parsing of
+                // `srcdoc`) only recognize the canonical, unprefixed spelling.
+                'mathml',
                 'style',
                 'punctuation',
                 'footnote',
                 'whitespace',
                 'language',
+                // TeX runs are rendered after the text-normalizing stages, so
+                // their source is not rewritten (punctuation, 简繁) mid-formula.
+                'latex',
                 'sanitizer',
                 'simplecc',
                 'nbsp',

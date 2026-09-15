@@ -325,7 +325,7 @@ Client-side reading feature code.
 
 Text/content transformation modules.
 
-- language, punctuation, whitespace, proofread, sanitization, footnote, style, simplecc, warichu
+- language, punctuation, whitespace, proofread, sanitization, footnote, style, simplecc, warichu, mathml, latex
 
 Shared pure logic, usually frontend-facing but not tied to a single runtime.
 
