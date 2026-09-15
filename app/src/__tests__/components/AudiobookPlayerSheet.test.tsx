@@ -33,6 +33,8 @@ const nextMock = vi.fn();
 const seekToMock = vi.fn();
 const setRateMock = vi.fn();
 const configureAppServiceMock = vi.fn();
+const setSleepTimerMock = vi.fn();
+let sleepTimer: { timeoutSec: number; firesAt: number } | null = null;
 vi.mock('@/services/audiobook/audiobookSessionManager', () => ({
   audiobookSessionManager: {
     selectTrack: (...a: unknown[]) => selectTrackMock(...a),
@@ -42,6 +44,8 @@ vi.mock('@/services/audiobook/audiobookSessionManager', () => ({
     seekTo: (...a: unknown[]) => seekToMock(...a),
     setRate: (...a: unknown[]) => setRateMock(...a),
     configureAppService: (...a: unknown[]) => configureAppServiceMock(...a),
+    setSleepTimer: (...a: unknown[]) => setSleepTimerMock(...a),
+    getSleepTimer: () => sleepTimer,
   },
 }));
 
@@ -96,6 +100,7 @@ describe('AudiobookPlayerSheet', () => {
   beforeEach(() => {
     sheetOpen = true;
     isPlaying = false;
+    sleepTimer = null;
     session = {
       bookId: 5,
       meta: { title: 'Dune', author: 'Frank Herbert', coverImageUrl: null },
@@ -152,5 +157,18 @@ describe('AudiobookPlayerSheet', () => {
     render(<AudiobookPlayerSheet />);
     fireEvent.click(screen.getByLabelText('Close'));
     expect(closeSheetMock).toHaveBeenCalled();
+  });
+
+  it('selecting a sleep timer option arms it on the session manager', () => {
+    render(<AudiobookPlayerSheet />);
+    fireEvent.click(screen.getByLabelText('Sleep Timer'));
+    fireEvent.click(screen.getByText('10 minutes'));
+    expect(setSleepTimerMock).toHaveBeenCalledWith(600);
+  });
+
+  it('shows a live countdown on the sleep timer button once armed', () => {
+    sleepTimer = { timeoutSec: 600, firesAt: Date.now() + 600_000 };
+    render(<AudiobookPlayerSheet />);
+    expect(screen.getByLabelText('Sleep Timer').textContent).toMatch(/\d+:\d{2}/);
   });
 });

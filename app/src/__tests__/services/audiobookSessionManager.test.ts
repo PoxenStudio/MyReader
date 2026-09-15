@@ -244,6 +244,44 @@ describe('AudiobookSessionManager', () => {
     expect(audio.pause).toHaveBeenCalled();
   });
 
+  it('sleep timer stops playback after the given duration', async () => {
+    vi.useFakeTimers();
+    fetchAudioDetail.mockResolvedValue(detail([track()]));
+    await manager.openBook(5, { title: 'Dune' });
+
+    manager.setSleepTimer(60);
+    expect(manager.getSleepTimer()).toMatchObject({ timeoutSec: 60 });
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(manager.getActiveSession()).toBeNull();
+    expect(manager.getSleepTimer()).toBeNull();
+  });
+
+  it('setSleepTimer(0) clears an armed timer', async () => {
+    vi.useFakeTimers();
+    fetchAudioDetail.mockResolvedValue(detail([track()]));
+    await manager.openBook(5, { title: 'Dune' });
+
+    manager.setSleepTimer(60);
+    manager.setSleepTimer(0);
+    vi.advanceTimersByTime(60_000);
+
+    expect(manager.getSleepTimer()).toBeNull();
+    expect(manager.getActiveSession()).not.toBeNull();
+  });
+
+  it('opening a new book clears a previously armed sleep timer', async () => {
+    vi.useFakeTimers();
+    fetchAudioDetail.mockResolvedValue(detail([track()]));
+    await manager.openBook(5, { title: 'Dune' });
+    manager.setSleepTimer(60);
+
+    await manager.openBook(6, { title: 'Another' });
+
+    expect(manager.getSleepTimer()).toBeNull();
+  });
+
   it('saves playback position to localStorage on pause', async () => {
     fetchAudioDetail.mockResolvedValue(detail([track()]));
     await manager.openBook(5, { title: 'Dune' });

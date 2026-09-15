@@ -110,6 +110,9 @@ export class AudiobookSessionManager extends EventTarget {
   #subtitleCues: SubtitleCue[] = [];
   #subtitleUrl: string | null = null;
   #subtitleGeneration = 0;
+  #sleepTimer: ReturnType<typeof setTimeout> | null = null;
+  #sleepTimeoutSec = 0;
+  #sleepFiresAt = 0;
   // Set once from the library page root (see AudiobookPlayerSheet's mount)
   // so #loadTrack can prefer an already-downloaded local file over the
   // remote URL without every test needing to inject resolvePlaybackUrl.
@@ -272,8 +275,39 @@ export class AudiobookSessionManager extends EventTarget {
     if (this.#audio) this.#audio.playbackRate = rate;
   }
 
+  // Sleep timer, mirroring TTSSessionManager's (see its doc comment): lives
+  // here so it survives sheet/mini-bar unmount and can actually stop
+  // playback in the background.
+  setSleepTimer(seconds: number): void {
+    this.#clearSleepTimer();
+    if (seconds > 0) {
+      this.#sleepTimeoutSec = seconds;
+      this.#sleepFiresAt = Date.now() + seconds * 1000;
+      this.#sleepTimer = setTimeout(() => {
+        this.#sleepTimer = null;
+        this.stop();
+      }, seconds * 1000);
+    }
+  }
+
+  getSleepTimer(): { timeoutSec: number; firesAt: number } | null {
+    return this.#sleepTimer
+      ? { timeoutSec: this.#sleepTimeoutSec, firesAt: this.#sleepFiresAt }
+      : null;
+  }
+
+  #clearSleepTimer(): void {
+    if (this.#sleepTimer) {
+      clearTimeout(this.#sleepTimer);
+      this.#sleepTimer = null;
+    }
+    this.#sleepTimeoutSec = 0;
+    this.#sleepFiresAt = 0;
+  }
+
   stop(): void {
     this.#openGeneration++; // invalidate any in-flight openBook
+    this.#clearSleepTimer();
     this.#stopSaveTimer();
     this.#savePosition();
     const audio = this.#audio;

@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   MdOutlinePause,
   MdPlayArrow,
@@ -9,6 +9,8 @@ import {
   MdDownloadForOffline,
   MdOfflinePin,
   MdArrowBackIosNew,
+  MdAlarm,
+  MdCheck,
 } from 'react-icons/md';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
@@ -16,13 +18,15 @@ import { formatPlaybackTime } from '@/utils/time';
 import { formatBytes } from '@/utils/book';
 import Dialog from '@/components/Dialog';
 import SpeedRuler, { formatRate } from '@/app/reader/components/tts/SpeedRuler';
+import { getTTSTimeoutOptions } from '@/app/reader/components/tts/TTSPlayerSheet';
+import { useCountdownLabel } from '@/app/reader/components/tts/useCountdownLabel';
 import { audiobookSessionManager } from '@/services/audiobook/audiobookSessionManager';
 import { useAudiobookUIStore } from '@/store/audiobookUIStore';
 import { useAudiobookSession } from '../../hooks/useAudiobookSession';
 import { useAudiobookDownloads } from '../../hooks/useAudiobookDownloads';
 import { useResolvedCoverUrl } from '@/hooks/useResolvedCoverUrl';
 
-type SheetView = 'main' | 'speed';
+type SheetView = 'main' | 'speed' | 'timer';
 
 // 章节文件名去掉后端约定的 4 位序号前缀（0001_第一章 -> 第一章），参考
 // mybooks 前端播放器 audio/_id.vue 的 getDisplayName。
@@ -38,6 +42,7 @@ const AudiobookPlayerSheet = () => {
   const closeSheet = useAudiobookUIStore((s) => s.closeSheet);
   const { session, isPlaying, playbackInfo } = useAudiobookSession();
   const [view, setView] = useState<SheetView>('main');
+  const iconSize18 = useResponsiveSize(18);
   const iconSize24 = useResponsiveSize(24);
   const iconSize28 = useResponsiveSize(28);
   const iconSize32 = useResponsiveSize(32);
@@ -49,6 +54,23 @@ const AudiobookPlayerSheet = () => {
     session?.meta.title ?? '',
     String(session?.bookId ?? ''),
   );
+
+  // Sleep timer lives in the session manager (survives sheet unmount); resync
+  // local display state whenever a (possibly different) book is opened.
+  const [sleepTimer, setSleepTimerState] = useState(() => audiobookSessionManager.getSleepTimer());
+  useEffect(() => {
+    setSleepTimerState(audiobookSessionManager.getSleepTimer());
+  }, [session?.bookId]);
+  const timerLabel = useCountdownLabel(sleepTimer?.firesAt ?? 0);
+  const timerCaption = sleepTimer && timerLabel ? timerLabel : _('Sleep Timer');
+  const timeoutOptions = getTTSTimeoutOptions(_);
+
+  const handleSelectTimeout = (value: number) => {
+    audiobookSessionManager.setSleepTimer(value);
+    setSleepTimerState(
+      value > 0 ? { timeoutSec: value, firesAt: Date.now() + value * 1000 } : null,
+    );
+  };
 
   if (!session) return null;
 
@@ -85,7 +107,9 @@ const AudiobookPlayerSheet = () => {
           <MdArrowBackIosNew size={iconSize24 * 0.8} className='rtl:rotate-180' />
         </button>
         <div className='pointer-events-none absolute inset-0 flex items-center justify-center'>
-          <span className='line-clamp-1 text-center font-bold'>{_('Speed')}</span>
+          <span className='line-clamp-1 text-center font-bold'>
+            {view === 'timer' ? _('Sleep Timer') : _('Speed')}
+          </span>
         </div>
       </div>
     );
@@ -263,17 +287,32 @@ const AudiobookPlayerSheet = () => {
             </button>
           </div>
 
-          <button
-            type='button'
-            aria-label={_('Speed')}
-            onClick={() => setView('speed')}
-            className='not-eink:bg-base-200 eink-bordered flex h-12 w-full items-center justify-center gap-2 rounded-xl'
-          >
-            <span className='text-sm font-semibold tabular-nums'>
-              {formatRate(playbackInfo?.rate ?? 1)}
-            </span>
-            <span className='text-base-content/60 text-xs'>{_('Speed')}</span>
-          </button>
+          <div className='flex w-full gap-2'>
+            <button
+              type='button'
+              aria-label={_('Speed')}
+              onClick={() => setView('speed')}
+              className='not-eink:bg-base-200 eink-bordered flex h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl'
+            >
+              <span className='text-sm font-semibold tabular-nums'>
+                {formatRate(playbackInfo?.rate ?? 1)}
+              </span>
+              <span className='text-base-content/60 max-w-full truncate px-1 text-xs'>
+                {_('Speed')}
+              </span>
+            </button>
+            <button
+              type='button'
+              aria-label={_('Sleep Timer')}
+              onClick={() => setView('timer')}
+              className='not-eink:bg-base-200 eink-bordered flex h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl'
+            >
+              <MdAlarm size={iconSize18} />
+              <span className='text-base-content/60 max-w-full truncate px-1 text-xs tabular-nums'>
+                {timerCaption}
+              </span>
+            </button>
+          </div>
         </div>
       )}
       {view === 'speed' && (
@@ -282,6 +321,25 @@ const AudiobookPlayerSheet = () => {
             rate={playbackInfo?.rate ?? 1}
             onSelect={(rate) => audiobookSessionManager.setRate(rate)}
           />
+        </div>
+      )}
+      {view === 'timer' && (
+        <div className='flex w-full flex-col pb-4'>
+          {timeoutOptions.map((option) => (
+            <button
+              key={option.value}
+              type='button'
+              onClick={() => handleSelectTimeout(option.value)}
+              className='flex w-full items-center gap-2 rounded-lg px-2 py-2 text-start'
+            >
+              <span className='flex h-6 w-6 items-center justify-center'>
+                {(sleepTimer?.timeoutSec ?? 0) === option.value && (
+                  <MdCheck className='text-base-content' />
+                )}
+              </span>
+              <span className='text-base sm:text-sm'>{option.label}</span>
+            </button>
+          ))}
         </div>
       )}
     </Dialog>
