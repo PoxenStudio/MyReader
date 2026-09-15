@@ -166,18 +166,26 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
         toggleSelection(book.hash);
         return;
       }
-      // The "有声书" shelf: open the global audiobook player instead of the
-      // ebook reader (see design doc §5.2) — an audiobook-only entry has no
-      // readable file to open, and openBook() would try to download one.
       if (isAudiobookShelf) {
         const bookId = getMyBooksId(book);
-        if (!bookId) return;
-        await audiobookSessionManager.openBook(bookId, {
-          title: book.title,
-          author: book.author,
-          coverImageUrl: book.coverImageUrl ?? null,
-        });
-        useAudiobookUIStore.getState().openSheet();
+        if (!bookId) {
+          console.error('[Audiobook] missing bookId for', book.hash);
+          return;
+        }
+        try {
+          await audiobookSessionManager.openBook(bookId, {
+            title: book.title,
+            author: book.author,
+            coverImageUrl: book.coverImageUrl ?? null,
+          });
+          useAudiobookUIStore.getState().openSheet();
+        } catch (error) {
+          console.error('[Audiobook] failed to open', bookId, error);
+          eventDispatcher.dispatch('toast', {
+            type: 'error',
+            message: _('Failed to open audiobook'),
+          });
+        }
         return;
       }
       await openBook(book);
