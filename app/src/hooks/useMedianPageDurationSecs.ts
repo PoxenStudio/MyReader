@@ -15,11 +15,17 @@ export const useMedianPageDurationSecs = (bookMd5?: string): number | null => {
     if (!appService || !bookMd5) return;
 
     const load = async () => {
-      const db = await StatisticsDb.open(appService);
-      const book = await db.getBookByMd5(bookMd5);
-      if (!book) return;
-      const median = await db.getMedianPageDurationSecs(book.id);
-      setMedianPageDurationSecs(median);
+      try {
+        const db = await StatisticsDb.open(appService);
+        const book = await db.getBookByMd5(bookMd5);
+        if (!book) return;
+        const median = await db.getMedianPageDurationSecs(book.id);
+        setMedianPageDurationSecs(median);
+      } catch (err) {
+        // Best-effort estimate; a DB open/read failure (e.g. "database ...
+        // not loaded", READEST-6) must not surface as an unhandled rejection.
+        console.warn('[stats] failed to load median page duration:', err);
+      }
     };
 
     void load();
