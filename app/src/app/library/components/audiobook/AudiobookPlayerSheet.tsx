@@ -20,6 +20,7 @@ import { audiobookSessionManager } from '@/services/audiobook/audiobookSessionMa
 import { useAudiobookUIStore } from '@/store/audiobookUIStore';
 import { useAudiobookSession } from '../../hooks/useAudiobookSession';
 import { useAudiobookDownloads } from '../../hooks/useAudiobookDownloads';
+import { useResolvedCoverUrl } from '@/hooks/useResolvedCoverUrl';
 
 type SheetView = 'main' | 'speed';
 
@@ -43,6 +44,11 @@ const AudiobookPlayerSheet = () => {
 
   const tracks = session?.tracks ?? [];
   const downloads = useAudiobookDownloads(session?.bookId ?? null, tracks);
+  const coverImageUrl = useResolvedCoverUrl(
+    session?.meta.coverImageUrl,
+    session?.meta.title ?? '',
+    String(session?.bookId ?? ''),
+  );
 
   if (!session) return null;
 
@@ -98,10 +104,10 @@ const AudiobookPlayerSheet = () => {
       {view === 'main' && (
         <div className='flex w-full flex-col gap-3 pb-4 sm:pt-4'>
           <div className='flex items-center gap-3'>
-            {meta.coverImageUrl ? (
+            {coverImageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={meta.coverImageUrl}
+                src={coverImageUrl}
                 alt=''
                 className='not-eink:shadow-lg eink-bordered hidden h-20 w-auto shrink-0 rounded-lg object-cover sm:block'
               />

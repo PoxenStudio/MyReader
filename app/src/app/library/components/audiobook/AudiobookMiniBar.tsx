@@ -8,6 +8,7 @@ import { useEnv } from '@/context/EnvContext';
 import { audiobookSessionManager } from '@/services/audiobook/audiobookSessionManager';
 import { useAudiobookUIStore } from '@/store/audiobookUIStore';
 import { useAudiobookSession } from '../../hooks/useAudiobookSession';
+import { useResolvedCoverUrl } from '@/hooks/useResolvedCoverUrl';
 
 interface AudiobookMiniBarProps {
   isSelectMode: boolean;
@@ -26,6 +27,11 @@ const AudiobookMiniBar = ({ isSelectMode }: AudiobookMiniBarProps) => {
   const { session, isPlaying } = useAudiobookSession();
   const size20 = useResponsiveSize(20);
   const size30 = useResponsiveSize(30);
+  const coverImageUrl = useResolvedCoverUrl(
+    session?.meta.coverImageUrl,
+    session?.meta.title ?? '',
+    String(session?.bookId ?? ''),
+  );
 
   // Hands the manager an AppService once so #loadTrack can prefer an
   // already-downloaded local file over the remote URL (see
@@ -38,7 +44,6 @@ const AudiobookMiniBar = ({ isSelectMode }: AudiobookMiniBarProps) => {
   if (!visible) return null;
 
   const title = session.meta.title;
-  const coverImageUrl = session.meta.coverImageUrl;
 
   return (
     <div
