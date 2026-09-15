@@ -12,6 +12,20 @@ vi.mock('@/store/mybooksStatusStore', () => ({
   useMyBooksStatusStore: { getState: () => ({ currentUserId: null }) },
 }));
 
+const isTauriAppPlatformMock = vi.fn().mockReturnValue(false);
+vi.mock('@/services/environment', () => ({
+  isTauriAppPlatform: () => isTauriAppPlatformMock(),
+}));
+
+const fetchRemoteAudioBlobUrlMock = vi.fn();
+vi.mock('@/services/audiobook/audiobookService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/audiobook/audiobookService')>();
+  return {
+    ...actual,
+    fetchRemoteAudioBlobUrl: (...args: unknown[]) => fetchRemoteAudioBlobUrlMock(...args),
+  };
+});
+
 import {
   AudiobookSessionManager,
   type AudioElementLike,
@@ -43,6 +57,14 @@ class FakeAudioElement extends EventTarget implements AudioElementLike {
   });
 }
 
+// Never fires 'loadedmetadata' — simulates a real <audio> failing to load
+// (bad URL, CORS, network error), which fires 'error' instead.
+class FailingAudioElement extends FakeAudioElement {
+  override load = vi.fn(() => {
+    queueMicrotask(() => this.dispatchEvent(new Event('error')));
+  });
+}
+
 const track = (overrides: Partial<AudioTrack> = {}): AudioTrack => ({
   filename: 'ch1',
   url: 'https://mybooks.local/api/audio/5/ch1.mp3',
@@ -64,6 +86,8 @@ describe('AudiobookSessionManager', () => {
   beforeEach(() => {
     localStorage.clear();
     stopActiveMock.mockClear();
+    isTauriAppPlatformMock.mockReturnValue(false);
+    fetchRemoteAudioBlobUrlMock.mockReset();
     audio = new FakeAudioElement();
     fetchAudioDetail = vi.fn();
     manager = new AudiobookSessionManager({
@@ -86,6 +110,28 @@ describe('AudiobookSessionManager', () => {
     expect(session?.bookId).toBe(5);
     expect(session?.currentTrackIndex).toBe(0);
     expect(audio.src).toBe(track().url);
+  });
+
+  it('on Tauri, streams a not-yet-downloaded track through fetchRemoteAudioBlobUrl (cookie-auth workaround)', async () => {
+    isTauriAppPlatformMock.mockReturnValue(true);
+    fetchRemoteAudioBlobUrlMock.mockResolvedValue('blob:mock-audio');
+    fetchAudioDetail.mockResolvedValue(detail([track()]));
+
+    await manager.openBook(5, { title: 'Dune' });
+
+    expect(fetchRemoteAudioBlobUrlMock).toHaveBeenCalledWith(track().url);
+    expect(audio.src).toBe('blob:mock-audio');
+  });
+
+  it('rejects instead of hanging when the audio element fails to load', async () => {
+    const failingAudio = new FailingAudioElement();
+    manager = new AudiobookSessionManager({
+      createAudioElement: () => failingAudio,
+      fetchAudioDetail,
+    });
+    fetchAudioDetail.mockResolvedValue(detail([track()]));
+
+    await expect(manager.openBook(5, { title: 'Dune' })).rejects.toThrow();
   });
 
   it('restores a saved trackIndex/currentTime from localStorage', async () => {

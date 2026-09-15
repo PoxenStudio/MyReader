@@ -18,12 +18,14 @@ import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import {
   getAudioBookDetail,
   resolveAudioTrackUrl,
+  fetchRemoteAudioBlobUrl,
   type AudioBookDetail,
   type AudioTrack,
 } from './audiobookService';
 import { findActiveCueIndex, parseSubtitle, type SubtitleCue } from './audioSubtitle';
 import { resolveLocalPlaybackUrl } from './audiobookDownloader';
 import { audiobookMediaBridge } from './audiobookMediaBridge';
+import { isTauriAppPlatform } from '@/services/environment';
 import type { AppService } from '@/types/system';
 
 export interface AudiobookSessionMeta {
@@ -312,17 +314,35 @@ export class AudiobookSessionManager extends EventTarget {
         (await this.#resolvePlaybackUrl?.(session.bookId, track)) ||
         (this.#appService &&
           (await resolveLocalPlaybackUrl(this.#appService, session.bookId, track)));
-      const src = resolved || resolveAudioTrackUrl(track.url);
+      // A not-yet-downloaded track on Tauri can't be streamed directly:
+      // <audio src> in the webview has no access to tauriFetch's session
+      // cookie, so the MyBooks audio endpoint 401s. Fetch it through
+      // tauriFetch instead and play the resulting Blob.
+      const remoteUrl = resolveAudioTrackUrl(track.url);
+      const src =
+        resolved || (isTauriAppPlatform() ? await fetchRemoteAudioBlobUrl(remoteUrl) : remoteUrl);
       audio.src = src;
       this.#loadedUrl = track.url;
       audio.playbackRate = this.#rate;
-      await new Promise<void>((resolve) => {
-        const onReady = () => {
+      // Without an 'error' listener, a bad URL/CORS/network failure never
+      // fires 'loadedmetadata' and openBook() hangs forever with no visible
+      // failure — this is what makes tapping a book look like a no-op.
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
           audio.removeEventListener('loadedmetadata', onReady);
+          audio.removeEventListener('error', onError);
+        };
+        const onReady = () => {
+          cleanup();
           audio.currentTime = targetTime;
           resolve();
         };
+        const onError = () => {
+          cleanup();
+          reject(new Error(`Failed to load audio: ${src}`));
+        };
         audio.addEventListener('loadedmetadata', onReady);
+        audio.addEventListener('error', onError);
         audio.load();
       });
     }

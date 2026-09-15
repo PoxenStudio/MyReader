@@ -12,6 +12,7 @@ import { fetchMyBooks } from '@/services/mybooksService';
 import type { MyBooksBook } from '@/services/mybooksService';
 import { getBooksByType } from '@/services/mybooksService';
 import { isTauriAppPlatform } from '@/services/environment';
+import { useSettingsStore } from '@/store/settingsStore';
 
 export interface AudioTrack {
   filename: string;
@@ -64,8 +65,11 @@ export async function getAudioBookDetail(bookId: number): Promise<AudioBookDetai
 /**
  * 把后端返回的曲目 `url`（形如 `/api/audio/<id>/<filename>`，相对于 MyBooks
  * 主机根路径）解析成当前平台可以直接播放/下载的完整地址：
- * - Tauri：直接拼接 `mybooks_host`（Tauri 原生 WebView 加载 <audio>/下载器均
- *   可正常带上会话 Cookie，同 cloudService.ts 里封面/正文下载的处理方式）。
+ * - Tauri：直接拼接 `mybooks_host`。注意这个直连地址本身**不带认证**——
+ *   audio 接口要求登录 cookie，而该 cookie 存在 tauriFetch 自己的原生
+ *   jar 里，对 webview 原生请求（<audio src=...>）不可见，直接播放会
+ *   401（同 avatar 直连图曾踩过的坑）。调用方必须用 `fetchRemoteAudioBlobUrl`
+ *   把这个地址转成 Blob URL 才能实际播放，见 audiobookSessionManager.ts。
  * - Web：走已有的 `/api/mybooks/proxy/<path>` 通用代理（同源，自动带上
  *   Cookie，避免 CORS）。注意：该通用代理目前不转发 Range 请求/响应头，
  *   因此"在线流式播放时拖动到尚未缓冲的位置"在浏览器端体验会打折扣——这不
@@ -86,4 +90,25 @@ export function resolveAudioTrackUrl(url: string): string {
   }
   const apiPath = url.replace(/^\/?api\//, '');
   return `/api/mybooks/proxy/${apiPath}?host=${encodeURIComponent(host)}`;
+}
+
+// Tauri-only: fetches a direct (unauthenticated-looking) audio URL through
+// tauriFetch — which carries the session cookie from its own native jar,
+// unlike a plain <audio src> request in the webview — and returns it as a
+// Blob URL. See resolveAudioTrackUrl's Tauri branch above.
+export async function fetchRemoteAudioBlobUrl(url: string): Promise<string> {
+  const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+  let headers: Record<string, string> | undefined;
+  const nasSettings = useSettingsStore.getState().settings.nas;
+  if (nasSettings?.enabled) {
+    const { getNasCookies, NAS_CHROME_USER_AGENT } = await import(
+      '@/services/mybooks/nasCookieStore'
+    );
+    const nasCookie = getNasCookies(new URL(url).host);
+    headers = { ...(nasCookie && { Cookie: nasCookie }), 'User-Agent': NAS_CHROME_USER_AGENT };
+  }
+  const response = await tauriFetch(url, { headers });
+  if (!response.ok) throw new Error(`Failed to fetch audio: ${response.status}`);
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
