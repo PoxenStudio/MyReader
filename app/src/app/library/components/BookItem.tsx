@@ -36,6 +36,7 @@ interface BookItemProps {
   showBookDetailsModal: (book: Book) => void;
   showCloudIcon?: boolean;
   showAllFormatsBadge?: boolean;
+  isAudiobookShelf?: boolean;
   showTimeRemaining: boolean;
 }
 
@@ -51,6 +52,7 @@ const BookItem: React.FC<BookItemProps> = ({
   showBookDetailsModal,
   showCloudIcon = false,
   showAllFormatsBadge = false,
+  isAudiobookShelf = false,
   showTimeRemaining,
 }) => {
   const _ = useTranslation();
@@ -132,21 +134,23 @@ const BookItem: React.FC<BookItemProps> = ({
             <LiaCloudSolid size={iconSize15} className='fill-gray-300 drop-shadow-md' />
           </div>
         )}
-        {showAllFormatsBadge ? (
-          <div className='absolute right-0.5 top-0 flex flex-row-reverse gap-0.3'>
-            {book.files && book.files.length > 0 ? (
-              book.files
-                .slice(0, 3)
-                .map((file, index) => <FormatBadge key={index} format={file.format} />)
-            ) : (
+        {/* An EPUB/PDF format badge doesn't apply to a pure-audio entry. */}
+        {!isAudiobookShelf &&
+          (showAllFormatsBadge ? (
+            <div className='absolute right-0.5 top-0 flex flex-row-reverse gap-0.3'>
+              {book.files && book.files.length > 0 ? (
+                book.files
+                  .slice(0, 3)
+                  .map((file, index) => <FormatBadge key={index} format={file.format} />)
+              ) : (
+                <FormatBadge format={book.sourceFormat ?? book.format} />
+              )}
+            </div>
+          ) : (
+            <div className='absolute right-0.5 top-0 flex flex-row-reverse gap-0.3'>
               <FormatBadge format={book.sourceFormat ?? book.format} />
-            )}
-          </div>
-        ) : (
-          <div className='absolute right-0.5 top-0 flex flex-row-reverse gap-0.3'>
-            <FormatBadge format={book.sourceFormat ?? book.format} />
-          </div>
-        )}
+            </div>
+          ))}
       </div>
       <div
         className={clsx(

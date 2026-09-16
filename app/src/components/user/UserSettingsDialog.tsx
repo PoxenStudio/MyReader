@@ -36,6 +36,7 @@ import UserAvatar from '@/components/UserAvatar';
 import NasRemoteWebview from '@/components/nas/NasRemoteWebview';
 import NasRemoteLoginIconButton from '@/components/nas/NasRemoteLoginIconButton';
 import ReadingStatsCard from '@/components/user/ReadingStatsCard';
+import AudiobookStorageSection from '@/components/user/AudiobookStorageSection';
 
 type RefreshStatus = 'idle' | 'loading' | 'error';
 
@@ -368,6 +369,9 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
               </SettingsRow>
             </BoxedList>
 
+            {/* Audiobook Storage — only rendered once something is downloaded */}
+            <AudiobookStorageSection />
+
             {/* Annotation Data */}
             <BoxedList title={_('Annotation Data')}>
               <SettingsSwitchRow
@@ -400,7 +404,7 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
                   </span>
                 </div>
                 {isTauriAppPlatform() &&
-                  !appService?.isMobileApp &&
+                  !appService?.isIOSApp &&
                   nasSettings?.enabled &&
                   nasSettings.loginUrl && (
                     <div className='flex items-center gap-x-2'>

@@ -7,6 +7,13 @@ import { createProgressThrottle, ProgressPayload } from '@/utils/transfer';
 import { eventDispatcher } from '@/utils/event';
 import { getTransferMessages } from './transferMessages';
 import { MyBooksApiError } from './mybooksService';
+import { downloadMyBooksUrl } from './cloudService';
+import { resolveAudioTrackUrl, type AudioTrack } from './audiobook/audiobookService';
+import {
+  audiobookDir,
+  dedupeTracksByFile,
+  physicalFilename,
+} from './audiobook/audiobookDownloader';
 
 const TRANSFER_QUEUE_KEY = 'readest_transfer_queue';
 const RETRY_DELAY_BASE_MS = 2000;
@@ -269,6 +276,55 @@ class TransferManager {
       .filter((id): id is string => id !== null);
   }
 
+  /**
+   * Queues one downloaded-for-offline audiobook chapter file (see design doc
+   * §5.11/§6.4). Unlike book transfers, there's no local library entry to
+   * dedup against — identity is `audiobook:<bookId>:<physical filename>` in
+   * `bookHash`, matching how queueDownload/queueUpload dedup by book.hash.
+   */
+  queueAudiobookTrack(bookId: number, track: AudioTrack, priority: number = 10): string | null {
+    if (!this.isReady()) {
+      console.warn('TransferManager not initialized');
+      return null;
+    }
+
+    const filename = physicalFilename(track);
+    const bookHash = `audiobook:${bookId}:${filename}`;
+    const store = useTransferStore.getState();
+
+    const existing = store.getTransferByBookHash(bookHash, 'download');
+    if (existing) {
+      return existing.id;
+    }
+
+    const transferId = store.addAudiobookTrackTransfer(
+      bookId,
+      filename,
+      track.url,
+      track.size,
+      track.filename,
+      priority,
+    );
+    this.persistQueue();
+    this.processQueue();
+    return transferId;
+  }
+
+  /**
+   * Batch counterpart to queueAudiobookTrack — "download all" for a book.
+   * m4b virtual chapters sharing one physical file are deduped first so the
+   * shared file is only queued once.
+   */
+  queueAudiobookTracks(bookId: number, tracks: AudioTrack[], priority: number = 10): string[] {
+    if (!this.isReady()) {
+      console.warn('TransferManager not initialized');
+      return [];
+    }
+    return dedupeTracksByFile(tracks)
+      .map((track) => this.queueAudiobookTrack(bookId, track, priority))
+      .filter((id): id is string => id !== null);
+  }
+
   cancelTransfer(transferId: string): void {
     const controller = this.abortControllers.get(transferId);
     if (controller) {
@@ -407,7 +463,11 @@ class TransferManager {
     };
 
     try {
-      await this.executeBookTransfer(transfer, progressHandler, abortController);
+      if (transfer.kind === 'audiobook_track') {
+        await this.executeAudiobookTrackTransfer(transfer, progressHandler);
+      } else {
+        await this.executeBookTransfer(transfer, progressHandler, abortController);
+      }
 
       // Land the final progress value that the throttle may still be holding.
       progressThrottle.flush();
@@ -548,6 +608,29 @@ class TransferManager {
       book.downloadedAt = Date.now();
       await this.updateBook!(book);
     }
+  }
+
+  /**
+   * Downloads one audiobook chapter file to Books/audiobooks/<bookId>/
+   * <filename> (see audiobookDownloader.ts). Reuses the same
+   * cookie-attaching download primitive as book/cover downloads
+   * (downloadMyBooksUrl) — no format matching, TXT conversion, or cover
+   * download: those are book-specific steps executeBookTransfer handles.
+   */
+  private async executeAudiobookTrackTransfer(
+    transfer: TransferItem,
+    progressHandler: (p: ProgressPayload) => void,
+  ): Promise<void> {
+    const payload = transfer.audiobook;
+    if (!payload) {
+      throw new Error('Missing audiobook track payload');
+    }
+    const appService = this.appService!;
+    const dirRel = audiobookDir(payload.bookId);
+    await appService.createDir(dirRel, 'Books', true);
+    const dst = await appService.resolveFilePath(`${dirRel}/${payload.filename}`, 'Books');
+    const resolvedUrl = resolveAudioTrackUrl(payload.url);
+    await downloadMyBooksUrl(appService, resolvedUrl, dst, progressHandler);
   }
 
   private async loadPersistedQueue(): Promise<void> {

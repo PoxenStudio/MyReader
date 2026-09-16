@@ -155,7 +155,7 @@ export async function uploadBook(
  * a header — the same trick `tauriCookieStore.ts` already uses for the
  * WebSocket sync channel, which has the identical problem.
  */
-async function downloadMyBooksUrl(
+export async function downloadMyBooksUrl(
   appService: AppService,
   url: string,
   dst: string,

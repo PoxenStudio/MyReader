@@ -1,0 +1,139 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+
+const isTauriAppPlatformMock = vi.fn().mockReturnValue(false);
+vi.mock('@/services/environment', () => ({
+  isTauriAppPlatform: () => isTauriAppPlatformMock(),
+}));
+
+const tauriFetchMock = vi.fn();
+vi.mock('@tauri-apps/plugin-http', () => ({
+  fetch: (...args: unknown[]) => tauriFetchMock(...args),
+}));
+
+vi.mock('@/store/settingsStore', () => ({
+  useSettingsStore: { getState: () => ({ settings: { nas: { enabled: false } } }) },
+}));
+
+import {
+  getAudiobooks,
+  getAudioBookDetail,
+  resolveAudioTrackUrl,
+  fetchRemoteAudioBlobUrl,
+} from '@/services/audiobook/audiobookService';
+
+describe('getAudiobooks', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem('mybooks_host', 'http://mybooks.local');
+    vi.restoreAllMocks();
+  });
+
+  it('hits /audiobooks with start/size pagination params', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      json: async () => ({ err: 'ok', books: [{ id: 1 }], total: 1 }),
+    } as Response);
+
+    const result = await getAudiobooks(2, 10);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url] = fetchSpy.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/audiobooks(\?|$)/);
+    expect(String(url)).toContain('start=10');
+    expect(String(url)).toContain('size=10');
+    expect(result).toEqual({ books: [{ id: 1 }], total: 1 });
+  });
+});
+
+describe('getAudioBookDetail', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem('mybooks_host', 'http://mybooks.local');
+    vi.restoreAllMocks();
+  });
+
+  it('fetches /audio/<id> and normalizes the response', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      json: async () => ({
+        err: 'ok',
+        audios: [{ filename: 'ch1', url: '/api/audio/5/ch1.mp3', size: 123 }],
+        total_files: 1,
+        is_paid: true,
+      }),
+    } as Response);
+
+    const detail = await getAudioBookDetail(5);
+
+    expect(String(fetchSpy.mock.calls[0]![0])).toMatch(/\/audio\/5(\?|$)/);
+    expect(detail).toEqual({
+      audios: [{ filename: 'ch1', url: '/api/audio/5/ch1.mp3', size: 123 }],
+      total_files: 1,
+      is_paid: true,
+    });
+  });
+
+  it('defaults missing fields to empty/safe values', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      json: async () => ({ err: 'ok' }),
+    } as Response);
+
+    const detail = await getAudioBookDetail(5);
+
+    expect(detail).toEqual({ audios: [], total_files: 0, is_paid: true });
+  });
+});
+
+describe('resolveAudioTrackUrl', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    isTauriAppPlatformMock.mockReturnValue(false);
+  });
+
+  it('returns the url unchanged when no mybooks host is configured', () => {
+    expect(resolveAudioTrackUrl('/api/audio/5/ch1.mp3')).toBe('/api/audio/5/ch1.mp3');
+  });
+
+  it('routes through the same-origin proxy on web', () => {
+    localStorage.setItem('mybooks_host', 'http://mybooks.local/');
+    expect(resolveAudioTrackUrl('/api/audio/5/ch1.mp3')).toBe(
+      '/api/mybooks/proxy/audio/5/ch1.mp3?host=' + encodeURIComponent('http://mybooks.local/'),
+    );
+  });
+
+  it('resolves directly against the host on Tauri', () => {
+    isTauriAppPlatformMock.mockReturnValue(true);
+    localStorage.setItem('mybooks_host', 'http://mybooks.local');
+    expect(resolveAudioTrackUrl('/api/audio/5/ch1.mp3')).toBe(
+      'http://mybooks.local/api/audio/5/ch1.mp3',
+    );
+  });
+});
+
+describe('fetchRemoteAudioBlobUrl', () => {
+  beforeEach(() => {
+    tauriFetchMock.mockReset();
+  });
+
+  it("fetches via tauriFetch (not the webview's cookie-less fetch) and returns a blob URL", async () => {
+    const blob = new Blob(['audio bytes']);
+    tauriFetchMock.mockResolvedValue({ ok: true, blob: async () => blob });
+    const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url');
+
+    const url = await fetchRemoteAudioBlobUrl('http://mybooks.local/api/audio/5/ch1.mp3');
+
+    expect(tauriFetchMock).toHaveBeenCalledWith(
+      'http://mybooks.local/api/audio/5/ch1.mp3',
+      expect.anything(),
+    );
+    expect(createObjectURLSpy).toHaveBeenCalledWith(blob);
+    expect(url).toBe('blob:mock-url');
+    createObjectURLSpy.mockRestore();
+  });
+
+  it('throws when the upstream request fails, instead of returning a broken URL', async () => {
+    tauriFetchMock.mockResolvedValue({ ok: false, status: 401, blob: async () => new Blob() });
+
+    await expect(
+      fetchRemoteAudioBlobUrl('http://mybooks.local/api/audio/5/ch1.mp3'),
+    ).rejects.toThrow();
+  });
+});

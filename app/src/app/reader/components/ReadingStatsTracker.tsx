@@ -38,10 +38,12 @@ export default function ReadingStatsTracker({ bookKey }: { bookKey: string }) {
   useEffect(() => {
     if (!appService) return;
     let cancelled = false;
-    StatisticsDb.open(appService).then((db) => {
-      if (cancelled) return;
-      dbRef.current = db;
-    });
+    StatisticsDb.open(appService)
+      .then((db) => {
+        if (cancelled) return;
+        dbRef.current = db;
+      })
+      .catch((err) => console.warn('[stats] failed to open statistics DB:', err));
     return () => {
       cancelled = true;
     };
