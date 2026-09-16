@@ -448,7 +448,7 @@ const LoginDialog: React.FC = () => {
                 disabled={isLoading}
               />
               {isTauriAppPlatform() &&
-                !appService?.isIOSApp &&
+                !appService?.isMobileApp &&
                 nasSettings?.enabled &&
                 nasSettings.loginUrl && (
                   <NasRemoteLoginIconButton
