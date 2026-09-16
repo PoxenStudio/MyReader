@@ -404,7 +404,7 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
                   </span>
                 </div>
                 {isTauriAppPlatform() &&
-                  !appService?.isMobileApp &&
+                  !appService?.isIOSApp &&
                   nasSettings?.enabled &&
                   nasSettings.loginUrl && (
                     <div className='flex items-center gap-x-2'>
