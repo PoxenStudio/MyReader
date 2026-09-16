@@ -25,7 +25,7 @@ import {
 import type { BookNav } from '@/services/nav';
 import { partialMD5, md5 } from '@/utils/md5';
 import { getBaseFilename, getFilename } from '@/utils/path';
-import { BookDoc, DocumentLoader } from '@/libs/document';
+import { BookDoc, DocumentLoader, sniffBinaryBookFormat } from '@/libs/document';
 import { tryNativeParseEpub } from '@/utils/tauriEpubBridge';
 import { tryNativeParseMobi } from '@/utils/tauriMobiBridge';
 import { isPseStreamFileName, openPseStreamBook, parsePseStreamFileName } from './opds/pseStream';
@@ -385,7 +385,7 @@ export async function importBook(
           fileobj = file;
           filename = file.name;
         }
-        if (/\.txt$/i.test(filename)) {
+        if (/\.txt$/i.test(filename) && !(await sniffBinaryBookFormat(fileobj))) {
           sourceFormat = 'TXT';
           const txt2epub = new TxtToEpubConverter();
           ({ file: fileobj } = await txt2epub.convert({ file: fileobj }));

@@ -9,7 +9,7 @@ import {
 import { ClosableFile } from '@/utils/file';
 import { ProgressHandler } from '@/utils/transfer';
 import { isBookFileContentSource, resolveBookContentSource } from './bookContent';
-import { EXTS } from '@/libs/document';
+import { EXTS, sniffBinaryBookFormat } from '@/libs/document';
 import { isTauriAppPlatform } from '@/services/environment';
 import { getCloudBookId, getMyBooksId } from '@/utils/bookConverter';
 import { uploadBookToMyBooks, deleteBookFromMyBooks } from '@/services/mybooksService';
@@ -238,8 +238,8 @@ export async function downloadMyBooksBook(
     await fs.createDir(getDir(book), 'Books');
   }
 
-  const lfp = getLocalBookFilename(book);
-  const dst = `${localBooksDir}/${lfp}`;
+  let lfp = getLocalBookFilename(book);
+  let dst = `${localBooksDir}/${lfp}`;
   console.log(`Downloading MyReader book from: ${downloadUrl} to ${dst}`);
 
   if (book.format === 'TXT') {
@@ -264,10 +264,30 @@ export async function downloadMyBooksBook(
     }
     const { blob } = await webDownload(downloadUrl, onProgress, headers, 'include');
     const bookArrayBuffer = await blob.arrayBuffer();
-    const { TxtToEpubConverter } = await import('@/utils/txt');
-    const txtFile = new File([bookArrayBuffer], `${book.sourceTitle || book.title}.txt`);
-    const { file: epubFile } = await new TxtToEpubConverter().convert({ file: txtFile });
-    await appService.writeFile(dst, 'None', await epubFile.arrayBuffer());
+    const probeFile = new File([bookArrayBuffer], `${book.sourceTitle || book.title}.txt`);
+    const sniffedFormat = await sniffBinaryBookFormat(probeFile);
+    let bytesToWrite: ArrayBuffer;
+    if (sniffedFormat) {
+      // The catalog said TXT, but the bytes are actually a binary ebook (e.g. the
+      // server mislabeled an EPUB). Running these through TxtToEpubConverter would
+      // decode the archive bytes as text and corrupt them, so persist them as-is
+      // under their real format instead.
+      book.format = sniffedFormat;
+      book.sourceFormat = undefined;
+      bytesToWrite = bookArrayBuffer;
+    } else {
+      const { TxtToEpubConverter } = await import('@/utils/txt');
+      const { file: epubFile } = await new TxtToEpubConverter().convert({ file: probeFile });
+      book.format = 'EPUB';
+      bytesToWrite = await epubFile.arrayBuffer();
+    }
+    // The on-disk filename must reflect the corrected format, not the
+    // catalog's stale 'TXT' -- otherwise the reader later re-detects the
+    // file as TXT by its extension and re-runs the (now destructive)
+    // TXT->EPUB conversion on already-binary bytes.
+    lfp = getLocalBookFilename(book);
+    dst = `${localBooksDir}/${lfp}`;
+    await appService.writeFile(dst, 'None', bytesToWrite);
   } else {
     await downloadMyBooksUrl(appService, downloadUrl, dst, onProgress);
   }
