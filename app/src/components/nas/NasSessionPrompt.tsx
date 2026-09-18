@@ -21,11 +21,12 @@ const NasSessionPrompt: React.FC = () => {
   const closePrompt = useNasDeviceStore((s) => s.closePrompt);
   const nasSettings = settings.nas;
 
-  // Mobile has no supported entry point to enable this (see IntegrationsPanel/
-  // LoginDialog/UserSettingsDialog), but `nasSettings.enabled` can still be
-  // `true` here if it was turned on from a synced desktop session — guard
-  // explicitly so the auto re-login prompt can't fire on Android/iOS.
-  if (appService?.isMobileApp) return null;
+  // iOS has no native close-button support for the NAS popup (see
+  // NasRemoteWebview.tsx), so it has no supported entry point to enable this
+  // (see IntegrationsPanel/LoginDialog/UserSettingsDialog) — but
+  // `nasSettings.enabled` can still be `true` here if it was turned on from a
+  // synced desktop/Android session, so guard explicitly.
+  if (appService?.isIOSApp) return null;
   if (!promptOpen || !nasSettings?.enabled || !nasSettings.loginUrl) return null;
 
   const handleClose = async (cookies: NasCookieEntry[] | null) => {

@@ -48,7 +48,7 @@ flowchart LR
         S3["Object storage<br/>(S3 / R2)"]
         Stripe["Stripe<br/>(billing)"]
         AI["AI providers<br/>(OpenAI / Ollama / ...)"]
-        Trans["Translators<br/>(DeepL / Google / Azure / Yandex)"]
+        Trans["Translators<br/>(Edge Translator)"]
         Meta["Metadata providers<br/>(Google Books / Open Library)"]
         Dict["Dictionary sources<br/>(Wikipedia / Wiktionary / StarDict)"]
         OPDS["OPDS catalogs / Calibre"]
@@ -358,7 +358,7 @@ the user's inbox so that the in-app `Send` page can pick them up via the
 
 `src/app/runtime-config.js/route.ts` is a server route that builds a small JSON
 object — `supabaseUrl`, `supabaseAnonKey`, `apiBaseUrl`, `objectStorageType`,
-`storageFixedQuota`, `translationFixedQuota` — from `process.env` at request
+`storageFixedQuota` — from `process.env` at request
 time and serializes it as a JS payload. The client reads it through
 `getRuntimeConfig()` in `src/services/runtimeConfig.ts` (browser) or
 `getServerRuntimeConfig()` (server). This is the mechanism that makes the same
@@ -413,10 +413,9 @@ locally and querying the embeddings store.
 
 ### 6.4 Translation
 
-`src/services/translators` has provider adapters for DeepL, Google, Azure, and
-Yandex, plus a preprocess + cache + polish pipeline. DeepL goes through a
-server proxy (`pages/api/deepl/translate.ts`) to keep the API key server-side;
-the others can hit the providers directly from the client.
+`src/services/translators` has provider adapters (currently Edge Translator,
+Microsoft Edge's free client-side translation endpoint — no API key or server
+proxy needed), plus a preprocess + cache + polish pipeline.
 
 ### 6.5 TTS
 

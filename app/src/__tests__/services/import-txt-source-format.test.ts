@@ -127,6 +127,29 @@ describe('importBook TXT to EPUB conversion records sourceFormat', () => {
     expect(result!.sourceFormat).toBe('TXT');
   });
 
+  it('does not run TXT to EPUB conversion when a .txt-named file is actually a binary ebook', async () => {
+    // Regression test: a file that carries a misleading .txt extension but is
+    // really a ZIP/EPUB (e.g. a cloud download saved under the wrong name, or
+    // a user-renamed file) must not be blindly fed through TxtToEpubConverter,
+    // which would decode the archive bytes as text and corrupt them.
+    mockOpen.mockResolvedValue({
+      book: {
+        metadata: { title: 'Real Epub', author: 'Someone', language: 'en' },
+        getCover: vi.fn().mockResolvedValue(null),
+      },
+      format: 'EPUB',
+    });
+
+    const zipBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
+    const misnamedFile = new File([zipBytes], 'Fake.txt', { type: 'text/plain' });
+    const books: Book[] = [];
+    const result = await service.importBook(misnamedFile, books);
+
+    expect(mockTxtConvert).not.toHaveBeenCalled();
+    expect(result!.format).toBe('EPUB');
+    expect(result!.sourceFormat).toBeUndefined();
+  });
+
   it('does not set sourceFormat for a non-TXT import', async () => {
     mockOpen.mockResolvedValue({
       book: {

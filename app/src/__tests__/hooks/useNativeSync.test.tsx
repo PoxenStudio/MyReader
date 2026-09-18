@@ -287,6 +287,70 @@ describe('useNativeSync', () => {
     );
   });
 
+  test('does not include a reading_seconds field when nothing has been tracked yet', async () => {
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    h.pushSyncMock.mockClear();
+
+    await flushPushDebounce();
+
+    expect(h.pushSyncMock).toHaveBeenCalled();
+    const payload = h.pushSyncMock.mock.calls[0]![0] as { reading_seconds?: unknown };
+    expect(payload.reading_seconds).toBeUndefined();
+  });
+
+  test('piggybacks pending offline reading seconds onto the next push and clears them on success', async () => {
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+    h.state.config = {
+      location: 'local-loc',
+      updatedAt: 1000,
+      pendingReadingSeconds: { '2025-12-31': 120 },
+    };
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    h.pushSyncMock.mockClear();
+    h.setConfigMock.mockClear();
+
+    await flushPushDebounce();
+
+    expect(h.pushSyncMock).toHaveBeenCalled();
+    const payload = h.pushSyncMock.mock.calls[0]![0] as {
+      reading_seconds?: { book_hash: string; date: string; seconds: number }[];
+    };
+    expect(payload.reading_seconds).toEqual([
+      { book_hash: 'book-hash', date: '2025-12-31', seconds: 120 },
+    ]);
+    // acked seconds must be cleared from the persisted config after a successful push
+    expect(h.setConfigMock).toHaveBeenCalledWith(
+      'book-key',
+      expect.objectContaining({ pendingReadingSeconds: {} }),
+    );
+  });
+
+  test('keeps pending offline reading seconds on a failed push', async () => {
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+    h.state.config = {
+      location: 'local-loc',
+      updatedAt: 1000,
+      pendingReadingSeconds: { '2025-12-31': 60 },
+    };
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    h.pushSyncMock.mockRejectedValueOnce(new Error('offline'));
+    h.setConfigMock.mockClear();
+
+    await flushPushDebounce();
+
+    expect(h.setConfigMock).not.toHaveBeenCalledWith(
+      'book-key',
+      expect.objectContaining({ pendingReadingSeconds: expect.anything() }),
+    );
+  });
+
   test('does not push back a note that belongs to another user', async () => {
     h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
     h.state.config = {

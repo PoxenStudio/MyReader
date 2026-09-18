@@ -721,6 +721,9 @@ describe('cloudService', () => {
           { format: 'TXT' as BookFormat, size: 2, href: '/api/book/123.txt' },
         ],
       });
+      // Genuinely plain-text content so the magic-byte sniff correctly says
+      // "not a binary ebook" and the conversion path is taken.
+      webDownloadMock.mockResolvedValue({ blob: new Blob(['plain text content']) });
       const epubBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04]).buffer;
       txtConvertMock.mockResolvedValue({
         file: new File([epubBytes], 'Test Book.epub'),
@@ -738,6 +741,62 @@ describe('cloudService', () => {
         expect.stringContaining(`${book.hash}/`),
         'None',
         epubBytes,
+      );
+    });
+
+    test('updates book.format to EPUB after converting a TXT download, so the saved filename is not .txt', async () => {
+      // Regression test: previously book.format stayed 'TXT' after the silent
+      // TXT->EPUB conversion, so getLocalBookFilename(book) kept producing a
+      // .txt filename for what is now real EPUB (zip) content on disk. The
+      // reader then re-detected the file as TXT by its extension and re-ran
+      // the (now destructive) TXT->EPUB conversion on already-binary bytes,
+      // corrupting the book.
+      const book = createMockBook({
+        hash: 'cloud-123-txt',
+        format: 'TXT' as BookFormat,
+        sourceFormat: 'TXT' as BookFormat,
+        files: [{ format: 'TXT' as BookFormat, size: 2, href: '/api/book/123.txt' }],
+      });
+      webDownloadMock.mockResolvedValue({ blob: new Blob(['plain text content']) });
+      txtConvertMock.mockResolvedValue({
+        file: new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04]).buffer], 'Test Book.epub'),
+        bookTitle: 'Test Book',
+        chapterCount: 1,
+        language: 'en',
+      });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(book.format).toBe('EPUB');
+      // getLocalBookFilename is mocked to always append .epub in this suite,
+      // but the real function keys off book.format -- so asserting the field
+      // itself is what actually verifies the fix.
+    });
+
+    test('skips the destructive TXT conversion when the "TXT" download is actually binary ebook content', async () => {
+      // Some cloud sources mislabel a real EPUB as TXT. Feeding EPUB (zip)
+      // bytes through TxtToEpubConverter's text-encoding heuristics would
+      // decode them as garbage text and re-wrap that garbage into a new,
+      // corrupted EPUB. The download must instead detect the real content
+      // and persist it unmodified.
+      const book = createMockBook({
+        hash: 'cloud-7780-txt',
+        format: 'TXT' as BookFormat,
+        sourceFormat: 'TXT' as BookFormat,
+        files: [{ format: 'TXT' as BookFormat, size: 2, href: '/api/book/7780.txt' }],
+      });
+      const realEpubBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4]).buffer;
+      webDownloadMock.mockResolvedValue({ blob: new Blob([realEpubBytes]) });
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(txtConvertMock).not.toHaveBeenCalled();
+      expect(book.format).toBe('EPUB');
+      expect(book.sourceFormat).toBeUndefined();
+      expect(mockAppService.writeFile).toHaveBeenCalledWith(
+        expect.stringContaining(`${book.hash}/`),
+        'None',
+        realEpubBytes,
       );
     });
 

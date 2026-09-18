@@ -32,6 +32,10 @@ import {
   removeBookNoteOverlays,
   removeEmptyAnnotationPlaceholder,
 } from '../../utils/annotatorUtil';
+import {
+  expandAllRenderedSections,
+  removeGlobalAnnotationOverlays,
+} from '../../utils/globalAnnotations';
 import BooknoteItem from '../sidebar/BooknoteItem';
 import AIAssistant from './AIAssistant';
 import NotebookHeader from './Header';
@@ -212,7 +216,7 @@ const Notebook: React.FC = ({}) => {
     setNotebookEditAnnotation(null);
   };
 
-  const handleSaveNote = (selection: TextSelection, note: string) => {
+  const handleSaveNote = (selection: TextSelection, note: string, isGlobal: boolean) => {
     if (!sideBarBookKey) return;
     const view = getView(sideBarBookKey);
     const config = getConfig(sideBarBookKey)!;
@@ -222,6 +226,7 @@ const Notebook: React.FC = ({}) => {
 
     const { booknotes: annotations = [] } = config;
     const existingIndex = findAnnotationAtCfi(annotations, cfi);
+    let saved: BookNote;
     if (existingIndex !== -1) {
       // Attach the note to the existing highlight at this CFI instead of
       // creating a second record. The highlight overlay (value = cfi) already
@@ -231,10 +236,12 @@ const Notebook: React.FC = ({}) => {
         ...existing,
         note,
         text: selection.text || existing.text,
+        global: isGlobal,
         updatedAt: Date.now(),
       };
       annotations[existingIndex] = updated;
       view?.addAnnotation({ ...updated, value: `${NOTE_PREFIX}${updated.cfi}` });
+      saved = updated;
     } else {
       // No highlight at this CFI yet (e.g. a note added without first
       // highlighting): create one unified record with the current global style
@@ -248,6 +255,7 @@ const Notebook: React.FC = ({}) => {
         style,
         color,
         note,
+        global: isGlobal,
         page: selection.page,
         text: selection.text,
         createdAt: Date.now(),
@@ -256,10 +264,14 @@ const Notebook: React.FC = ({}) => {
       view?.addAnnotation(annotation);
       view?.addAnnotation({ ...annotation, value: `${NOTE_PREFIX}${annotation.cfi}` });
       annotations.push(annotation);
+      saved = annotation;
     }
     const updatedConfig = updateBooknotes(sideBarBookKey, annotations);
     if (updatedConfig) {
       saveConfig(envConfig, sideBarBookKey, updatedConfig, settings);
+    }
+    if (isGlobal && view) {
+      expandAllRenderedSections(view, saved);
     }
     setNotebookNewAnnotation(null);
     // The placeholder now carries a note (or a fresh unified record was created),
@@ -275,6 +287,7 @@ const Notebook: React.FC = ({}) => {
     const { booknotes: annotations = [] } = config;
     const existingIndex = annotations.findIndex((item) => item.id === note.id);
     if (existingIndex === -1) return;
+    const wasGlobal = !!annotations[existingIndex]!.global;
     if (isDelete) {
       note.deletedAt = Date.now();
     } else {
@@ -286,6 +299,13 @@ const Notebook: React.FC = ({}) => {
     const updatedConfig = updateBooknotes(sideBarBookKey, annotations);
     if (updatedConfig) {
       saveConfig(envConfig, sideBarBookKey, updatedConfig, settings);
+    }
+    if (view) {
+      if (isDelete || (wasGlobal && !note.global)) {
+        removeGlobalAnnotationOverlays(view, note);
+      } else if (note.global) {
+        expandAllRenderedSections(view, note);
+      }
     }
     setNotebookEditAnnotation(null);
   };

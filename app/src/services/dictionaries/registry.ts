@@ -21,8 +21,11 @@ import type {
 } from './types';
 import { BUILTIN_PROVIDER_IDS } from './types';
 import { isSystemDictionarySupported } from './systemDictionary';
+import { isTauriAppPlatform } from '@/services/environment';
 import { wiktionaryProvider } from './providers/wiktionaryProvider';
 import { wikipediaProvider } from './providers/wikipediaProvider';
+import { myBooksDictProvider } from './providers/myBooksDictProvider';
+import { baiduBaikeProvider } from './providers/baiduBaikeProvider';
 import { createStarDictProvider, type DictionaryFileOpener } from './providers/starDictProvider';
 import { createMdictProvider } from './providers/mdictProvider';
 import { createDictProvider } from './providers/dictProvider';
@@ -46,6 +49,14 @@ interface RegistryArgs {
 const builtinFor = (id: string): DictionaryProvider | undefined => {
   if (id === BUILTIN_PROVIDER_IDS.wiktionary) return wiktionaryProvider;
   if (id === BUILTIN_PROVIDER_IDS.wikipedia) return wikipediaProvider;
+  // MyBooks and Baidu Baike both go through `@tauri-apps/plugin-http` —
+  // neither upstream sends CORS headers, so a web-build `fetch` would be
+  // blocked. Returning `undefined` on web makes `getEnabledProviders` skip
+  // the id (same as a disabled provider) so no broken tab appears.
+  if (id === BUILTIN_PROVIDER_IDS.myBooks)
+    return isTauriAppPlatform() ? myBooksDictProvider : undefined;
+  if (id === BUILTIN_PROVIDER_IDS.baiduBaike)
+    return isTauriAppPlatform() ? baiduBaikeProvider : undefined;
   // System dictionary is a sentinel — it has no in-popup UI. The
   // annotator handles it before reaching the popup; the registry
   // filters it out of `getEnabledProviders` so no empty tab appears.

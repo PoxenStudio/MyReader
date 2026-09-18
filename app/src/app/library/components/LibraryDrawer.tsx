@@ -31,6 +31,7 @@ import {
   MdStar,
   MdKeyboardArrowDown,
   MdKeyboardArrowRight,
+  MdHeadphones,
 } from 'react-icons/md';
 
 interface NavSubItem {
@@ -203,6 +204,14 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
   ];
 
   const nav_links = [
+    {
+      icon: <MdHeadphones className='w-5 h-5' />,
+      href: '/library?source=cloud&type=audiobooks',
+      text: _('Audiobooks'),
+      color: 'text-primary',
+      source: 'cloud',
+      type: 'audiobooks',
+    },
     {
       icon: <MdCategory className='w-5 h-5' />,
       href: '/library?source=cloud&type=categories',

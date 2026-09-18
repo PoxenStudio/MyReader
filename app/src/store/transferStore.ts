@@ -2,7 +2,13 @@ import { create } from 'zustand';
 
 export type TransferType = 'upload' | 'download' | 'delete';
 export type TransferStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
-export type TransferKind = 'book';
+// 'audiobook_track' — a single downloaded-for-offline audiobook chapter file
+// (see document/MyReader_Audiobook_Feature_Design.md §5.11/§6.4). Reuses
+// this same queue (persistence, progress throttling, retry/backoff) instead
+// of a parallel one, but carries its own minimal payload in `audiobook`
+// rather than being looked up from the local library by `bookHash` the way
+// 'book' transfers are (audiobooks have no local library entry).
+export type TransferKind = 'book' | 'audiobook_track';
 /**
  * Why a transfer was cancelled. 'user' = an explicit cancel action;
  * 'policy' = the app cancelled it because MyBooks Cloud is not the
@@ -12,6 +18,24 @@ export type TransferKind = 'book';
  * cancel-retry-cancel), and they are pruned on the next restore.
  */
 export type TransferCancelReason = 'user' | 'policy';
+
+// Minimal, self-contained payload for an 'audiobook_track' transfer — unlike
+// a 'book' transfer, there is no local library entry to look the track back
+// up from, so everything executeTransfer needs travels with the item
+// (and survives a restart via the persisted queue).
+export interface AudiobookTrackPayload {
+  bookId: number;
+  // Physical filename on disk (see audiobookDownloader.ts's
+  // physicalFilename) — the download destination's basename, and the
+  // dedup/identity key alongside bookId (m4b virtual chapters share one
+  // physical file and must only be queued/downloaded once).
+  filename: string;
+  // Raw backend-relative url (e.g. /api/audio/5/0001_ch.mp3), resolved
+  // against the current mybooks_host at execute time rather than persisted
+  // pre-resolved, in case the host changes between queueing and running.
+  url: string;
+  size: number;
+}
 
 export interface TransferItem {
   id: string;
@@ -33,6 +57,8 @@ export interface TransferItem {
   completedAt?: number;
   priority: number; // Lower = higher priority
   isBackground: boolean;
+  // Present only when kind === 'audiobook_track'.
+  audiobook?: AudiobookTrackPayload;
 }
 
 interface TransferState {
@@ -62,6 +88,17 @@ interface TransferState {
       isBackground?: boolean;
     }>,
   ) => string[];
+  // Identity is `audiobook:<bookId>:<filename>` in `bookHash`, so
+  // getTransferByBookHash(..., 'download') doubles as the "already
+  // queued/downloading/downloaded" dedup check — no separate lookup needed.
+  addAudiobookTrackTransfer: (
+    bookId: number,
+    filename: string,
+    url: string,
+    size: number,
+    displayLabel: string,
+    priority?: number,
+  ) => string;
   removeTransfer: (transferId: string) => void;
   updateTransferProgress: (
     transferId: string,
@@ -198,6 +235,37 @@ export const useTransferStore = create<TransferState>((set, get) => ({
     }));
 
     return ids;
+  },
+
+  addAudiobookTrackTransfer: (bookId, filename, url, size, displayLabel, priority = 10) => {
+    const id = generateTransferId();
+    const transfer: TransferItem = {
+      id,
+      kind: 'audiobook_track',
+      bookHash: `audiobook:${bookId}:${filename}`,
+      bookTitle: displayLabel,
+      type: 'download',
+      status: 'pending',
+      progress: 0,
+      totalBytes: size,
+      transferredBytes: 0,
+      transferSpeed: 0,
+      retryCount: 0,
+      maxRetries: 3,
+      createdAt: Date.now(),
+      priority,
+      // Background: no per-item completion toast (see executeTransfer) —
+      // a whole-book "download all" queues many tracks at once and a toast
+      // per file would be noise. Kept visible in the transfer queue panel.
+      isBackground: true,
+      audiobook: { bookId, filename, url, size },
+    };
+
+    set((state) => ({
+      transfers: { ...state.transfers, [id]: transfer },
+    }));
+
+    return id;
   },
 
   removeTransfer: (transferId) => {
@@ -372,12 +440,13 @@ export const useTransferStore = create<TransferState>((set, get) => ({
   },
 
   getTransferByBookHash: (bookHash, type) => {
+    // Not kind-restricted: 'audiobook_track' transfers use this same lookup
+    // to dedup (see TransferManager.queueAudiobookTrack), namespacing their
+    // bookHash as `audiobook:<bookId>:<filename>` so it can never collide
+    // with a real book.hash.
     return Object.values(get().transfers).find(
       (t) =>
-        t.kind === 'book' &&
-        t.bookHash === bookHash &&
-        t.type === type &&
-        ['pending', 'in_progress'].includes(t.status),
+        t.bookHash === bookHash && t.type === type && ['pending', 'in_progress'].includes(t.status),
     );
   },
 

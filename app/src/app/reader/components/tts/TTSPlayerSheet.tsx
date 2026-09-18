@@ -47,7 +47,9 @@ export const formatGap = (sec: number) => `${parseFloat(sec.toFixed(2))}s`;
 const SENTENCE_PAUSE_MARKS = [0, 0.2, 0.4, 0.6];
 const PARAGRAPH_PAUSE_MARKS = [0, 0.5, 1, 1.5, 2];
 
-const getTTSTimeoutOptions = (_: TranslationFunc) => {
+// Exported for reuse by the audiobook player's sleep timer (same options,
+// same intent — stop playback after N minutes/hours).
+export const getTTSTimeoutOptions = (_: TranslationFunc) => {
   return [
     { label: _('No Timeout'), value: 0 },
     { label: _('{{value}} minute', { value: 1 }), value: 60 },

@@ -120,7 +120,7 @@ const IntegrationsPanel: React.FC = () => {
         </p>
       </div>
 
-      {isTauriAppPlatform() && !appService?.isMobileApp && (
+      {isTauriAppPlatform() && !appService?.isIOSApp && (
         <div className='w-full' data-setting-id='settings.integrations.nas'>
           <SectionTitle className='mb-2'>{_('Remote Login')}</SectionTitle>
           <div className='card eink-bordered border-base-200 bg-base-100 overflow-hidden border'>

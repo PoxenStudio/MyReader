@@ -94,7 +94,7 @@ export const UpdaterContent = ({
   const _ = useTranslation();
   const [targetLang, setTargetLang] = useState('EN');
   const { translate } = useTranslator({
-    provider: 'azure',
+    provider: 'edge',
     sourceLang: 'AUTO',
     targetLang,
   });

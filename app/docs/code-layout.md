@@ -278,7 +278,7 @@ Mostly frontend/domain logic, sometimes paired with server proxy routes.
 
 Translation provider integration.
 
-- provider adapters for DeepL, Google, Azure, Yandex
+- provider adapters (currently Edge Translator)
 - preprocessing, cache, polish, and translator utilities
 
 Mixed integration code. Some providers are used via server APIs to avoid exposing secrets.
@@ -325,7 +325,7 @@ Client-side reading feature code.
 
 Text/content transformation modules.
 
-- language, punctuation, whitespace, proofread, sanitization, footnote, style, simplecc, warichu
+- language, punctuation, whitespace, proofread, sanitization, footnote, style, simplecc, warichu, mathml, latex
 
 Shared pure logic, usually frontend-facing but not tied to a single runtime.
 

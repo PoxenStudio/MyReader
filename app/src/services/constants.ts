@@ -30,6 +30,13 @@ import {
 } from '@/types/settings';
 import { getDefaultMaxBlockSize, getDefaultMaxInlineSize } from '@/utils/config';
 import { stubTranslation as _ } from '@/utils/misc';
+
+// Inlined rather than imported from '@/services/environment' — that module
+// imports `MYBOOKS_NODE_BASE_URL`/`MYBOOKS_WEB_BASE_URL` from this file, so
+// importing `isTauriAppPlatform` back here would create a circular import
+// (environment.ts ⇄ constants.ts) that leaves this binding `undefined` at
+// module-eval time depending on which side loads first.
+const isTauriBuild = () => process.env['NEXT_PUBLIC_APP_PLATFORM'] === 'tauri';
 import { DEFAULT_AI_SETTINGS } from './ai/constants';
 import { DEFAULT_ANNOTATION_TOOLBAR_ITEMS } from '@/utils/annotationToolbar';
 import { DEFAULT_SENTENCE_GAP_SEC } from './tts/EdgeTTSClient';
@@ -147,11 +154,27 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   pinCodeEnabled: false,
 
   customDictionaries: [],
+  // A minimal seed — `customDictionaryStore`'s `loadCustomDictionaries` merges
+  // in the rest of the builtin ids (system dictionary, web-search templates)
+  // on load, appending anything missing to the END of this order. MyBooks and
+  // Baidu Baike must therefore already be listed here (ahead of Wiktionary/
+  // Wikipedia) rather than left for that backfill, or they'd land at the
+  // bottom of the list instead of the top. Wiktionary/Wikipedia are the
+  // default-open pair only on web, where MyBooks/Baidu Baike can't run (no
+  // CORS); Tauri's richer default flips this pair off in favor of those two
+  // instead — see `DEFAULT_DICTIONARY_SETTINGS` in `customDictionaryStore.ts`.
   dictionarySettings: {
-    providerOrder: ['builtin:wiktionary', 'builtin:wikipedia'],
+    providerOrder: [
+      'builtin:mybooks',
+      'builtin:baidu-baike',
+      'builtin:wiktionary',
+      'builtin:wikipedia',
+    ],
     providerEnabled: {
-      'builtin:wiktionary': true,
-      'builtin:wikipedia': true,
+      'builtin:mybooks': isTauriBuild(),
+      'builtin:baidu-baike': isTauriBuild(),
+      'builtin:wiktionary': !isTauriBuild(),
+      'builtin:wikipedia': !isTauriBuild(),
     },
   },
 
@@ -204,7 +227,7 @@ export const DEFAULT_READSETTINGS: ReadSettings = {
   isNotebookPinned: false,
   notebookActiveTab: 'notes',
   autohideCursor: true,
-  translationProvider: 'deepl',
+  translationProvider: 'edge',
   translateTargetLang: 'EN',
   wordLensAutoDownload: true,
 
@@ -384,7 +407,7 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
 
 export const DEFAULT_TRANSLATOR_CONFIG: TranslatorConfig = {
   translationEnabled: false,
-  translationProvider: 'deepl',
+  translationProvider: 'edge',
   translateTargetLang: '',
   showTranslateSource: true,
   ttsReadAloudText: 'both',
@@ -850,7 +873,6 @@ export const AUTO_SCROLL_SPEED_STEP = 25;
 export const SHOW_UNREAD_STATUS_BADGE = false;
 
 export const DEFAULT_STORAGE_QUOTA_BYTES = 500 * 1024 * 1024;
-export const DEFAULT_DAILY_TRANSLATION_QUOTA_CHARS = 10 * 1024;
 
 export const DOUBLE_CLICK_INTERVAL_THRESHOLD_MS = 250;
 export const DISABLE_DOUBLE_CLICK_ON_MOBILE = true;

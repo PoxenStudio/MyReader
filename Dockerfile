@@ -38,7 +38,6 @@ ARG NEXT_PUBLIC_APP_PLATFORM
 ARG NEXT_PUBLIC_API_BASE_URL
 ARG NEXT_PUBLIC_OBJECT_STORAGE_TYPE
 ARG NEXT_PUBLIC_STORAGE_FIXED_QUOTA
-ARG NEXT_PUBLIC_TRANSLATION_FIXED_QUOTA
 COPY --from=dependencies /app/node_modules /app/node_modules
 COPY --from=dependencies /app/app/node_modules /app/app/node_modules
 COPY --from=dependencies /app/app/public/vendor /app/app/public/vendor

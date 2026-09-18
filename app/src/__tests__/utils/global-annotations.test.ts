@@ -4,7 +4,7 @@ import {
   removeGlobalAnnotationOverlays,
 } from '@/app/reader/utils/globalAnnotations';
 import { BookNote } from '@/types/book';
-import { FoliateView } from '@/types/view';
+import { FoliateView, NOTE_PREFIX } from '@/types/view';
 
 /**
  * Regression coverage for issue #4575: highlighting recurring character names
@@ -122,5 +122,62 @@ describe('expandGlobalAnnotation idempotency (issue #4575)', () => {
     const addedB = expandGlobalAnnotation(view, n, docB, 1);
     expect(addedB).toHaveLength(2);
     expect(view.getCfiCalls).toBe(4); // 2 per distinct section
+  });
+});
+
+/**
+ * A global note that carries note text (not just a highlight style) must also
+ * fan out its note-bubble icon to every occurrence — not just the original
+ * anchor. Previously `expandGlobalAnnotation` only ever emitted one overlay
+ * per occurrence, keyed without the `NOTE_PREFIX` marker, so
+ * `decideAnnotationDraw` always resolved it to a highlight/underline and the
+ * bubble (and its click-to-view-note popup) never appeared anywhere but the
+ * spot the note was originally created on.
+ */
+describe('expandGlobalAnnotation note-bubble fan-out', () => {
+  it('emits both a highlight overlay and a NOTE_PREFIX bubble overlay per occurrence when note text is set', () => {
+    const doc = makeDoc('foo', 2);
+    const view = makeView([doc]);
+    const n = note({ id: 'noted', note: 'this is a person name' });
+    const added = expandGlobalAnnotation(view, n, doc, 0);
+
+    expect(added).toHaveLength(4); // 2 occurrences x (highlight + bubble)
+    const bubbleValues = added.filter((v) => v.startsWith(NOTE_PREFIX));
+    const plainValues = added.filter((v) => !v.startsWith(NOTE_PREFIX));
+    expect(bubbleValues).toHaveLength(2);
+    expect(plainValues).toHaveLength(2);
+    // The bubble value must map back to the same occurrence's plain value so
+    // a click on it can resolve the same source CFI.
+    bubbleValues.forEach((bubble) => {
+      expect(plainValues).toContain(bubble.replace(NOTE_PREFIX, ''));
+    });
+  });
+
+  it('emits only the plain overlay per occurrence when the note has no text (pure highlight)', () => {
+    const doc = makeDoc('foo', 2);
+    const view = makeView([doc]);
+    const n = note({ id: 'unnoted', note: '' });
+    const added = expandGlobalAnnotation(view, n, doc, 0);
+
+    expect(added).toHaveLength(2);
+    expect(added.some((v) => v.startsWith(NOTE_PREFIX))).toBe(false);
+  });
+
+  it('removes both the plain and NOTE_PREFIX bubble overlays on teardown', () => {
+    const doc = makeDoc('foo', 2);
+    const view = makeView([doc]);
+    const overlayer = (
+      view.renderer!.getContents!()[0] as unknown as {
+        overlayer: { remove: ReturnType<typeof vi.fn> };
+      }
+    ).overlayer;
+    const n = note({ id: 'noted-removed', note: 'a place name' });
+    expandGlobalAnnotation(view, n, doc, 0);
+
+    removeGlobalAnnotationOverlays(view, n);
+
+    const removedKeys = overlayer.remove.mock.calls.map((call) => call[0] as string);
+    expect(removedKeys.some((k) => k.startsWith(NOTE_PREFIX))).toBe(true);
+    expect(removedKeys.some((k) => !k.startsWith(NOTE_PREFIX))).toBe(true);
   });
 });

@@ -38,8 +38,13 @@ function resolveCoverUrl(book: Book): string | null {
   return book.metadata?.coverImageUrl || book.coverImageUrl || null;
 }
 
-/** True for a cover that needs the async fetch/cache-api path below. */
-function isRemoteCoverUrl(coverUrl: string): boolean {
+/**
+ * True for a cover that needs the async fetch/cache-api path below.
+ * Exported for other bare-`<img>` cover renderers (e.g. the audiobook
+ * player, via `useResolvedCoverUrl`) that share the same MyBooks cover URL
+ * shape but aren't a `Book`-shaped grid cell.
+ */
+export function isRemoteCoverUrl(coverUrl: string): boolean {
   return isTauriAppPlatform() && isRemoteImageUrl(coverUrl);
 }
 
@@ -49,7 +54,7 @@ function isRemoteCoverUrl(coverUrl: string): boolean {
  * `getOrCreateCoverObjectUrl` so concurrent/repeat mounts for the same cover
  * share one object URL instead of re-decoding the image each time.
  */
-async function fetchRemoteCoverObjectUrl(
+export async function fetchRemoteCoverObjectUrl(
   coverUrl: string,
   title: string,
   hash: string,

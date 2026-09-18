@@ -239,6 +239,8 @@ export class MyBooksApiError extends Error {
  * 通用请求方法
  */
 const MYBOOKS_REQUEST_TIMEOUT_MS = 5000;
+const MYBOOKS_REQUEST_MAX_RETRIES = 3;
+const MYBOOKS_RETRY_DELAY_MS = 300;
 
 export async function fetchMyBooks<T>(
   endpoint: string,
@@ -333,48 +335,57 @@ export async function fetchMyBooks<T>(
     }
   }
 
-  const controller = new AbortController();
-  fetchOptions.signal = controller.signal;
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
   let result: MyBooksResponse<T>;
-  try {
-    const response = await fetchFn(url.toString(), fetchOptions);
-    // Opportunistically keep `mybooks_tauri_cookie` (the store the native
-    // downloader and WS sync channel read explicitly — see
-    // tauriCookieStore.ts) in sync with whatever session is actually live,
-    // not just at login/access-code time. Without this, a `mybooks_tauri_cookie`
-    // that was wiped independently of the real session (e.g. app data
-    // cleared — that clears localStorage but not plugin-http's own cookie
-    // jar or the server-side session) stays empty forever: every *other*
-    // Tauri call keeps working fine via plugin-http's automatic jar, so
-    // nothing ever prompts a fresh login to repopulate it, and the native
-    // downloader silently sends no cookie at all until it does.
-    if (host && isTauriAppPlatform()) {
-      try {
-        const cookie = extractCookieHeaderFromResponse(response as unknown as Response);
-        if (cookie) mergeTauriMyBooksCookie(cookie);
-      } catch (e) {
-        console.error('[fetchMyBooks] Failed to refresh the Tauri cookie store:', e);
+  let attempt = 0;
+  for (;;) {
+    const controller = new AbortController();
+    fetchOptions.signal = controller.signal;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetchFn(url.toString(), fetchOptions);
+      // Opportunistically keep `mybooks_tauri_cookie` (the store the native
+      // downloader and WS sync channel read explicitly — see
+      // tauriCookieStore.ts) in sync with whatever session is actually live,
+      // not just at login/access-code time. Without this, a `mybooks_tauri_cookie`
+      // that was wiped independently of the real session (e.g. app data
+      // cleared — that clears localStorage but not plugin-http's own cookie
+      // jar or the server-side session) stays empty forever: every *other*
+      // Tauri call keeps working fine via plugin-http's automatic jar, so
+      // nothing ever prompts a fresh login to repopulate it, and the native
+      // downloader silently sends no cookie at all until it does.
+      if (host && isTauriAppPlatform()) {
+        try {
+          const cookie = extractCookieHeaderFromResponse(response as unknown as Response);
+          if (cookie) mergeTauriMyBooksCookie(cookie);
+        } catch (e) {
+          console.error('[fetchMyBooks] Failed to refresh the Tauri cookie store:', e);
+        }
       }
+      result = await response.json();
+      break;
+    } catch (error) {
+      attempt++;
+      if (attempt <= MYBOOKS_REQUEST_MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, MYBOOKS_RETRY_DELAY_MS * attempt));
+        continue;
+      }
+      // Couldn't reach the configured MyBooks host at all (network down, server
+      // unreachable, timed out, etc.) — surface this as "offline" rather than an error.
+      // Logged here (not just left to bubble up) because WebKit's Error
+      // objects carry only enumerable `line`/`column` own properties — a
+      // caller that logs the caught error object directly (e.g. via a
+      // template literal) gets a useless `{"line":0,"column":0}` with no
+      // `message` at all, so the real reason never makes it into the log.
+      console.error(
+        `[fetchMyBooks] Request to ${url.toString()} failed:`,
+        error instanceof Error ? error.message : error,
+      );
+      if (host) useMyBooksStatusStore.getState().setOffline(true);
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    result = await response.json();
-  } catch (error) {
-    // Couldn't reach the configured MyBooks host at all (network down, server
-    // unreachable, timed out, etc.) — surface this as "offline" rather than an error.
-    // Logged here (not just left to bubble up) because WebKit's Error
-    // objects carry only enumerable `line`/`column` own properties — a
-    // caller that logs the caught error object directly (e.g. via a
-    // template literal) gets a useless `{"line":0,"column":0}` with no
-    // `message` at all, so the real reason never makes it into the log.
-    console.error(
-      `[fetchMyBooks] Request to ${url.toString()} failed:`,
-      error instanceof Error ? error.message : error,
-    );
-    if (host) useMyBooksStatusStore.getState().setOffline(true);
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
   }
   if (host) useMyBooksStatusStore.getState().setOffline(false);
 

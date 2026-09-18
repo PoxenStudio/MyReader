@@ -13,6 +13,12 @@ import { BookConfig, BookNote } from '@/types/book';
 import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
+import {
+  ActiveReadingTracker,
+  KEEPALIVE_PUSH_MS,
+  PERSIST_INTERVAL_MS,
+  TICK_INTERVAL_MS,
+} from '@/services/mybooks/activeReadingTracker';
 import { useWindowActiveChanged } from './useWindowActiveChanged';
 import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvents';
 
@@ -51,6 +57,39 @@ export const useNativeSync = (bookKey: string) => {
   const lastPulledAtRef = useRef(0);
   const hasPulledOnce = useRef(false);
   const initialPullDoneRef = useRef(false);
+
+  // 本地"活跃阅读"计时器（见 activeReadingTracker.ts）：覆盖心跳到达间隔完全看不到
+  // 的场景，典型是离线阅读。惰性初始化（首次拿到本地持久化的 config 时才创建，用它
+  // 里面上次未上报成功的 pendingReadingSeconds 续上，而不是每次重新挂载都清零）。
+  const trackerRef = useRef<ActiveReadingTracker | null>(null);
+  const isWindowActiveRef = useRef(true);
+  const lastPersistedPendingRef = useRef<string>('');
+  const lastPushAttemptAtRef = useRef(0);
+
+  const ensureTracker = useCallback((): ActiveReadingTracker => {
+    if (!trackerRef.current) {
+      const initialPending = getConfig(bookKey)?.pendingReadingSeconds ?? {};
+      trackerRef.current = new ActiveReadingTracker(initialPending);
+      lastPersistedPendingRef.current = JSON.stringify(initialPending);
+    }
+    return trackerRef.current;
+  }, [bookKey, getConfig]);
+
+  // 只落本地（不联网），供 tick/persist 节拍和窗口失焦时调用。跳过一次没有实际变化
+  // 的写入，避免 30s 节拍在阅读完全静止时仍然反复触发 IPC。
+  const persistPendingSeconds = useCallback(async () => {
+    const tracker = trackerRef.current;
+    if (!tracker) return;
+    const pending = tracker.getPending();
+    const serialized = JSON.stringify(pending);
+    if (serialized === lastPersistedPendingRef.current) return;
+    lastPersistedPendingRef.current = serialized;
+    const config = getConfig(bookKey);
+    if (!config) return;
+    setConfig(bookKey, { pendingReadingSeconds: pending });
+    const latest = getConfig(bookKey);
+    if (latest) await saveConfig(envConfig, bookKey, latest, settings);
+  }, [bookKey, getConfig, setConfig, saveConfig, envConfig, settings]);
   // Diagnostic only (see syncLogger.ts): timestamps how long a change has
   // sat "dirty" and how many times the push debounce got reset before it
   // actually fired — used to confirm/rule out debounce starvation (the
@@ -79,11 +118,18 @@ export const useNativeSync = (bookKey: string) => {
     if (!config || !book) return;
 
     const now = Date.now();
+    lastPushAttemptAtRef.current = now;
     syncLog(bookKey, 'push:start', {
       location: config.location,
       progress: config.progress,
       localUpdatedAt: config.updatedAt ?? 0,
     });
+    // 离线阅读显式上报：随这次 push 顺路带走本地计时器攒的秒数（见
+    // activeReadingTracker.ts），不依赖 configs 是否真的有变化——用户可能全程停在
+    // 同一页，但确实读了这么久。只有 push 成功才清掉已发出去的那部分（见下方）。
+    const tracker = ensureTracker();
+    const sentReadingSeconds = tracker.getPending();
+    const readingSecondsPayload = tracker.toReadingSecondsPayload(book.hash);
     try {
       const currentUserId = useMyBooksStatusStore.getState().currentUserId;
       // Never push back a note that belongs to someone else — it can only be
@@ -113,11 +159,15 @@ export const useNativeSync = (bookKey: string) => {
           deleted_at: note.deletedAt ?? null,
           ...note,
         })),
+        ...(readingSecondsPayload.length > 0 && { reading_seconds: readingSecondsPayload }),
       });
       dirtyRef.current = false;
       pendingSinceRef.current = 0;
       debounceResetCountRef.current = 0;
       syncLog(bookKey, 'push:done', { elapsedMs: Date.now() - now });
+      if (readingSecondsPayload.length > 0) {
+        tracker.clearSent(sentReadingSeconds);
+      }
 
       const latest = getConfig(bookKey);
       if (latest) {
@@ -125,7 +175,9 @@ export const useNativeSync = (bookKey: string) => {
           ...latest,
           lastSyncedAtConfig: now,
           lastSyncedAtNotes: now,
+          pendingReadingSeconds: tracker.getPending(),
         };
+        lastPersistedPendingRef.current = JSON.stringify(synced.pendingReadingSeconds);
         setConfig(bookKey, synced);
         await saveConfig(envConfig, bookKey, synced, settings);
       }
@@ -141,7 +193,18 @@ export const useNativeSync = (bookKey: string) => {
         console.warn('Native sync push failed', e);
       }
     }
-  }, [isReady, bookKey, getConfig, getBookData, setConfig, saveConfig, envConfig, settings, _]);
+  }, [
+    isReady,
+    bookKey,
+    getConfig,
+    getBookData,
+    setConfig,
+    saveConfig,
+    envConfig,
+    settings,
+    _,
+    ensureTracker,
+  ]);
 
   const pullNow = useCallback(async (): Promise<boolean> => {
     if (!isReady) return false;
@@ -377,8 +440,9 @@ export const useNativeSync = (bookKey: string) => {
     if (!isReady) return;
     if (!progress?.location) return;
     syncLog(bookKey, 'push:progress-changed', { location: progress.location });
+    ensureTracker().noteInteraction();
     markDirtyAndSchedule();
-  }, [isReady, progress?.location, markDirtyAndSchedule]);
+  }, [isReady, progress?.location, markDirtyAndSchedule, ensureTracker]);
 
   const config = getConfig(bookKey);
   const booknoteFingerprint = useMemo(() => {
@@ -390,8 +454,38 @@ export const useNativeSync = (bookKey: string) => {
   useEffect(() => {
     if (!isReady) return;
     if (Date.now() - lastPulledAtRef.current < 1_000) return;
+    ensureTracker().noteInteraction();
     markDirtyAndSchedule();
-  }, [isReady, booknoteFingerprint, markDirtyAndSchedule]);
+  }, [isReady, booknoteFingerprint, markDirtyAndSchedule, ensureTracker]);
+
+  // 本地"活跃阅读"计时器：tick 判定"是否算在阅读"（前台可见 + 最近有交互，口径与
+  // 服务端 60s 心跳窗口一致，见 activeReadingTracker.ts），持久化防崩溃丢数据，
+  // keep-alive 兜底"长时间不翻页也不会让攒的秒数迟迟发不出去"。三个节拍各自独立，
+  // 互不依赖——tick 最频繁且纯内存，persist/keep-alive 更粗。
+  useEffect(() => {
+    if (!isReady) return;
+    const tracker = ensureTracker();
+
+    const tickId = setInterval(() => {
+      tracker.tick(isWindowActiveRef.current);
+    }, TICK_INTERVAL_MS);
+
+    const persistId = setInterval(() => {
+      void persistPendingSeconds();
+    }, PERSIST_INTERVAL_MS);
+
+    const keepAliveId = setInterval(() => {
+      if (tracker.isEmpty()) return;
+      if (Date.now() - lastPushAttemptAtRef.current < KEEPALIVE_PUSH_MS) return;
+      void syncRefs.current.pushNow();
+    }, KEEPALIVE_PUSH_MS);
+
+    return () => {
+      clearInterval(tickId);
+      clearInterval(persistId);
+      clearInterval(keepAliveId);
+    };
+  }, [isReady, ensureTracker, persistPendingSeconds]);
 
   // WS acceleration: an immediate pull when the WS channel reports this
   // book's config/notes changed elsewhere, instead of waiting for the next
@@ -411,20 +505,37 @@ export const useNativeSync = (bookKey: string) => {
   }, [isReady, bookKey]);
 
   useWindowActiveChanged((isActive) => {
+    // Tick right at the transition (not just on the next 10s interval poll)
+    // so lastTickAt gets reset exactly when the window actually went
+    // inactive/active — otherwise the next interval tick would measure
+    // elapsed time all the way back past however long the window was
+    // backgrounded, and wrongly credit that whole gap as reading.
+    trackerRef.current?.tick(isActive);
+    isWindowActiveRef.current = isActive;
     if (!isReady) return;
     if (isActive) {
       if (Date.now() - lastPulledAtRef.current < PULL_COOLDOWN_MS) return;
       void syncRefs.current.pullNow();
-    } else if (dirtyRef.current) {
-      debouncedPush.flush();
+    } else {
+      if (dirtyRef.current) debouncedPush.flush();
+      // 后台/失焦时立即落一次本地盘（不等 30s 节拍），并且如果攒了还没上报的秒数，
+      // 顺路推一次——不依赖 dirtyRef（用户可能全程停在同一页）。
+      void persistPendingSeconds();
+      if (trackerRef.current && !trackerRef.current.isEmpty()) {
+        void syncRefs.current.pushNow();
+      }
     }
   });
 
   useEffect(() => {
     return () => {
       debouncedPush.flush();
+      void persistPendingSeconds();
+      if (trackerRef.current && !trackerRef.current.isEmpty()) {
+        void syncRefs.current.pushNow();
+      }
     };
-  }, [debouncedPush]);
+  }, [debouncedPush, persistPendingSeconds]);
 
   return { pushNow, pullNow };
 };

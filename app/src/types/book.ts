@@ -526,6 +526,11 @@ export interface BookConfig {
   lastPushedAtNotes?: number;
   foliateImportedAt?: number;
 
+  // 本地"活跃阅读"计时器尚未成功上报给 mybooks 的秒数，UTC 日期（"YYYY-MM-DD"）
+  // -> 秒数，见 activeReadingTracker.ts。持久化到这里是为了在 App 崩溃/重启后不丢失
+  // 离线阅读期间攒下的时长——只有上报成功后才会从这里清掉对应的量。
+  pendingReadingSeconds?: Record<string, number>;
+
   updatedAt: number;
 }
 

@@ -482,6 +482,18 @@ const FORCE_SAME_WINDOW_LINKS_SCRIPT: &str = r#"(function () {
   }, true);
 })();"#;
 
+/// WebView2/Chromium's GPU compositor can fail to create a *second*
+/// GPU-accelerated `CoreWebView2Controller` in the same environment —
+/// deterministically on some machines
+#[cfg(target_os = "windows")]
+const NAS_WEBVIEW_BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu";
+
+#[cfg(target_os = "windows")]
+fn nas_webview_data_directory(app_local_data_dir: &std::path::Path) -> std::path::PathBuf {
+    app_local_data_dir.join("webview2-nas")
+}
+
 /// Create the NAS remote-login popup window (see
 /// `GetWebviewCookiesRequest`/`get_webview_cookies` for how the frontend
 /// later reads its cookies). A dedicated command rather than the frontend's
@@ -573,6 +585,15 @@ pub(crate) async fn create_nas_login_window<R: Runtime>(
     if let Some(user_agent) = &payload.user_agent {
         builder = builder.user_agent(user_agent);
     }
+    // See `NAS_WEBVIEW_BROWSER_ARGS` — isolated to its own data directory so
+    // this never touches the main window's webview environment.
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(app_local_data_dir) = app.path().app_local_data_dir() {
+            builder = builder.data_directory(nas_webview_data_directory(&app_local_data_dir));
+        }
+        builder = builder.additional_browser_args(NAS_WEBVIEW_BROWSER_ARGS);
+    }
     builder
         .build()
         .map_err(|e| crate::Error::NativeBridgeError(e.to_string()))?;
@@ -610,5 +631,19 @@ pub(crate) async fn detach_nas_close_button<R: Runtime>(app: AppHandle<R>) -> Re
     {
         let _ = app;
         Ok(())
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::nas_webview_data_directory;
+    use std::path::Path;
+
+    #[test]
+    fn nests_under_the_given_app_data_dir() {
+        assert_eq!(
+            nas_webview_data_directory(Path::new("/x/y")),
+            Path::new("/x/y/webview2-nas"),
+        );
     }
 }

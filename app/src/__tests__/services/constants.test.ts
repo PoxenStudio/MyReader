@@ -75,7 +75,6 @@ import {
   ZOOM_STEP,
   SHOW_UNREAD_STATUS_BADGE,
   DEFAULT_STORAGE_QUOTA_BYTES,
-  DEFAULT_DAILY_TRANSLATION_QUOTA_CHARS,
   DOUBLE_CLICK_INTERVAL_THRESHOLD_MS,
   DISABLE_DOUBLE_CLICK_ON_MOBILE,
   LONG_HOLD_THRESHOLD,
@@ -943,11 +942,6 @@ describe('services/constants', () => {
     it('DEFAULT_STORAGE_QUOTA_BYTES is a positive number', () => {
       expect(typeof DEFAULT_STORAGE_QUOTA_BYTES).toBe('number');
       expect(DEFAULT_STORAGE_QUOTA_BYTES).toBeGreaterThan(0);
-    });
-
-    it('DEFAULT_DAILY_TRANSLATION_QUOTA_CHARS is a positive number', () => {
-      expect(typeof DEFAULT_DAILY_TRANSLATION_QUOTA_CHARS).toBe('number');
-      expect(DEFAULT_DAILY_TRANSLATION_QUOTA_CHARS).toBeGreaterThan(0);
     });
   });
 
