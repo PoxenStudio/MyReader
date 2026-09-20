@@ -110,13 +110,17 @@ beforeEach(() => {
   localStorage.clear();
   // Book uploads are gated on the selected cloud sync provider and
   // deferred until settings hydrate; hydrate with Readest Cloud selected
-  // so the pre-gating behavior under test is preserved.
+  // so the pre-gating behavior under test is preserved. Only the fields that
+  // gate reads are stated: `googleDrive` used to be listed here as well, but it
+  // is not part of SystemSettings and nothing reads it, and it was what forced
+  // the assertion through `unknown`. Without it the cast is a plain
+  // `as SystemSettings`, so `version` or `webdav` drifting still fails the
+  // build instead of being silently accepted.
   useSettingsStore.setState({
     settings: {
       version: 1,
       webdav: { enabled: false },
-      googleDrive: { enabled: false },
-    } as unknown as SystemSettings,
+    } as SystemSettings,
   });
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
