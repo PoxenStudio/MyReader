@@ -53,8 +53,17 @@ export class StatisticsDb {
     bindLifecycle();
     if (!sharedDb) {
       sharedDb = (async () => {
-        const db = await appService.openDatabase('statistics', 'statistics.db', 'Data');
-        return new StatisticsDb(db);
+        try {
+          const db = await appService.openDatabase('statistics', 'statistics.db', 'Data');
+          return new StatisticsDb(db);
+        } catch (err) {
+          // A transient open failure (e.g. "database ... not loaded",
+          // READEST-6) must not be cached forever — clear the slot so the
+          // next open() retries instead of every caller staying broken for
+          // the rest of the tab's lifetime.
+          sharedDb = null;
+          throw err;
+        }
       })();
     }
     return sharedDb;

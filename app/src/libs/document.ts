@@ -144,6 +144,61 @@ export interface DocumentLoaderOptions {
   nativeFilePath?: string;
 }
 
+async function hasZipEOCD(file: File): Promise<boolean> {
+  // EOCD record is at least 22 bytes (sig + 16 + comment length); the
+  // trailing comment can be up to 64 KiB, so search the last 64 KiB + 22.
+  const maxEOCDSearch = 1024 * 64 + 22;
+  const sliceSize = Math.min(maxEOCDSearch, file.size);
+  if (sliceSize < 22) return false;
+  const tail = await file.slice(file.size - sliceSize, file.size).arrayBuffer();
+  const bytes = new Uint8Array(tail);
+  for (let i = bytes.length - 22; i >= 0; i--) {
+    if (
+      bytes[i] === 0x50 &&
+      bytes[i + 1] === 0x4b &&
+      bytes[i + 2] === 0x05 &&
+      bytes[i + 3] === 0x06
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function isZipSignature(file: File): Promise<boolean> {
+  const arr = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+  // Standard local file header signature is PK\x03\x04, but some non-conformant
+  // EPUB writers emit malformed bytes (e.g., PK\x03\x02) on the first entry.
+  // The archive is still readable via the central directory, so don't gate on
+  // the 4th byte. PK\x03 alone is enough to identify a local file header.
+  if (arr[0] === 0x50 && arr[1] === 0x4b && arr[2] === 0x03) {
+    return true;
+  }
+  // Some files have their first few bytes corrupted (e.g. Baidu Netdisk
+  // mangles the leading PK\x03\x04 into garbage on certain epubs).
+  return await hasZipEOCD(file);
+}
+
+async function isPdfSignature(file: File): Promise<boolean> {
+  const arr = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+  return (
+    arr[0] === 0x25 && arr[1] === 0x50 && arr[2] === 0x44 && arr[3] === 0x46 && arr[4] === 0x2d
+  );
+}
+
+// Determines the real book format from content bytes alone, ignoring
+// filename/extension and any server- or caller-reported format. Used to
+// guard the blind TXT->EPUB conversion (utils/txt.ts) against files that
+// are already a binary ebook format but carry a misleading .txt name or
+// declared format (e.g. a cloud source that mislabels an EPUB as TXT).
+export async function sniffBinaryBookFormat(file: File): Promise<BookFormat | null> {
+  if (await isZipSignature(file)) return 'EPUB';
+  if (await isPdfSignature(file)) return 'PDF';
+  const { isMOBI } = await import('foliate-js/mobi.js');
+  if (await isMOBI(file)) return 'MOBI';
+  return null;
+}
+
 export class DocumentLoader {
   private file: File;
   private nativeFilePath?: string;
@@ -154,51 +209,11 @@ export class DocumentLoader {
   }
 
   private async isZip(): Promise<boolean> {
-    const arr = new Uint8Array(await this.file.slice(0, 4).arrayBuffer());
-    // Standard local file header signature is PK\x03\x04, but some non-conformant
-    // EPUB writers emit malformed bytes (e.g., PK\x03\x02) on the first entry.
-    // The archive is still readable via the central directory, so don't gate on
-    // the 4th byte. PK\x03 alone is enough to identify a local file header.
-    if (arr[0] === 0x50 && arr[1] === 0x4b && arr[2] === 0x03) {
-      return true;
-    }
-    // Some files have their first few bytes corrupted (e.g. Baidu Netdisk
-    // mangles the leading PK\x03\x04 into garbage on certain epubs). The zip
-    // format is officially located by walking the End-of-Central-Directory
-    // record at the *tail* of the file -- everything before it is allowed to
-    // be arbitrary data (self-extracting executables rely on this). So when
-    // the magic bytes look wrong, fall back to searching for the EOCD
-    // signature (PK\x05\x06) in the last 64 KiB of the file. If found, the
-    // file is still a usable zip and we should let zip.js try to read it.
-    return await this.hasEOCD();
-  }
-
-  private async hasEOCD(): Promise<boolean> {
-    // EOCD record is at least 22 bytes (sig + 16 + comment length); the
-    // trailing comment can be up to 64 KiB, so search the last 64 KiB + 22.
-    const maxEOCDSearch = 1024 * 64 + 22;
-    const sliceSize = Math.min(maxEOCDSearch, this.file.size);
-    if (sliceSize < 22) return false;
-    const tail = await this.file.slice(this.file.size - sliceSize, this.file.size).arrayBuffer();
-    const bytes = new Uint8Array(tail);
-    for (let i = bytes.length - 22; i >= 0; i--) {
-      if (
-        bytes[i] === 0x50 &&
-        bytes[i + 1] === 0x4b &&
-        bytes[i + 2] === 0x05 &&
-        bytes[i + 3] === 0x06
-      ) {
-        return true;
-      }
-    }
-    return false;
+    return isZipSignature(this.file);
   }
 
   private async isPDF(): Promise<boolean> {
-    const arr = new Uint8Array(await this.file.slice(0, 5).arrayBuffer());
-    return (
-      arr[0] === 0x25 && arr[1] === 0x50 && arr[2] === 0x44 && arr[3] === 0x46 && arr[4] === 0x2d
-    );
+    return isPdfSignature(this.file);
   }
 
   private async makeZipLoader(prefetch?: {
@@ -369,23 +384,11 @@ export class DocumentLoader {
       throw new Error('File is empty');
     }
     try {
-      // A raw .txt has no binary book format, so the checks below all miss and
-      // `book` stays null. Convert it to EPUB in-memory first (the same
-      // conversion the import path runs) and parse that. The managed library
-      // stores the already-converted EPUB, but the Android "Open with" transient
-      // path points the book at the original .txt, so it reaches us unconverted.
-      // Markdown is rendered to HTML at runtime (no EPUB conversion). Check
-      // this BEFORE isTxt() — a .md served as text/plain would otherwise be
-      // grabbed by the TXT->EPUB path above.
-      if (this.isMd()) {
-        const { makeMarkdownBook } = await import('@/utils/md');
-        return { book: await makeMarkdownBook(this.file), format: 'MD' };
-      }
-      if (this.isTxt()) {
-        const { TxtToEpubConverter } = await import('@/utils/txt');
-        const { file: epubFile } = await new TxtToEpubConverter().convert({ file: this.file });
-        return await new DocumentLoader(epubFile).open();
-      }
+      // Magic-byte checks (zip/PDF/MOBI below) run BEFORE the extension-based
+      // md/txt checks so a file that is actually a binary ebook but carries a
+      // misleading .txt/.md name (e.g. a cloud source that mislabels an EPUB
+      // as TXT, or a renamed file) is still parsed as what it really is,
+      // instead of being fed through the TXT->EPUB converter as garbage text.
       if (await this.isZip()) {
         // EPUB-only fast path: ask Rust to pre-read OPF/nav/ncx + sizes.
         // CBZ/FBZ skip this -- they have no OPF and Rust has no parser
@@ -441,6 +444,22 @@ export class DocumentLoader {
         const { makeFB2 } = await import('foliate-js/fb2.js');
         book = await makeFB2(this.file);
         format = 'FB2';
+      } else if (this.isMd()) {
+        // Markdown is rendered to HTML at runtime (no EPUB conversion). Check
+        // this BEFORE isTxt() — a .md served as text/plain would otherwise be
+        // grabbed by the TXT->EPUB path below.
+        const { makeMarkdownBook } = await import('@/utils/md');
+        return { book: await makeMarkdownBook(this.file), format: 'MD' };
+      } else if (this.isTxt()) {
+        // A raw .txt has no binary book format, so every check above misses
+        // and `book` stays null. Convert it to EPUB in-memory first (the same
+        // conversion the import path runs) and parse that. The managed
+        // library stores the already-converted EPUB, but the Android "Open
+        // with" transient path points the book at the original .txt, so it
+        // reaches us unconverted.
+        const { TxtToEpubConverter } = await import('@/utils/txt');
+        const { file: epubFile } = await new TxtToEpubConverter().convert({ file: this.file });
+        return await new DocumentLoader(epubFile).open();
       }
     } catch (e: unknown) {
       console.error('Failed to open document:', e);

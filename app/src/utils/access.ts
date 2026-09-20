@@ -1,8 +1,5 @@
 import { supabase } from '@/utils/supabase';
-import {
-  DEFAULT_DAILY_TRANSLATION_QUOTA_CHARS,
-  DEFAULT_STORAGE_QUOTA_BYTES,
-} from '@/services/constants';
+import { DEFAULT_STORAGE_QUOTA_BYTES } from '@/services/constants';
 import { isWebAppPlatform } from '@/services/environment';
 import { getRuntimeConfig } from '@/services/runtimeConfig';
 
@@ -20,17 +17,6 @@ export const getStoragePlanData = () => {
     usage,
     quota,
   };
-};
-
-export const getTranslationQuota = (): number => {
-  const runtimeConfig = getRuntimeConfig();
-  const fixedQuota =
-    runtimeConfig?.translationFixedQuota ?? parseInt(process.env['TRANSLATION_FIXED_QUOTA'] ?? '0');
-  return fixedQuota || DEFAULT_DAILY_TRANSLATION_QUOTA_CHARS;
-};
-
-export const getDailyTranslationPlanData = () => {
-  return { quota: getTranslationQuota() };
 };
 
 export const getAccessToken = async (): Promise<string | null> => {

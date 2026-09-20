@@ -227,7 +227,7 @@ export const DEFAULT_READSETTINGS: ReadSettings = {
   isNotebookPinned: false,
   notebookActiveTab: 'notes',
   autohideCursor: true,
-  translationProvider: 'deepl',
+  translationProvider: 'edge',
   translateTargetLang: 'EN',
   wordLensAutoDownload: true,
 
@@ -407,7 +407,7 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
 
 export const DEFAULT_TRANSLATOR_CONFIG: TranslatorConfig = {
   translationEnabled: false,
-  translationProvider: 'deepl',
+  translationProvider: 'edge',
   translateTargetLang: '',
   showTranslateSource: true,
   ttsReadAloudText: 'both',
@@ -873,7 +873,6 @@ export const AUTO_SCROLL_SPEED_STEP = 25;
 export const SHOW_UNREAD_STATUS_BADGE = false;
 
 export const DEFAULT_STORAGE_QUOTA_BYTES = 500 * 1024 * 1024;
-export const DEFAULT_DAILY_TRANSLATION_QUOTA_CHARS = 10 * 1024;
 
 export const DOUBLE_CLICK_INTERVAL_THRESHOLD_MS = 250;
 export const DISABLE_DOUBLE_CLICK_ON_MOBILE = true;

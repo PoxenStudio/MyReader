@@ -33,6 +33,11 @@ import BookItem from './BookItem';
 import GroupItem from './GroupItem';
 import { useAuth } from '@/context/AuthContext';
 import { useOpenBook } from '../hooks/useOpenBook';
+import { audiobookSessionManager } from '@/services/audiobook/audiobookSessionManager';
+import { useAudiobookUIStore } from '@/store/audiobookUIStore';
+import { audiobookDir, deleteLocalAudiobook } from '@/services/audiobook/audiobookDownloader';
+import { getAudioBookDetail } from '@/services/audiobook/audiobookService';
+import { transferManager } from '@/services/transferManager';
 
 export const generateBookshelfItems = (
   books: Book[],
@@ -118,6 +123,7 @@ interface BookshelfItemProps {
   showCloudIcon?: boolean;
   showAllFormatsBadge?: boolean;
   isCloudLibrary?: boolean;
+  isAudiobookShelf?: boolean;
   showTimeRemaining: boolean;
 }
 
@@ -140,6 +146,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
   showCloudIcon = false,
   showAllFormatsBadge = false,
   isCloudLibrary = false,
+  isAudiobookShelf = false,
   showTimeRemaining,
 }) => {
   const _ = useTranslation();
@@ -162,9 +169,31 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
         toggleSelection(book.hash);
         return;
       }
+      if (isAudiobookShelf) {
+        const bookId = getMyBooksId(book);
+        if (!bookId) {
+          console.error('[Audiobook] missing bookId for', book.hash);
+          return;
+        }
+        try {
+          await audiobookSessionManager.openBook(bookId, {
+            title: book.title,
+            author: book.author,
+            coverImageUrl: book.coverImageUrl ?? null,
+          });
+          useAudiobookUIStore.getState().openSheet();
+        } catch (error) {
+          console.error('[Audiobook] failed to open', bookId, error);
+          eventDispatcher.dispatch('toast', {
+            type: 'error',
+            message: _('Failed to open audiobook'),
+          });
+        }
+        return;
+      }
       await openBook(book);
     },
-    [isSelectMode, openBook, toggleSelection],
+    [isSelectMode, openBook, toggleSelection, isAudiobookShelf],
   );
 
   const handleReadInFormat = useCallback(
@@ -296,6 +325,31 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
         eventDispatcher.dispatch('show-send-to-device-dialog', { book });
       },
     });
+    // Audiobooks have no "send to device"/ebook-download action; offer
+    // caching all tracks locally, or clearing that cache, instead (§6.2/§5.11).
+    const audiobookId = isAudiobookShelf && appService ? getMyBooksId(book) : 0;
+    const hasLocalAudiobook = audiobookId
+      ? await appService!.exists(audiobookDir(audiobookId), 'Books')
+      : false;
+    const downloadAudiobookMenuItem =
+      audiobookId && !hasLocalAudiobook
+        ? await MenuItem.new({
+            text: _('Download Audiobook'),
+            action: async () => {
+              const detail = await getAudioBookDetail(audiobookId);
+              transferManager.queueAudiobookTracks(audiobookId, detail.audios);
+            },
+          })
+        : null;
+    const deleteLocalAudiobookMenuItem =
+      audiobookId && hasLocalAudiobook
+        ? await MenuItem.new({
+            text: _('Delete Local Download'),
+            action: async () => {
+              await deleteLocalAudiobook(appService!, audiobookId);
+            },
+          })
+        : null;
     const deleteBookMenuItem = await MenuItem.new({
       text: _('Delete'),
       action: async () => {
@@ -363,7 +417,10 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
     if (!isCloudLibrary) {
       menu.append(showBookInFinderMenuItem);
     }
-    if (book.storageType === 'cloud' && !book.downloadedAt) {
+    if (isAudiobookShelf) {
+      if (downloadAudiobookMenuItem) menu.append(downloadAudiobookMenuItem);
+      if (deleteLocalAudiobookMenuItem) menu.append(deleteLocalAudiobookMenuItem);
+    } else if (book.storageType === 'cloud' && !book.downloadedAt) {
       if (downloadInFormatMenuItem) {
         menu.append(downloadInFormatMenuItem);
       } else {
@@ -374,8 +431,9 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
       menu.append(uploadBookMenuItem);
     }
     // Offered for cloud-bookshelf books and local books downloaded from
-    // MyBooks (both carry a resolvable MyBooks book id).
-    if (getMyBooksId(book)) {
+    // MyBooks (both carry a resolvable MyBooks book id); not for audiobooks
+    // (§6.2 — "send to device" doesn't apply to a pure audio entry).
+    if (!isAudiobookShelf && getMyBooksId(book)) {
       menu.append(sendToDeviceMenuItem);
     }
     if (!isCloudLibrary || (isAdmin && settings.allowDelCloudBook)) {
@@ -596,6 +654,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
               showBookDetailsModal={showBookDetailsModal}
               showCloudIcon={showCloudIcon}
               showAllFormatsBadge={showAllFormatsBadge}
+              isAudiobookShelf={isAudiobookShelf}
               showTimeRemaining={showTimeRemaining}
             />
           ) : (

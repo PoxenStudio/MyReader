@@ -62,4 +62,22 @@ describe('DocumentLoader EPUB zip lookup', () => {
     const doc = await book.sections[0]!.createDocument();
     expect(doc.body.textContent).toContain('Hello from the lowercase chapter entry.');
   });
+
+  it('opens real EPUB (zip) bytes as EPUB even when the file carries a misleading .txt name', async () => {
+    // Regression test: a cloud download (or a renamed file) can end up with a
+    // .txt extension while its content is actually a real EPUB zip archive.
+    // DocumentLoader must sniff the magic bytes and parse it as EPUB rather
+    // than matching the .txt extension and feeding real zip bytes through the
+    // TXT->EPUB converter's text-encoding heuristics, which would corrupt it.
+    const epubFile = await createCaseMismatchEpub();
+    const arrayBuffer = await epubFile.arrayBuffer();
+    const misnamedFile = new File([arrayBuffer], 'book.txt', { type: 'text/plain' });
+    const loader = new DocumentLoader(misnamedFile);
+
+    const { book, format } = await loader.open();
+    expect(format).toBe('EPUB');
+
+    const doc = await book.sections[0]!.createDocument();
+    expect(doc.body.textContent).toContain('Hello from the lowercase chapter entry.');
+  });
 });

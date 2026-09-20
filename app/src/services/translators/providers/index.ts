@@ -1,8 +1,5 @@
 import { TranslationProvider } from '../types';
-import { deeplProvider } from './deepl';
-import { azureProvider } from './azure';
-import { googleProvider } from './google';
-import { yandexProvider } from './yandex';
+import { edgeProvider } from './edge';
 
 function createTranslator<T extends string>(
   name: T,
@@ -16,16 +13,10 @@ function createTranslator<T extends string>(
   return implementation as TranslationProvider & { name: T };
 }
 
-const deeplTranslator = createTranslator('deepl', deeplProvider);
-const azureTranslator = createTranslator('azure', azureProvider);
-const googleTranslator = createTranslator('google', googleProvider);
-const yandexTranslator = createTranslator('yandex', yandexProvider);
+const edgeTranslator = createTranslator('edge', edgeProvider);
 
 const availableTranslators = [
-  deeplTranslator,
-  azureTranslator,
-  googleTranslator,
-  yandexTranslator,
+  edgeTranslator,
   // Add more translators here
 ];
 
@@ -52,7 +43,6 @@ export const isTranslatorAvailable = (
   hasToken: boolean,
 ): boolean => {
   if (translator.disabled) return false;
-  if (translator.quotaExceeded) return false;
   if (translator.authRequired && !hasToken) return false;
   return true;
 };
@@ -74,9 +64,6 @@ export const getTranslatorDisplayLabel = (
   }
   if (translator.authRequired && !hasToken) {
     return `${translator.label} (${_('Login Required')})`;
-  }
-  if (translator.quotaExceeded) {
-    return `${translator.label} (${_('Quota Exceeded')})`;
   }
   return translator.label;
 };
