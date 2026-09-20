@@ -117,6 +117,31 @@ describe('latexTransformer', () => {
 
       expect(await transform(content)).toBe(content);
     });
+
+    test('still renders what follows an unclosed environment', async () => {
+      // Rejecting the broken `\begin{itemize}` used to end the scan for the whole
+      // text node, so the formula after it never rendered either.
+      const out = await transform(
+        page('<p>\\begin{itemize}没有结束 与 \\begin{equation}x^2\\end{equation} 之后</p>'),
+      );
+
+      expect(out).toContain('<msup>');
+      expect(out).toContain('之后');
+      // The broken opener is still the source text the book wrote.
+      expect(out).toContain('\\begin{itemize}');
+    });
+
+    test('still renders what follows a run past the runaway guard', async () => {
+      // Deliberately longer than MAX_ENV_LENGTH: that run stays as source text,
+      // and the environment written after it must not go down with it.
+      const oversized = `\\begin{equation}${'a + '.repeat(6000)}b\\end{equation}`;
+      const out = await transform(page(`<p>${oversized} 之后 \\begin{gather}z\\end{gather}</p>`));
+
+      expect(out).toContain('\\begin{equation}');
+      expect(out).not.toContain('\\begin{gather}');
+      expect(out).toContain('<mi>z</mi>');
+      expect(out).toContain('之后');
+    });
   });
 
   describe('leaves ordinary dollar signs alone', () => {

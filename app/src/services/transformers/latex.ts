@@ -33,9 +33,17 @@ const MAX_INLINE_DOLLAR_LENGTH = 400;
 const ENV_OPEN = '\\begin{';
 const ENV_CLOSE = '\\end{';
 
-// A `\begin{` whose `\end{` is nowhere near is not a formula; the guard also
-// keeps a runaway match from handing a whole chapter to KaTeX.
-const MAX_ENV_LENGTH = 2000;
+// A `\begin{` whose `\end{` is nowhere near is not a formula. The closing
+// environment is already matched by name, so this guard only has to catch markup
+// broken across a long stretch of text — it is not a statement about how long a
+// formula may be, and it sits an order of magnitude above the longest display
+// block a book realistically carries. What it stops is handing a whole section
+// to KaTeX in one call.
+//
+// A run that trips it is kept as the source text the book wrote and the scan
+// resumes *after* it, so one runaway cannot hide the formulas written later in
+// the same text node (see `findEnv`).
+const MAX_ENV_LENGTH = 20000;
 
 const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
 const XML_DECL_RE = /^\s*<\?xml[^?]*\?>/;
@@ -101,23 +109,38 @@ const findEnvClose = (text: string, from: number, name: string): number => {
   }
 };
 
-const findEnv = (text: string, from: number): TexMatch | null => {
+// What looking for an environment turned up: the environment itself, a position
+// to resume from when the `\begin{` found there is not a formula after all, or
+// `null` when there is no `\begin{` left in the text.
+type EnvSearch = { match: TexMatch } | { nextIndex: number } | null;
+
+const findEnv = (text: string, from: number): EnvSearch => {
   const start = text.indexOf(ENV_OPEN, from);
   if (start < 0) return null;
+
+  // Every rejection below resumes just past the `\begin{` it rejected instead of
+  // reporting "no environment here". Returning `null` ends the scan, so a text
+  // node that opens with a broken or unusable environment would lose every
+  // formula written after it.
+  const skipOpener = { nextIndex: start + ENV_OPEN.length };
+
   const nameStart = start + ENV_OPEN.length;
   const nameEnd = text.indexOf('}', nameStart);
-  if (nameEnd < 0) return null;
+  if (nameEnd < 0) return skipOpener;
   const name = text.slice(nameStart, nameEnd).trim();
-  if (!name) return null;
+  if (!name) return skipOpener;
 
   const closedAt = findEnvClose(text, nameEnd + 1, name);
-  if (closedAt < 0) return null;
+  if (closedAt < 0) return skipOpener;
   const end = text.indexOf('}', closedAt + ENV_CLOSE.length) + 1;
-  if (end <= 0) return null;
+  if (end <= 0) return skipOpener;
 
   const tex = text.slice(start, end).trim();
-  if (tex.length > MAX_ENV_LENGTH) return null;
-  return { start, end, tex, displayMode: true };
+  // Past the runaway guard: keep the whole run as the source text the book wrote
+  // and resume after it rather than inside it — resuming inside would render the
+  // nested environments of a block just decided against.
+  if (tex.length > MAX_ENV_LENGTH) return { nextIndex: end };
+  return { match: { start, end, tex, displayMode: true } };
 };
 
 const findTex = (
@@ -134,8 +157,15 @@ const findTex = (
   // An environment starting before the next delimiter wins; one starting after
   // it is either part of that formula or found again further along.
   const env = findEnv(text, from);
-  if (!best) return env ? { match: env } : null;
-  if (env && env.start < best.pos) return { match: env };
+  if (env && 'match' in env && (!best || env.match.start < best.pos)) {
+    return { match: env.match };
+  }
+
+  // No delimiter left to render, but a rejected `\begin{` still has to be
+  // stepped over: the scan ends as soon as this returns `null`, so one unusable
+  // environment would take the rest of the text node with it. `env` here is
+  // either that resume position or `null`.
+  if (!best) return env;
 
   const { pos, delimiter } = best;
   if (delimiter.open === '$' && (text[pos - 1] === '$' || text[pos + 1] === '$')) {
