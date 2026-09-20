@@ -326,6 +326,7 @@ Client-side reading feature code.
 Text/content transformation modules.
 
 - language, punctuation, whitespace, proofread, sanitization, footnote, style, simplecc, warichu, mathml, latex
+  (shared MathML cleanup for both the book path and the KaTeX path lives in `mathmlNormalize.ts`)
 
 Shared pure logic, usually frontend-facing but not tied to a single runtime.
 
