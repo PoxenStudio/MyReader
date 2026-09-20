@@ -159,8 +159,9 @@ describe('BookDetailModal purge-on-delete routing', () => {
     );
 
   const openStandardDelete = (container: HTMLElement) => {
-    fireEvent.click(container.querySelector('button[aria-label="Delete Book Options"]')!);
-    fireEvent.click(screen.getByText('Remove from Cloud & Device'));
+    // The per-scope delete dropdown is gone: BookDetailView now exposes a
+    // single delete button that opens the confirmation alert directly.
+    fireEvent.click(container.querySelector('button[title="Delete Book"]')!);
   };
 
   it('shows the purge toggle on the standard delete and routes to purge when enabled', () => {
