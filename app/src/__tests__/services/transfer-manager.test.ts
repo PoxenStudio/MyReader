@@ -116,7 +116,7 @@ beforeEach(() => {
       version: 1,
       webdav: { enabled: false },
       googleDrive: { enabled: false },
-    } as SystemSettings,
+    } as unknown as SystemSettings,
   });
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});

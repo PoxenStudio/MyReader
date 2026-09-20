@@ -41,7 +41,7 @@ vi.mock('@/services/transferManager', () => ({
   },
 }));
 
-const saveLibraryBooks = vi.fn(async () => {});
+const saveLibraryBooks = vi.fn(async (_books?: unknown) => {});
 const setLibrary = vi.fn((books: Array<Record<string, unknown>>) => {
   mockLibrary.current = books;
 });

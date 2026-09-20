@@ -87,8 +87,8 @@ vi.stubGlobal('Image', MockImage);
 // keeping `URL` a real constructor — fetchImageAsBase64 calls `new URL(...)`
 // to classify remote vs. local image URLs, which a plain object stub breaks.
 class MockURL extends URL {
-  static createObjectURL = vi.fn().mockReturnValue('blob:http://localhost/fake-blob');
-  static revokeObjectURL = vi.fn();
+  static override createObjectURL = vi.fn().mockReturnValue('blob:http://localhost/fake-blob');
+  static override revokeObjectURL = vi.fn();
 }
 vi.stubGlobal('URL', MockURL);
 

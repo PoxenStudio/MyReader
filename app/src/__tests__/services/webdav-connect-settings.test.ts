@@ -6,7 +6,7 @@ import {
   MYBOOKS_WEBDAV_ROOT_PATH,
 } from '@/services/webdav/webdavConnectSettings';
 import { setStoredMyBooksPassword } from '@/utils/credentialStorage';
-import type { WebDAVSettings, WebDAVSyncLogEntry } from '@/types/settings';
+import type { WebDAVSettings } from '@/types/settings';
 
 describe('buildWebDAVConnectSettings', () => {
   test('applies form fields onto a blank previous state', () => {

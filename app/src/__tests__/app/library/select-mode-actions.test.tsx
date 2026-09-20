@@ -44,6 +44,8 @@ const baseProps = {
   onSend: noop,
   onDelete: noop,
   onCancel: noop,
+  onUpload: noop,
+  canUpload: true,
 };
 
 describe('SelectModeActions height reporting', () => {
