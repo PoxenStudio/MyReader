@@ -287,7 +287,12 @@ describe('ensureMyBooksBookLocal', () => {
         title: 'Test Book',
         author: 'Author',
         rating: 10,
-        metadata: { title: 'Test Book', author: 'Author', publisher: 'My Own Edit' },
+        metadata: {
+          title: 'Test Book',
+          author: 'Author',
+          publisher: 'My Own Edit',
+          language: 'zh',
+        },
         createdAt: 1000,
         updatedAt: 1000,
       };

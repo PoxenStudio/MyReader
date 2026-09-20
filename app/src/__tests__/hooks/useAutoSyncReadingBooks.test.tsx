@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 
+import type { AppService } from '@/types/system';
+
 const mockUser: { current: { id: string } | null } = { current: { id: 'user-1' } };
 const mockSettings: { current: { autoSyncReadingBooks: boolean } } = {
   current: { autoSyncReadingBooks: true },
@@ -8,7 +10,7 @@ const mockSettings: { current: { autoSyncReadingBooks: boolean } } = {
 const mockLibrary: { current: Array<Record<string, unknown>> } = { current: [] };
 
 vi.mock('@/context/EnvContext', () => ({
-  useEnv: () => ({ appService: { saveLibraryBooks: (books: unknown) => saveLibraryBooks(books) } }),
+  useEnv: () => ({ appService: { saveLibraryBooks } }),
 }));
 
 vi.mock('@/context/AuthContext', () => ({
@@ -41,7 +43,10 @@ vi.mock('@/services/transferManager', () => ({
   },
 }));
 
-const saveLibraryBooks = vi.fn(async () => {});
+// Typed from the real signature rather than an `_books?: unknown` placeholder:
+// the mock has to accept the book list the hook passes, and this way a change to
+// `saveLibraryBooks` shows up here instead of being absorbed by the placeholder.
+const saveLibraryBooks = vi.fn<AppService['saveLibraryBooks']>(async () => {});
 const setLibrary = vi.fn((books: Array<Record<string, unknown>>) => {
   mockLibrary.current = books;
 });

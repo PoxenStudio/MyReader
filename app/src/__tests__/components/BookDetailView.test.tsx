@@ -75,8 +75,6 @@ const renderView = (extra?: Partial<React.ComponentProps<typeof BookDetailView>>
         metadata={null}
         fileSize={1024}
         onDelete={vi.fn()}
-        onDeleteCloudBackup={vi.fn()}
-        onDeleteLocalCopy={vi.fn()}
         {...extra}
       />
     </DropdownProvider>,

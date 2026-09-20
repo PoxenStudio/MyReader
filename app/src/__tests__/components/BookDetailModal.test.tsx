@@ -152,7 +152,6 @@ describe('BookDetailModal purge-on-delete routing', () => {
           isOpen
           onClose={vi.fn()}
           handleBookDelete={handlers.handleBookDelete}
-          handleBookDeleteCloudBackup={vi.fn()}
           handleBookDeleteLocalCopy={vi.fn()}
           handleBookPurge={handlers.handleBookPurge}
         />

@@ -30,7 +30,7 @@ describe('MyBooks request timeout', () => {
   it('aborts a hung request after 5s and reports offline once retries are exhausted', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn((_url, opts) => {
-      return new Promise((_resolve, reject) => {
+      return new Promise<Response>((_resolve, reject) => {
         (opts as RequestInit)?.signal?.addEventListener('abort', () => {
           reject(new DOMException('Aborted', 'AbortError'));
         });

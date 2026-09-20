@@ -72,6 +72,9 @@ class TestAppService extends BaseAppService {
   async ask() {
     return false;
   }
+  async saveImageToGallery() {
+    return false;
+  }
   async openDatabase() {
     return {} as ReturnType<BaseAppService['openDatabase']>;
   }
