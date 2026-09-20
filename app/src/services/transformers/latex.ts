@@ -1,9 +1,12 @@
 import type { Transformer } from './types';
+import { normalizeMathMl } from './mathmlNormalize';
 
-// Books that ship LaTeX instead of MathML spell formulas with delimiters in the
-// running text. `$$…$$`, `\[…\]` and `\(…\)` are unambiguous; a bare `$…$` is
-// not — books about shell scripts, prices or currency use `$` as ordinary text —
-// so inline dollars are only honored when the content passes `looksLikeTex`.
+// Books that ship LaTeX instead of MathML spell formulas in the running text.
+// `$$…$$`, `\[…\]` and `\(…\)` are unambiguous; a bare `$…$` is not — books
+// about shell scripts, prices or currency use `$` as ordinary text — so inline
+// dollars are only honored when the content passes `looksLikeTex`. On top of
+// those, a book exported straight from LaTeX may use `\begin{equation}…` with no
+// delimiter at all, which is what `\begin{` covers here.
 const DELIMITERS = [
   { open: '$$', close: '$$', displayMode: true },
   { open: '\\[', close: '\\]', displayMode: true },
@@ -11,10 +14,36 @@ const DELIMITERS = [
   { open: '$', close: '$', displayMode: false },
 ] as const;
 
-const MAYBE_TEX_RE = /\\\(|\\\[|\$/;
+const MAYBE_TEX_RE = /\\\(|\\\[|\$|\\begin\{/;
 
 // A `$…$` run longer than this is prose that happens to contain two dollars.
 const MAX_INLINE_DOLLAR_LENGTH = 400;
+
+// Books exported straight from LaTeX spell display math with an environment
+// instead of a delimiter: `\begin{equation}…\end{equation}`, `\begin{align}…`,
+// `\begin{gather}…`. KaTeX renders those, but *only* in display mode — it raises
+// `{equation} can be used only in display mode` otherwise — so every
+// environment match is rendered as display math.
+//
+// Which environments KaTeX knows is left to KaTeX: an environment it does not
+// implement (`multline`, `eqnarray`, or something that is not math at all like
+// `itemize`) makes `renderToString` throw, and the run is left as the source
+// text the book wrote. Keeping a list here would only have to track KaTeX's own
+// support table.
+const ENV_OPEN = '\\begin{';
+const ENV_CLOSE = '\\end{';
+
+// A `\begin{` whose `\end{` is nowhere near is not a formula. The closing
+// environment is already matched by name, so this guard only has to catch markup
+// broken across a long stretch of text — it is not a statement about how long a
+// formula may be, and it sits an order of magnitude above the longest display
+// block a book realistically carries. What it stops is handing a whole section
+// to KaTeX in one call.
+//
+// A run that trips it is kept as the source text the book wrote and the scan
+// resumes *after* it, so one runaway cannot hide the formulas written later in
+// the same text node (see `findEnv`).
+const MAX_ENV_LENGTH = 20000;
 
 const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
 const XML_DECL_RE = /^\s*<\?xml[^?]*\?>/;
@@ -51,6 +80,69 @@ const looksLikeTex = (tex: string): boolean => /[\\^_{}=+<>/]|^.$/.test(tex);
 // Finds the next TeX run at or after `from`. A run that fails its guards is
 // skipped by resuming the search just past the opening delimiter, so a rejected
 // `$` can still pair with a later one (`$PATH … $x$`).
+// The `\end{<name>}` that closes the `\begin{<name>}` opened before `from`,
+// counting every `\begin{` against every `\end{` so that a nested environment
+// (`\begin{equation}\begin{aligned}…\end{aligned}\end{equation}`) closes its
+// own pair. Returns the index of `\end{`, or -1 when it is never closed — or
+// closed by a different environment, which means the markup is broken.
+const findEnvClose = (text: string, from: number, name: string): number => {
+  let depth = 0;
+  let index = from;
+  for (;;) {
+    const openedAt = text.indexOf(ENV_OPEN, index);
+    const closedAt = text.indexOf(ENV_CLOSE, index);
+    if (closedAt < 0) return -1;
+    if (openedAt >= 0 && openedAt < closedAt) {
+      depth += 1;
+      index = openedAt + ENV_OPEN.length;
+      continue;
+    }
+    const brace = closedAt + ENV_CLOSE.length;
+    const closingBrace = text.indexOf('}', brace);
+    if (closingBrace < 0) return -1;
+    if (depth > 0) {
+      depth -= 1;
+      index = closingBrace + 1;
+      continue;
+    }
+    return text.slice(brace, closingBrace).trim() === name ? closedAt : -1;
+  }
+};
+
+// What looking for an environment turned up: the environment itself, a position
+// to resume from when the `\begin{` found there is not a formula after all, or
+// `null` when there is no `\begin{` left in the text.
+type EnvSearch = { match: TexMatch } | { nextIndex: number } | null;
+
+const findEnv = (text: string, from: number): EnvSearch => {
+  const start = text.indexOf(ENV_OPEN, from);
+  if (start < 0) return null;
+
+  // Every rejection below resumes just past the `\begin{` it rejected instead of
+  // reporting "no environment here". Returning `null` ends the scan, so a text
+  // node that opens with a broken or unusable environment would lose every
+  // formula written after it.
+  const skipOpener = { nextIndex: start + ENV_OPEN.length };
+
+  const nameStart = start + ENV_OPEN.length;
+  const nameEnd = text.indexOf('}', nameStart);
+  if (nameEnd < 0) return skipOpener;
+  const name = text.slice(nameStart, nameEnd).trim();
+  if (!name) return skipOpener;
+
+  const closedAt = findEnvClose(text, nameEnd + 1, name);
+  if (closedAt < 0) return skipOpener;
+  const end = text.indexOf('}', closedAt + ENV_CLOSE.length) + 1;
+  if (end <= 0) return skipOpener;
+
+  const tex = text.slice(start, end).trim();
+  // Past the runaway guard: keep the whole run as the source text the book wrote
+  // and resume after it rather than inside it — resuming inside would render the
+  // nested environments of a block just decided against.
+  if (tex.length > MAX_ENV_LENGTH) return { nextIndex: end };
+  return { match: { start, end, tex, displayMode: true } };
+};
+
 const findTex = (
   text: string,
   from: number,
@@ -61,7 +153,19 @@ const findTex = (
     if (pos < 0) continue;
     if (!best || pos < best.pos) best = { pos, delimiter };
   }
-  if (!best) return null;
+
+  // An environment starting before the next delimiter wins; one starting after
+  // it is either part of that formula or found again further along.
+  const env = findEnv(text, from);
+  if (env && 'match' in env && (!best || env.match.start < best.pos)) {
+    return { match: env.match };
+  }
+
+  // No delimiter left to render, but a rejected `\begin{` still has to be
+  // stepped over: the scan ends as soon as this returns `null`, so one unusable
+  // environment would take the rest of the text node with it. `env` here is
+  // either that resume position or `null`.
+  if (!best) return env;
 
   const { pos, delimiter } = best;
   if (delimiter.open === '$' && (text[pos - 1] === '$' || text[pos + 1] === '$')) {
@@ -122,16 +226,12 @@ const isSkipped = (node: Text): boolean => {
 // the nodes can be imported into the section's XML document as-is.
 const parseRenderedNodes = (doc: Document, holder: Document, html: string): Node[] => {
   holder.body.innerHTML = html;
-  // The sanitizer that runs after this transformer treats <semantics> and
-  // <annotation> as disallowed MathML: it unwraps them but keeps their text,
-  // which would print the TeX source next to the formula it belongs to. Drop the
-  // annotation here, and lift the presentation markup out of <semantics>.
-  for (const annotation of Array.from(holder.body.querySelectorAll('annotation'))) {
-    annotation.remove();
-  }
-  for (const semantics of Array.from(holder.body.querySelectorAll('semantics'))) {
-    semantics.replaceWith(...Array.from(semantics.childNodes));
-  }
+  // KaTeX wraps its MathML in the same `<semantics>` / `<annotation>` scaffolding
+  // books ship, so it is reduced by the very same helper the `mathml` transformer
+  // applies to book markup. The sanitizer that runs after this transformer treats
+  // both elements as disallowed MathML: it unwraps them but keeps their text,
+  // which would print the TeX source next to the formula it belongs to.
+  normalizeMathMl(holder.body);
   return Array.from(holder.body.childNodes).map((node) => doc.importNode(node, true));
 };
 

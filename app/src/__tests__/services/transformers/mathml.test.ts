@@ -25,6 +25,7 @@ const ctx = (content: string, allowScript = false) =>
   ({ content, viewSettings: { allowScript } }) as unknown as TransformContext;
 
 const normalize = (content: string) => mathmlTransformer.transform(ctx(content));
+const asHtml = (content: string) => new DOMParser().parseFromString(content, 'text/html');
 
 describe('mathmlTransformer', () => {
   test('rewrites prefixed MathML into the default MathML namespace', async () => {
@@ -139,6 +140,66 @@ describe('mathmlTransformer', () => {
       expect(math).not.toBeNull();
       expect(math!.namespaceURI).toBe(MATHML_NS);
       expect(doc.body.textContent).toContain('都是整数可知');
+    });
+  });
+
+  // A conforming book — canonical spelling, nothing to un-prefix — still ships
+  // `<semantics>` with the TeX source in an `<annotation>`, because that is what
+  // MathML asks for. Without normalization the sanitizer unwraps both and prints
+  // the TeX beside the formula, so the formula renders twice.
+  describe('native MathML with the structural meta elements', () => {
+    const WITH_SEMANTICS =
+      `<p>由条件 <math xmlns="${MATHML_NS}"><semantics>` +
+      `<mrow><msup><mi>x</mi><mn>2</mn></msup></mrow>` +
+      `<annotation encoding="application/x-tex">x^{2}</annotation>` +
+      `</semantics></math> 可知</p>`;
+
+    const MULTISCRIPTS =
+      `<p><math xmlns="${MATHML_NS}"><mmultiscripts><mi>T</mi><mi>i</mi><mi>j</mi>` +
+      `<mprescripts/><none/><mi>k</mi></mmultiscripts></math></p>`;
+
+    test('drops <semantics> and the TeX annotation', async () => {
+      const out = await normalize(page(WITH_SEMANTICS));
+
+      expect(out).not.toContain('<semantics');
+      expect(out).not.toContain('<annotation');
+      expect(out).not.toContain('x^{2}');
+      expect(asHtml(out).querySelector('math > mrow')).not.toBeNull();
+    });
+
+    test('the TeX source does not leak into the rendered text', async () => {
+      const sanitized = await sanitizerTransformer.transform(
+        ctx(await normalize(page(WITH_SEMANTICS))),
+      );
+
+      // The bug this guards: `body.textContent` used to be `由条件 x2x^{2} 可知`.
+      expect(asHtml(sanitized).body.textContent?.trim()).toBe('由条件 x2 可知');
+    });
+
+    test('keeps the empty-slot placeholder <none/> out of the sanitizer', async () => {
+      const sanitized = await sanitizerTransformer.transform(
+        ctx(await normalize(page(MULTISCRIPTS))),
+      );
+      const slots = Array.from(asHtml(sanitized).querySelector('mmultiscripts')!.children).map(
+        (el) => el.localName,
+      );
+
+      // Dropping <none/> would make `k` the pre-subscript instead of the
+      // pre-superscript: a different formula, with no visible failure.
+      expect(slots).toEqual(['mi', 'mi', 'mi', 'mprescripts', 'none', 'mi']);
+    });
+
+    test('lifts presentation MathML out of <annotation-xml>', async () => {
+      const content = page(
+        `<p><math xmlns="${MATHML_NS}"><semantics>` +
+          `<annotation-xml encoding="MathML-Presentation"><mfrac><mi>a</mi><mi>b</mi></mfrac>` +
+          `</annotation-xml></semantics></math></p>`,
+      );
+      const sanitized = await sanitizerTransformer.transform(ctx(await normalize(content)));
+
+      // <annotation-xml> is in DOMPurify's FORBID_CONTENTS: left in place it takes
+      // the fraction with it and the formula disappears entirely.
+      expect(asHtml(sanitized).querySelector('math > mfrac')).not.toBeNull();
     });
   });
 });

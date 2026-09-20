@@ -55,6 +55,95 @@ describe('latexTransformer', () => {
     expect(out.match(/<math/g)).toHaveLength(2);
   });
 
+  // Books exported straight from LaTeX often carry display math as an
+  // environment with no `$` at all, which the old `MAYBE_TEX_RE` gate let
+  // through untouched.
+  describe('LaTeX environments without a $ delimiter', () => {
+    test('renders \\begin{equation}…\\end{equation}', async () => {
+      const out = await transform(
+        page('<p>由 \\begin{equation}x^2 + y^2 = z^2\\end{equation} 可知</p>'),
+      );
+
+      expect(out).toContain('<msup>');
+      expect(out).toContain('display="block"');
+      expect(out).not.toContain('\\begin{equation}');
+      expect(out).toContain('可知');
+    });
+
+    test('renders a multi-line \\begin{align}', async () => {
+      // `&` has to be `&amp;` in the section source, as in any XHTML book.
+      const out = await transform(
+        page('<p>\\begin{align}a &amp;= b \\\\ c &amp;= d\\end{align}</p>'),
+      );
+
+      expect(out).not.toContain('\\begin{align}');
+      expect(asHtml(out).querySelectorAll('math')).toHaveLength(1);
+    });
+
+    test('renders several environments in one section', async () => {
+      const out = await transform(
+        page('<p>\\begin{equation}a\\end{equation} 与 \\begin{gather}b\\end{gather}</p>'),
+      );
+
+      expect(out.match(/<math/g)).toHaveLength(2);
+    });
+
+    test('keeps a nested environment inside its parent', async () => {
+      const out = await transform(
+        page(
+          '<p>\\begin{equation}\\begin{aligned}a &amp;= b \\\\ c &amp;= d\\end{aligned}' +
+            '\\end{equation}</p>',
+        ),
+      );
+
+      expect(out.match(/<math/g)).toHaveLength(1);
+      expect(out).not.toContain('\\end{aligned}');
+    });
+
+    test('leaves an environment KaTeX cannot render as source', async () => {
+      const content = page('<p>\\begin{multline}a + b\\end{multline}</p>');
+
+      expect(await transform(content)).toBe(content);
+    });
+
+    test('leaves a non-math environment alone', async () => {
+      const content = page('<p>\\begin{itemize}\\item a\\end{itemize}</p>');
+
+      expect(await transform(content)).toBe(content);
+    });
+
+    test('leaves an unclosed environment alone', async () => {
+      const content = page('<p>\\begin{equation}一直没结束</p>');
+
+      expect(await transform(content)).toBe(content);
+    });
+
+    test('still renders what follows an unclosed environment', async () => {
+      // Rejecting the broken `\begin{itemize}` used to end the scan for the whole
+      // text node, so the formula after it never rendered either.
+      const out = await transform(
+        page('<p>\\begin{itemize}没有结束 与 \\begin{equation}x^2\\end{equation} 之后</p>'),
+      );
+
+      expect(out).toContain('<msup>');
+      expect(out).toContain('之后');
+      // The broken opener is still the source text the book wrote.
+      expect(out).toContain('\\begin{itemize}');
+    });
+
+    test('still renders what follows a run past the runaway guard', async () => {
+      // Deliberately longer than MAX_ENV_LENGTH: that run stays as source text,
+      // and the environment written after it must not go down with it.
+      const oversized = `\\begin{equation}${'a + '.repeat(6000)}b\\end{equation}`;
+      const out = await transform(page(`<p>${oversized} 之后 \\begin{gather}z\\end{gather}</p>`));
+
+      expect(out).toContain('\\begin{equation}');
+      expect(out).not.toContain('\\begin{gather}');
+      expect(out).toContain('<mi>z</mi>');
+      expect(out).toContain('之后');
+    });
+  });
+
   describe('leaves ordinary dollar signs alone', () => {
     test('prices', async () => {
       const content = page('<p>这本书花了 $5 和 $10 元</p>');

@@ -1,12 +1,18 @@
 import type { Transformer } from './types';
+import { normalizeMathMl } from './mathmlNormalize';
 
 const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
 const XML_DECL_RE = /^\s*<\?xml[^?]*\?>/;
 
-// `xmlns:foo="http://www.w3.org/1998/Math/MathML"` — some LaTeX → EPUB
-// converters (pdf-craft's epub-generator among them) spell MathML with a
-// namespace *prefix* instead of the default namespace: `<m:math xmlns:m="…">`
-// rather than `<math xmlns="…">`.
+// `<math …>` or `<prefix:math …>` — a MathML element in either spelling.
+// Sections without math (the vast majority of books) return untouched after this
+// single regex test.
+const MATHML_ELEMENT_RE = /<(?:[^\s<>/]+:)?math[\s/>]/i;
+
+// Some LaTeX → EPUB converters (pdf-craft's epub-generator among them) spell
+// MathML with a namespace *prefix* instead of the default namespace:
+// `<m:math xmlns:m="http://www.w3.org/1998/Math/MathML">` rather than
+// `<math xmlns="…">`.
 //
 // That spelling is valid XML, so validators and XML-based readers (calibre) are
 // happy with it, but every stage of this app that hands book markup to an HTML
@@ -17,31 +23,12 @@ const XML_DECL_RE = /^\s*<\?xml[^?]*\?>/;
 //
 // Rebuilding the elements without the prefix restores the canonical form the
 // HTML parser maps onto the MathML namespace, which is what the engine lays out
-// as math. Content without prefixed MathML (the vast majority of books) is
-// returned untouched after a single regex test.
-const MATHML_PREFIX_DECL_RE = new RegExp(
-  `xmlns:[\\w.-]+\\s*=\\s*["']${MATHML_NS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`,
-);
-
-const normalizePrefixedMathML = (content: string): string => {
-  if (!MATHML_PREFIX_DECL_RE.test(content)) return content;
-
-  // `&nbsp;` is an HTML entity, not XML: leaving it in makes the whole section
-  // fail to parse and skip the fix. The sanitizer normalizes the same entity for
-  // the same reason, and turns the numeric reference back into `&nbsp;` later.
-  const doc = new DOMParser().parseFromString(
-    content.replaceAll('&nbsp;', '&#160;'),
-    'application/xhtml+xml',
-  );
-  // Content that is not well-formed XHTML is left alone: the pipeline already
-  // has a fallback for those books (foliate re-parses them as HTML), and
-  // re-serializing a broken document would only make things worse.
-  if (doc.getElementsByTagName('parsererror').length > 0) return content;
-
+// as math.
+const rewritePrefixedMathMl = (doc: Document): number => {
   const prefixed = Array.from(doc.getElementsByTagName('*')).filter(
     (el) => el.namespaceURI === MATHML_NS && el.prefix,
   );
-  if (prefixed.length === 0) return content;
+  if (prefixed.length === 0) return 0;
 
   // Drop the prefix declarations themselves, wherever they sit — on <math> or on
   // an ancestor such as <html>. A declaration still in scope keeps the prefix
@@ -63,10 +50,7 @@ const normalizePrefixedMathML = (content: string): string => {
     el.replaceWith(replacement);
   }
 
-  // XMLSerializer never writes the XML declaration, so put back the one the
-  // section came with — both foliate and the sanitizer expect the XHTML shape.
-  const xmlDecl = XML_DECL_RE.exec(content)?.[0] ?? '';
-  return xmlDecl + new XMLSerializer().serializeToString(doc);
+  return prefixed.length;
 };
 
 export const mathmlTransformer: Transformer = {
@@ -74,7 +58,39 @@ export const mathmlTransformer: Transformer = {
 
   // Not gated on `viewSettings.allowScript` like the sanitizer: skipping the
   // sanitizer still leaves foliate injecting the section through `srcdoc`,
-  // which is parsed as HTML too, so prefixed MathML has to be normalized for
-  // every book either way.
-  transform: async (ctx) => normalizePrefixedMathML(ctx.content),
+  // which is parsed as HTML too, so MathML has to be normalized for every book
+  // either way. That is also why the `<semantics>` / `<annotation>` /
+  // `<annotation-xml>` cleanup lives here (see `mathmlNormalize.ts`) rather than
+  // in the sanitizer's allow-list, which is skipped on that path.
+  transform: async (ctx) => {
+    const content = ctx.content;
+    if (!MATHML_ELEMENT_RE.test(content)) return content;
+
+    // `&nbsp;` is an HTML entity, not XML: leaving it in makes the whole section
+    // fail to parse and skip the fix. The sanitizer normalizes the same entity for
+    // the same reason, and turns the numeric reference back into `&nbsp;` later.
+    const doc = new DOMParser().parseFromString(
+      content.replaceAll('&nbsp;', '&#160;'),
+      'application/xhtml+xml',
+    );
+    // Content that is not well-formed XHTML is left alone: the pipeline already
+    // has a fallback for those books (foliate re-parses them as HTML), and
+    // re-serializing a broken document would only make things worse.
+    if (doc.getElementsByTagName('parsererror').length > 0) return content;
+
+    // Two passes over one parse: unprefix first (so that `getElementsByTagName`
+    // and `localName` see the canonical spelling below), then reduce the
+    // structural meta elements.
+    const rewritten = rewritePrefixedMathMl(doc);
+    const normalized = normalizeMathMl(doc);
+
+    // Canonical MathML that carries none of those meta elements is returned
+    // byte-identical: a conforming book is never round-tripped.
+    if (rewritten === 0 && normalized === 0) return content;
+
+    // XMLSerializer never writes the XML declaration, so put back the one the
+    // section came with — both foliate and the sanitizer expect the XHTML shape.
+    const xmlDecl = XML_DECL_RE.exec(content)?.[0] ?? '';
+    return xmlDecl + new XMLSerializer().serializeToString(doc);
+  },
 };

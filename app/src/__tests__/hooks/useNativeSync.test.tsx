@@ -16,11 +16,19 @@ const h = vi.hoisted(() => {
         location: string;
         updatedAt: number;
         booknotes?: BookNote[];
+        pendingReadingSeconds?: Record<string, number>;
       },
       progress: { location: 'local-loc' } as { location: string } | null,
       previewMode: false,
     },
-    pullSyncMock: vi.fn(async () => ({ configs: null, notes: null })),
+    // `configs`/`notes` are intentionally loose: tests below resolve both a
+    // `null` payload and a populated one.
+    pullSyncMock: vi.fn(
+      async (): Promise<{ configs: unknown; notes: unknown }> => ({
+        configs: null,
+        notes: null,
+      }),
+    ),
     pushSyncMock: vi.fn(async (_payload: unknown) => ({})),
     setConfigMock: vi.fn(),
     saveConfigMock: vi.fn(async () => {}),
