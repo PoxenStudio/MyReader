@@ -21,7 +21,24 @@ export const sanitizerTransformer: Transformer = {
       FORBID_ATTR: ['srcdoc'],
       ALLOWED_URI_REGEXP:
         /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|blob|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-      ADD_TAGS: ['link', 'meta'],
+      // `none` is MathML's empty-slot placeholder. A book that writes
+      // `<mmultiscripts><mprescripts/><none/><mi>k</mi>…` needs it to keep the
+      // pre-script sub/superscript pairs aligned; dropping it moves `k` into the
+      // wrong slot and the formula silently renders as a different one. DOMPurify
+      // leaves it out of its default `mathMl` allow-list, but it *is* in the
+      // `mathMlDisallowed` list that feeds the namespace check, so re-allowing it
+      // by name is enough (and it is an empty element, so nothing else rides in
+      // with it).
+      //
+      // `semantics` / `annotation` / `annotation-xml` are deliberately NOT added
+      // here. Allowing the first two does not stop the duplication — the
+      // sanitizer's unwrap is replaced by the engine printing the annotation text
+      // anyway — and allowing `annotation-xml` would let its `encoding` attribute
+      // survive (it is in DOMPurify's default MathML attribute list), putting the
+      // `encoding="text/html"` HTML-integration-point path back in the DOM. All
+      // three are reduced by the `mathml` transformer instead, which also runs on
+      // the `allowScript` path this sanitizer skips.
+      ADD_TAGS: ['link', 'meta', 'none'],
       ADD_ATTR: (attributeName: string) => {
         const attrWhitelist = [
           'xmlns',
