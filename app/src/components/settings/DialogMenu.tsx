@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import React from 'react';
-import { MdCheck } from 'react-icons/md';
+import { MdCheck, MdOutlineLibraryAddCheck } from 'react-icons/md';
 import { useEnv } from '@/context/EnvContext';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -62,11 +62,10 @@ const DialogMenu: React.FC<DialogMenuProps> = ({
   return (
     <Menu className={clsx('dialog-menu dropdown-content no-triangle z-20 mt-2 shadow-2xl')}>
       <MenuItem
-        label={_('Global Settings')}
-        tooltip={isSettingsGlobal ? _('Apply to All Books') : _('Apply to This Book')}
+        label={isSettingsGlobal ? _('Apply to All Books') : _('Apply to This Book')}
         disabled={!bookKey}
         buttonClass='lg:tooltip'
-        Icon={isSettingsGlobal ? MdCheck : null}
+        Icon={isSettingsGlobal ? MdOutlineLibraryAddCheck : MdCheck}
         onClick={handleToggleGlobal}
       />
       <MenuItem label={resetLabel || _('Reset Settings')} onClick={handleResetToDefaults} />
