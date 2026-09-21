@@ -85,6 +85,8 @@ pub enum Error {
     HttpErrorCode(u16, String),
     #[error("permission denied: path not in filesystem scope: {0}")]
     Forbidden(String),
+    #[error("unexpected response: {0}")]
+    UnexpectedResponse(String),
 }
 
 /// Reject paths the webview must not be allowed to target: relative paths and
@@ -145,6 +147,30 @@ pub struct ProgressPayload {
     transfer_speed: u64,
 }
 
+/// Rejects an HTML response. Downloads here are ebook/dictionary files
+/// (pdf/epub/txt/azw3/mobi/...), never HTML, so an HTML body after redirects
+/// have been followed is an error page (typically a login/home page served
+/// when the session cookie was missing or dropped) that must not be written
+/// to disk as if it were the book.
+fn ensure_not_html(response: &reqwest::Response) -> Result<()> {
+    let is_html = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| {
+            let v = v.to_ascii_lowercase();
+            v.starts_with("text/html") || v.starts_with("application/xhtml")
+        })
+        .unwrap_or(false);
+    if is_html {
+        return Err(Error::UnexpectedResponse(format!(
+            "expected a file but got an HTML page (final url: {})",
+            response.url()
+        )));
+    }
+    Ok(())
+}
+
 #[command]
 #[allow(clippy::too_many_arguments)] // Tauri command surface mirrors the JS caller's options.
 pub async fn download_file(
@@ -196,6 +222,7 @@ pub async fn download_file(
                 response.text().await.unwrap_or_default(),
             ));
         }
+        ensure_not_html(&response)?;
 
         let mut resp_headers = HashMap::new();
         for (key, value) in response.headers().iter() {
@@ -234,6 +261,9 @@ pub async fn download_file(
         range_req = range_req.header(key, value);
     }
     let range_resp = range_req.send().await?;
+    if range_resp.status().is_success() {
+        ensure_not_html(&range_resp)?;
+    }
     let accept_ranges = range_resp
         .headers()
         .get("accept-ranges")
