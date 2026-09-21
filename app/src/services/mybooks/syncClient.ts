@@ -6,6 +6,7 @@
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
 import { BookRecord, BookNoteRecord, BookConfigRecord } from '@/types/book';
+import { buildMyBooksCookieHeaders } from '@/services/mybooks/cookieHeaders';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
 
 export interface SyncEnvelope {
@@ -31,6 +32,7 @@ export class SyncApiError extends Error {}
 function buildSyncRequest(params?: Record<string, string | number>): {
   url: string;
   fetchFn: typeof fetch;
+  headers: Record<string, string>;
 } {
   const host = typeof window !== 'undefined' ? localStorage.getItem('mybooks_host') : null;
   if (!host) {
@@ -39,6 +41,7 @@ function buildSyncRequest(params?: Record<string, string | number>): {
 
   let url: URL;
   let fetchFn: typeof fetch;
+  let headers: Record<string, string> = {};
   if (isTauriAppPlatform()) {
     // Tauri: direct request — the Tauri HTTP plugin manages cookies natively,
     // mirroring fetchMyBooks's Tauri branch in mybooksService.ts.
@@ -57,11 +60,29 @@ function buildSyncRequest(params?: Record<string, string | number>): {
     Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
   }
 
-  return { url: url.toString(), fetchFn };
+  if (isTauriAppPlatform()) {
+    // In NAS mode plugin-http's own jar never gets the session cookie (the
+    // login went through explicit Cookie headers), so attach it here just
+    // like fetchMyBooks does; otherwise the server sees an anonymous request.
+    headers = buildMyBooksCookieHeaders(url.toString());
+  }
+
+  return { url: url.toString(), fetchFn, headers };
 }
 
 async function parseSyncResponse(response: Response): Promise<SyncEnvelope> {
-  const json = (await response.json()) as SyncEnvelope & { err?: string };
+  const text = await response.text();
+  let json: SyncEnvelope & { err?: string };
+  try {
+    json = JSON.parse(text) as SyncEnvelope & { err?: string };
+  } catch {
+    // Not JSON — typically an HTML login/home page after a redirect or a relay
+    // error page, i.e. the request arrived without a valid session cookie.
+    const contentType = response.headers.get('content-type') ?? 'unknown';
+    throw new SyncApiError(
+      `Sync response is not JSON (status ${response.status}, content-type ${contentType}, url ${response.url})`,
+    );
+  }
   if (!response.ok) {
     throw new SyncApiError(json.err || response.statusText || 'Sync request failed');
   }
@@ -83,8 +104,8 @@ export async function pullSync(
   if (options.type) params['type'] = options.type;
   if (options.book) params['book'] = options.book;
 
-  const { url, fetchFn } = buildSyncRequest(params);
-  const response = await fetchFn(url, { method: 'GET', credentials: 'include' });
+  const { url, fetchFn, headers } = buildSyncRequest(params);
+  const response = await fetchFn(url, { method: 'GET', credentials: 'include', headers });
   return parseSyncResponse(response);
 }
 
@@ -109,11 +130,11 @@ export async function pushSync(payload: SyncPushPayload): Promise<SyncEnvelope> 
     notesCount: payload.notes?.length ?? 0,
   });
   try {
-    const { url, fetchFn } = buildSyncRequest();
+    const { url, fetchFn, headers } = buildSyncRequest();
     const response = await fetchFn(url, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const result = await parseSyncResponse(response);

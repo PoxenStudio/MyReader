@@ -8,9 +8,8 @@ import { isTauriAppPlatform } from '@/services/environment';
 import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useNasDeviceStore } from '@/store/nasDeviceStore';
-import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
+import { buildMyBooksCookieHeaders } from '@/services/mybooks/cookieHeaders';
 import {
-  getTauriMyBooksCookie,
   mergeTauriMyBooksCookie,
   extractCookieHeaderFromResponse,
 } from '@/services/mybooks/tauriCookieStore';
@@ -304,31 +303,10 @@ export async function fetchMyBooks<T>(
   if (host && isTauriAppPlatform()) {
     const nasSettings = useSettingsStore.getState().settings.nas;
     if (nasSettings?.enabled) {
-      try {
-        const sessionCookie = getTauriMyBooksCookie();
-        const nasCookie = getNasCookies(new URL(url).host);
-        // Defensive: a raw HTTP header value must not contain CR/LF (or it's
-        // rejected outright, at the Rust/reqwest layer for plugin-http's
-        // IPC-based fetch — surfacing here as a generic, unhelpful "Failed
-        // to fetch" with no indication it was ever about a header). Captured
-        // cookie values should never legitimately contain these, but the NAS
-        // popup's cookie jar isn't scoped to just the login flow (see
-        // `get_webview_cookies` in commands.rs) and gets replayed as-is, so
-        // strip defensively rather than let one bad stored value take down
-        // every NAS-gated request.
-        const sanitize = (v: string) => v.replace(/[\r\n]/g, '');
-        const cookie = [sessionCookie, nasCookie]
-          .filter((v): v is string => !!v)
-          .map(sanitize)
-          .join('; ');
-        fetchOptions.headers = {
-          ...fetchOptions.headers,
-          ...(cookie && { Cookie: cookie }),
-          'User-Agent': NAS_CHROME_USER_AGENT,
-        };
-      } catch (e) {
-        console.error('[fetchMyBooks] Failed to build NAS cookie header:', e);
-      }
+      fetchOptions.headers = {
+        ...fetchOptions.headers,
+        ...buildMyBooksCookieHeaders(url.toString()),
+      };
       if (shouldAutoPromptNasLogin(nasSettings)) {
         useNasDeviceStore.getState().requestPrompt();
       }

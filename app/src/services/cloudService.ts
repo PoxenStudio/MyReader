@@ -15,6 +15,7 @@ import { getCloudBookId, getMyBooksId } from '@/utils/bookConverter';
 import { uploadBookToMyBooks, deleteBookFromMyBooks } from '@/services/mybooksService';
 import { useSettingsStore } from '@/store/settingsStore';
 import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
+import { buildMyBooksCookieHeaders } from '@/services/mybooks/cookieHeaders';
 
 export async function deleteBook(
   fs: FileSystem,
@@ -163,22 +164,10 @@ export async function downloadMyBooksUrl(
 ): Promise<void> {
   const { downloadFile } = await import('@/libs/storage');
   if (isTauriAppPlatform()) {
-    const { getTauriMyBooksCookie } = await import('@/services/mybooks/tauriCookieStore');
-    const cookie = getTauriMyBooksCookie();
-    const headers: Record<string, string> = {};
-    if (cookie) headers['Cookie'] = cookie;
-    // The native downloader's reqwest client doesn't share the webview's
-    // cookie jar either, so — same as `fetchMyBooks` and the cover fetch in
-    // `BookCover.tsx` — the NAS relay cookie has to be attached explicitly,
-    // merged alongside the regular MyBooks session cookie above (a NAS-gated
-    // download needs both: the relay's own gate cookie plus the app-level
-    // session).
-    const nasSettings = useSettingsStore.getState().settings.nas;
-    if (nasSettings?.enabled) {
-      const nasCookie = getNasCookies(new URL(url).host);
-      if (nasCookie) headers['Cookie'] = [cookie, nasCookie].filter(Boolean).join('; ');
-      headers['User-Agent'] = NAS_CHROME_USER_AGENT;
-    }
+    // The native downloader's reqwest client shares no cookie jar with the
+    // webview or plugin-http, so the session cookie (and, with the NAS relay
+    // enabled, the relay cookie + browser UA) must always be passed explicitly.
+    const headers = buildMyBooksCookieHeaders(url, { alwaysSession: true });
     await downloadFile({
       appService,
       dst,
