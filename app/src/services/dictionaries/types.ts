@@ -158,6 +158,17 @@ export interface WebSearchEntry {
   deletedAt?: number;
 }
 
+/** User-added MyDict server (same API as the built-in MyBooks dictionary). */
+export interface MyDictEntry {
+  /** `mydict:<random>` */
+  id: string;
+  name: string;
+  /** Service base address, e.g. `https://192.168.1.2:8443`. */
+  url: string;
+  token: string;
+  deletedAt?: number;
+}
+
 export interface DictionarySettings {
   /** Provider id order shown in the popup tab strip. Includes builtin ids. */
   providerOrder: string[];
@@ -170,6 +181,8 @@ export interface DictionarySettings {
    * Merriam-Webster) are hardcoded in the registry and not stored here.
    */
   webSearches?: WebSearchEntry[];
+  /** User-added MyDict servers (Tauri-only). */
+  myDicts?: MyDictEntry[];
   /**
    * Font-size multiplier for the dictionary popup content (independent of the
    * main reading view, #4443). `1` = the default sizes; larger values scale

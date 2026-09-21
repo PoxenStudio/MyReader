@@ -17,6 +17,7 @@ import type {
   DictionaryProvider,
   DictionarySettings,
   ImportedDictionary,
+  MyDictEntry,
   WebSearchEntry,
 } from './types';
 import { BUILTIN_PROVIDER_IDS } from './types';
@@ -31,6 +32,7 @@ import { createMdictProvider } from './providers/mdictProvider';
 import { createDictProvider } from './providers/dictProvider';
 import { createSlobProvider } from './providers/slobProvider';
 import { createWebSearchProvider } from './providers/webSearchProvider';
+import { createMyDictProvider } from './providers/myDictProvider';
 import { getBuiltinWebSearch } from './webSearchTemplates';
 
 const instanceCache = new Map<string, DictionaryProvider>();
@@ -87,6 +89,15 @@ const getOrCreate = (
   if (builtin) {
     instanceCache.set(id, builtin);
     return builtin;
+  }
+  if (id.startsWith('mydict:')) {
+    // Tauri-only, same CORS reason as the built-in MyBooks provider.
+    if (!isTauriAppPlatform()) return undefined;
+    const entry = (settings.myDicts ?? []).find((d: MyDictEntry) => d.id === id);
+    if (!entry || entry.deletedAt) return undefined;
+    const provider = createMyDictProvider(entry);
+    instanceCache.set(id, provider);
+    return provider;
   }
   if (id.startsWith('web:')) {
     const tpl = findWebTemplate(id, settings);
@@ -147,7 +158,7 @@ export const getEnabledProviders = ({
       if (provider) out.push(provider);
       continue;
     }
-    if (id.startsWith('web:')) {
+    if (id.startsWith('web:') || id.startsWith('mydict:')) {
       const provider = getOrCreate(id, undefined, undefined, settings);
       if (provider) out.push(provider);
       continue;

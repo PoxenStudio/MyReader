@@ -3,6 +3,7 @@ import { EnvConfigType, isTauriAppPlatform } from '@/services/environment';
 import type {
   DictionarySettings,
   ImportedDictionary,
+  MyDictEntry,
   WebSearchEntry,
 } from '@/services/dictionaries/types';
 import { BUILTIN_PROVIDER_IDS, BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
@@ -102,6 +103,13 @@ interface DictionaryStoreState {
   updateWebSearch(id: string, patch: { name?: string; urlTemplate?: string }): void;
   /** Soft-delete a custom web search and remove from order/enabled. */
   removeWebSearch(id: string): boolean;
+
+  /** Add a MyDict server (id is generated). Appended + enabled by default. */
+  addMyDict(name: string, url: string, token: string): MyDictEntry;
+  /** Update an existing MyDict server; no-op if id is unknown. */
+  updateMyDict(id: string, patch: { name: string; url: string; token: string }): void;
+  /** Soft-delete a MyDict server and remove from order/enabled. */
+  removeMyDict(id: string): boolean;
 
   /** Hydrate from `settings.customDictionaries` + `settings.dictionarySettings` + check on-disk availability. */
   loadCustomDictionaries(envConfig: EnvConfigType): Promise<void>;
@@ -343,6 +351,52 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
     return true;
   },
 
+  addMyDict: (name, url, token) => {
+    const id = `mydict:${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+    const entry: MyDictEntry = { id, name: name.trim(), url: url.trim(), token: token.trim() };
+    set((state) => ({
+      settings: {
+        ...state.settings,
+        myDicts: [...(state.settings.myDicts ?? []), entry],
+        providerOrder: state.settings.providerOrder.includes(id)
+          ? state.settings.providerOrder
+          : [...state.settings.providerOrder, id],
+        providerEnabled: { ...state.settings.providerEnabled, [id]: true },
+      },
+    }));
+    return entry;
+  },
+
+  updateMyDict: (id, patch) => {
+    set((state) => {
+      const list = state.settings.myDicts ?? [];
+      if (!list.some((d) => d.id === id)) return state;
+      const next = list.map((d) =>
+        d.id === id
+          ? { ...d, name: patch.name.trim(), url: patch.url.trim(), token: patch.token.trim() }
+          : d,
+      );
+      return { settings: { ...state.settings, myDicts: next } };
+    });
+  },
+
+  removeMyDict: (id) => {
+    if (!(get().settings.myDicts ?? []).some((d) => d.id === id)) return false;
+    set((state) => ({
+      settings: {
+        ...state.settings,
+        myDicts: (state.settings.myDicts ?? []).map((d) =>
+          d.id === id ? { ...d, deletedAt: Date.now() } : d,
+        ),
+        providerOrder: state.settings.providerOrder.filter((p) => p !== id),
+        providerEnabled: Object.fromEntries(
+          Object.entries(state.settings.providerEnabled).filter(([k]) => k !== id),
+        ),
+      },
+    }));
+    return true;
+  },
+
   loadCustomDictionaries: async (envConfig) => {
     try {
       const { settings } = useSettingsStore.getState();
@@ -402,6 +456,7 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
         },
         defaultProviderId: persistedSettings.defaultProviderId,
         webSearches: persistedSettings.webSearches ?? [],
+        myDicts: persistedSettings.myDicts ?? [],
         fontScale: persistedSettings.fontScale ?? DEFAULT_DICTIONARY_SETTINGS.fontScale,
       };
       set({ dictionaries, settings: settingsMerged });

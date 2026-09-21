@@ -19,16 +19,38 @@ const MYBOOKS_DICT_URL = 'https://mybooks.top/dict/api/v1/query';
 // MyBooks词典服务分配的token, 限流控制
 const MYBOOKS_DICT_TOKEN = 'sk-ut5X97HcuelppOw90x3rcPuyyO5oYZLFCBAxE6LA6_g';
 
-interface MyBooksResult {
+export interface MyBooksResult {
   dictionary_name: string;
   word: string;
   phonetic: string | null;
   definition: string;
 }
 
-interface MyBooksResponse {
+export interface MyBooksResponse {
   results: MyBooksResult[];
 }
+
+/** Renders MyDict-API results (shared by the built-in and user-added servers). */
+export const renderMyBooksResults = (results: MyBooksResult[], container: HTMLElement): void => {
+  const hgroup = document.createElement('hgroup');
+  const h1 = document.createElement('h1');
+  h1.textContent = results[0]!.word;
+  h1.className = 'text-lg font-bold';
+  hgroup.append(h1);
+  container.append(hgroup);
+
+  results.forEach(({ dictionary_name, phonetic, definition }) => {
+    const h2 = document.createElement('h2');
+    h2.textContent = phonetic ? `${dictionary_name} · ${phonetic}` : dictionary_name;
+    h2.className = 'text-base font-semibold mt-4';
+    container.appendChild(h2);
+
+    const p = document.createElement('p');
+    p.textContent = definition;
+    p.className = 'whitespace-pre-wrap text-sm';
+    container.appendChild(p);
+  });
+};
 
 export const myBooksDictProvider: DictionaryProvider = {
   id: BUILTIN_PROVIDER_IDS.myBooks,
@@ -53,24 +75,7 @@ export const myBooksDictProvider: DictionaryProvider = {
         return { ok: false, reason: 'empty' };
       }
 
-      const hgroup = document.createElement('hgroup');
-      const h1 = document.createElement('h1');
-      h1.textContent = data.results[0]!.word;
-      h1.className = 'text-lg font-bold';
-      hgroup.append(h1);
-      ctx.container.append(hgroup);
-
-      data.results.forEach(({ dictionary_name, phonetic, definition }) => {
-        const h2 = document.createElement('h2');
-        h2.textContent = phonetic ? `${dictionary_name} · ${phonetic}` : dictionary_name;
-        h2.className = 'text-base font-semibold mt-4';
-        ctx.container.appendChild(h2);
-
-        const p = document.createElement('p');
-        p.textContent = definition;
-        p.className = 'whitespace-pre-wrap text-sm';
-        ctx.container.appendChild(p);
-      });
+      renderMyBooksResults(data.results, ctx.container);
 
       return { ok: true, headword: trimmed, sourceLabel: 'MyBooks' };
     } catch (error) {

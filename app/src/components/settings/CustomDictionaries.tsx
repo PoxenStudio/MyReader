@@ -38,7 +38,12 @@ import {
   isSystemDictionarySupported,
   type RememberedLookupApp,
 } from '@/services/dictionaries/systemDictionary';
-import type { ImportedDictionary, WebSearchEntry } from '@/services/dictionaries/types';
+import { testMyDictConnection } from '@/services/dictionaries/providers/myDictProvider';
+import type {
+  ImportedDictionary,
+  MyDictEntry,
+  WebSearchEntry,
+} from '@/services/dictionaries/types';
 import {
   getBuiltinWebSearch,
   isValidUrlTemplate,
@@ -63,13 +68,15 @@ interface CustomDictionariesProps {
 interface ProviderRow {
   id: string;
   label: string;
-  kind: 'builtin' | 'stardict' | 'mdict' | 'dict' | 'slob' | 'web';
+  kind: 'builtin' | 'stardict' | 'mdict' | 'dict' | 'slob' | 'web' | 'mydict';
   badge: string;
   imported?: ImportedDictionary;
   /** Set on `kind: 'web'` rows. The shape distinguishes deletable custom
    *  entries (when `builtinWeb` is false) from immutable built-ins. */
   webSearch?: WebSearchEntry;
   builtinWeb?: boolean;
+  /** Set on `kind: 'mydict'` rows. */
+  myDict?: MyDictEntry;
   disabled?: boolean;
   reason?: string;
 }
@@ -128,6 +135,7 @@ interface SortableRowProps {
   onDelete: (row: ProviderRow) => void;
   onEditWebSearch?: (entry: WebSearchEntry) => void;
   onEditDict?: (dict: ImportedDictionary) => void;
+  onEditMyDict?: (entry: MyDictEntry) => void;
   _: (key: string, options?: Record<string, number | string>) => string;
 }
 
@@ -141,6 +149,7 @@ const SortableRow: React.FC<SortableRowProps> = ({
   onDelete,
   onEditWebSearch,
   onEditDict,
+  onEditMyDict,
   _,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -218,38 +227,42 @@ const SortableRow: React.FC<SortableRowProps> = ({
           rename / re-template flow. Visible only in edit mode for rows
           backed by user-mutable metadata (imported dicts and custom web
           searches; built-ins are immutable). */}
-      {(row.imported || (row.kind === 'web' && !row.builtinWeb)) && isEditMode && (
-        <button
-          type='button'
-          onClick={() => {
-            if (row.imported && onEditDict) onEditDict(row.imported);
-            else if (row.kind === 'web' && row.webSearch && onEditWebSearch) {
-              onEditWebSearch(row.webSearch);
-            }
-          }}
-          className='btn btn-ghost btn-sm shrink-0 px-1'
-          aria-label={_('Edit')}
-          title={_('Edit')}
-        >
-          <MdEdit className='text-base-content/75 h-4 w-4' />
-        </button>
-      )}
+      {(row.imported || row.kind === 'mydict' || (row.kind === 'web' && !row.builtinWeb)) &&
+        isEditMode && (
+          <button
+            type='button'
+            onClick={() => {
+              if (row.imported && onEditDict) onEditDict(row.imported);
+              else if (row.kind === 'mydict' && row.myDict && onEditMyDict)
+                onEditMyDict(row.myDict);
+              else if (row.kind === 'web' && row.webSearch && onEditWebSearch) {
+                onEditWebSearch(row.webSearch);
+              }
+            }}
+            className='btn btn-ghost btn-sm shrink-0 px-1'
+            aria-label={_('Edit')}
+            title={_('Edit')}
+          >
+            <MdEdit className='text-base-content/75 h-4 w-4' />
+          </button>
+        )}
 
       {/* Delete X — for imported dictionaries and custom web searches, only
           in delete mode. Built-ins (incl. built-in web searches) never show
           it; deletable rows reserve no width when not in delete mode so the
           toggles align across the list. */}
-      {(row.imported || (row.kind === 'web' && !row.builtinWeb)) && isDeleteMode && (
-        <button
-          type='button'
-          onClick={() => onDelete(row)}
-          className='btn btn-ghost btn-sm shrink-0 px-1'
-          aria-label={_('Delete')}
-          title={_('Delete')}
-        >
-          <IoMdCloseCircleOutline className='text-base-content/75 h-5 w-5' />
-        </button>
-      )}
+      {(row.imported || row.kind === 'mydict' || (row.kind === 'web' && !row.builtinWeb)) &&
+        isDeleteMode && (
+          <button
+            type='button'
+            onClick={() => onDelete(row)}
+            className='btn btn-ghost btn-sm shrink-0 px-1'
+            aria-label={_('Delete')}
+            title={_('Delete')}
+          >
+            <IoMdCloseCircleOutline className='text-base-content/75 h-5 w-5' />
+          </button>
+        )}
     </div>
   );
 };
@@ -270,6 +283,9 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
     addWebSearch,
     updateWebSearch,
     removeWebSearch,
+    addMyDict,
+    updateMyDict,
+    removeMyDict,
     saveCustomDictionaries,
     loadCustomDictionaries,
     markAvailableByContentId,
@@ -369,6 +385,68 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
     setWebModal(null);
   };
 
+  // Add/edit MyDict-server modal. `editingId` is `null` for "add".
+  const [myDictModal, setMyDictModal] = useState<null | {
+    editingId: string | null;
+    name: string;
+    url: string;
+    token: string;
+  }>(null);
+  const [myDictTesting, setMyDictTesting] = useState(false);
+  const openAddMyDict = () => setMyDictModal({ editingId: null, name: '', url: '', token: '' });
+  const openEditMyDict = (e: MyDictEntry) =>
+    setMyDictModal({ editingId: e.id, name: e.name, url: e.url, token: e.token });
+  const closeMyDictModal = () => setMyDictModal(null);
+  const isValidMyDictUrl = (url: string) => /^https?:\/\/\S+$/i.test(url.trim());
+  const testMyDict = async () => {
+    if (!myDictModal || myDictTesting) return;
+    if (!isValidMyDictUrl(myDictModal.url)) {
+      eventDispatcher.dispatch('toast', {
+        type: 'warning',
+        message: _('MyDict address must start with http:// or https://.'),
+        timeout: 4000,
+      });
+      return;
+    }
+    setMyDictTesting(true);
+    try {
+      await testMyDictConnection({ url: myDictModal.url, token: myDictModal.token.trim() });
+      eventDispatcher.dispatch('toast', {
+        type: 'success',
+        message: _('Connection successful.'),
+        timeout: 3000,
+      });
+    } catch (err) {
+      eventDispatcher.dispatch('toast', {
+        type: 'error',
+        message: `${_('Connection failed.')} ${err instanceof Error ? err.message : String(err)}`,
+        timeout: 5000,
+      });
+    } finally {
+      setMyDictTesting(false);
+    }
+  };
+  const submitMyDictModal = async () => {
+    if (!myDictModal) return;
+    if (!myDictModal.name.trim() || !isValidMyDictUrl(myDictModal.url)) {
+      eventDispatcher.dispatch('toast', {
+        type: 'warning',
+        message: _('Enter a name and an address starting with http:// or https://.'),
+        timeout: 4000,
+      });
+      return;
+    }
+    const { editingId, name, url, token } = myDictModal;
+    if (editingId) {
+      updateMyDict(editingId, { name, url, token });
+      evictProvider(editingId);
+    } else {
+      addMyDict(name, url, token);
+    }
+    await saveCustomDictionaries(envConfig);
+    setMyDictModal(null);
+  };
+
   // Edit-imported-dict modal. Only the display `name` is editable; the
   // bundle on disk is untouched.
   const [dictModal, setDictModal] = useState<null | { id: string; name: string }>(null);
@@ -396,6 +474,7 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
   const buildRows = (): ProviderRow[] => {
     const dictById = new Map(dictionaries.map((d) => [d.id, d]));
     const webById = new Map((settings.webSearches ?? []).map((w) => [w.id, w]));
+    const myDictById = new Map((settings.myDicts ?? []).map((m) => [m.id, m]));
     const rows: ProviderRow[] = [];
     // Cache cross-row platform checks so we don't re-walk navigator
     // for every system-id encounter (and so the first iteration
@@ -458,6 +537,13 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
         });
         continue;
       }
+      if (id.startsWith('mydict:')) {
+        if (!isTauriAppPlatform()) continue;
+        const m = myDictById.get(id);
+        if (!m || m.deletedAt) continue;
+        rows.push({ id, label: m.name, kind: 'mydict', badge: _('MyDict'), myDict: m });
+        continue;
+      }
       if (id.startsWith('web:')) {
         const w = webById.get(id);
         if (!w || w.deletedAt) continue;
@@ -503,7 +589,9 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
   };
 
   const rows = buildRows();
-  const hasDeletable = rows.some((r) => r.imported || (r.kind === 'web' && !r.builtinWeb));
+  const hasDeletable = rows.some(
+    (r) => r.imported || r.kind === 'mydict' || (r.kind === 'web' && !r.builtinWeb),
+  );
 
   // System-dictionary handoff is exclusive at lookup time — but only on
   // platforms where it's actually supported. `providerEnabled` is whole-field
@@ -641,6 +729,9 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
       }
       removeDictionary(dict.id);
       evictProvider(dict.id);
+    } else if (row.kind === 'mydict' && row.myDict) {
+      removeMyDict(row.myDict.id);
+      evictProvider(row.id);
     } else if (row.kind === 'web' && !row.builtinWeb && row.webSearch) {
       removeWebSearch(row.webSearch.id);
       evictProvider(row.id);
@@ -652,7 +743,9 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
     // Auto-leave delete mode when the last deletable entry is gone — there's
     // nothing left to delete (edit mode is gated on the same row set).
     const remaining = rows.filter(
-      (r) => r.id !== row.id && (r.imported || (r.kind === 'web' && !r.builtinWeb)),
+      (r) =>
+        r.id !== row.id &&
+        (r.imported || r.kind === 'mydict' || (r.kind === 'web' && !r.builtinWeb)),
     );
     if (remaining.length === 0) {
       setIsDeleteMode(false);
@@ -785,6 +878,7 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
                   onToggle={handleToggle}
                   onDelete={handleDelete}
                   onEditWebSearch={openEditWebSearch}
+                  onEditMyDict={openEditMyDict}
                   onEditDict={openEditDict}
                   _={_}
                 />
@@ -811,7 +905,7 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
         </SettingsRow>
       </BoxedList>
 
-      <div className='mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2'>
+      <div className='mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3'>
         <button
           type='button'
           onClick={handleImport}
@@ -846,6 +940,34 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
             {importing ? _('Importing…') : _('Import Dictionary')}
           </span>
         </button>
+        {isTauriAppPlatform() && (
+          <button
+            type='button'
+            onClick={openAddMyDict}
+            className={clsx(
+              'eink-bordered group flex h-11 items-center justify-center gap-2.5',
+              'border-base-200 bg-base-100 rounded-lg border px-4',
+              'text-base-content text-sm font-medium',
+              'transition-colors duration-150',
+              'hover:border-base-300 hover:bg-base-300/40',
+              'active:bg-base-200/80',
+              'focus-visible:ring-base-content/15 focus-visible:outline-none focus-visible:ring-2',
+            )}
+          >
+            <span
+              className={clsx(
+                'eink-inverted',
+                'flex h-5 w-5 items-center justify-center rounded-full',
+                'bg-base-200 text-base-content/60',
+                'transition-colors duration-150',
+                'group-hover:bg-base-content group-hover:text-base-100',
+              )}
+            >
+              <MdAdd className='h-3.5 w-3.5' />
+            </span>
+            <span className='line-clamp-1'>{_('Add MyDict')}</span>
+          </button>
+        )}
         <button
           type='button'
           onClick={openAddWebSearch}
@@ -962,6 +1084,80 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
             aria-label={_('Close')}
             className='modal-backdrop'
             onClick={closeWebModal}
+          />
+        </div>
+      )}
+
+      {/* Add / edit MyDict-server modal. */}
+      {myDictModal && (
+        <div className='modal modal-open' role='dialog'>
+          <div className='modal-box w-11/12 max-w-md'>
+            <h3 className='text-base font-semibold'>
+              {myDictModal.editingId ? _('Edit MyDict') : _('Add MyDict')}
+            </h3>
+            <div className='mt-4 space-y-3'>
+              <label className='form-control w-full'>
+                <span className='label-text text-sm'>{_('Name')}</span>
+                <input
+                  type='text'
+                  className='input input-bordered input-sm w-full'
+                  value={myDictModal.name}
+                  placeholder='MyDict'
+                  onChange={(e) => setMyDictModal((m) => (m ? { ...m, name: e.target.value } : m))}
+                />
+              </label>
+              <label className='form-control w-full'>
+                <span className='label-text text-sm'>{_('MyDict Service Address')}</span>
+                <input
+                  type='url'
+                  className='input input-bordered input-sm w-full'
+                  value={myDictModal.url}
+                  placeholder='https://192.168.1.2:8443'
+                  onChange={(e) => setMyDictModal((m) => (m ? { ...m, url: e.target.value } : m))}
+                />
+                <span className='label-text-alt text-base-content/60 mt-1 text-xs'>
+                  {_('HTTP and self-signed HTTPS certificates are supported.')}
+                </span>
+              </label>
+              <label className='form-control w-full'>
+                <span className='label-text text-sm'>{_('Token')}</span>
+                <input
+                  type='password'
+                  className='input input-bordered input-sm w-full'
+                  value={myDictModal.token}
+                  autoComplete='off'
+                  onChange={(e) => setMyDictModal((m) => (m ? { ...m, token: e.target.value } : m))}
+                />
+              </label>
+            </div>
+            <div className='modal-action justify-between'>
+              <button
+                type='button'
+                onClick={testMyDict}
+                disabled={myDictTesting}
+                className='btn btn-outline btn-sm'
+              >
+                {myDictTesting ? _('Testing…') : _('Test')}
+              </button>
+              <div className='flex gap-2'>
+                <button type='button' onClick={closeMyDictModal} className='btn btn-ghost btn-sm'>
+                  {_('Cancel')}
+                </button>
+                <button
+                  type='button'
+                  onClick={submitMyDictModal}
+                  className='btn btn-primary btn-sm'
+                >
+                  {_('Save')}
+                </button>
+              </div>
+            </div>
+          </div>
+          <button
+            type='button'
+            aria-label={_('Close')}
+            className='modal-backdrop'
+            onClick={closeMyDictModal}
           />
         </div>
       )}
