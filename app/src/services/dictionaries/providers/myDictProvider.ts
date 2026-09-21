@@ -23,12 +23,18 @@ const queryMyDict = async (
   word: string,
   signal?: AbortSignal,
 ): Promise<MyBooksResponse> => {
-  const response = await tauriFetch(buildMyDictQueryUrl(entry.url, word), {
-    headers: { Authorization: `Bearer ${entry.token}` },
+  const queryUrl = buildMyDictQueryUrl(entry.url, word);
+  console.log(`[MyDict] GET ${queryUrl}`);
+  const response = await tauriFetch(queryUrl, {
+    headers: entry.token ? { Authorization: `Bearer ${entry.token}` } : {},
     signal,
     danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  console.log(`[MyDict] ${response.status} ${queryUrl}`);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status} ${detail}`.trim());
+  }
   return (await response.json()) as MyBooksResponse;
 };
 
@@ -54,10 +60,12 @@ export const createMyDictProvider = (entry: MyDictEntry): DictionaryProvider => 
       renderMyBooksResults(data.results, ctx.container);
       return { ok: true, headword: trimmed, sourceLabel: entry.name };
     } catch (error) {
-      if ((error as { name?: string }).name === 'AbortError') {
+      // plugin-http throws a plain `Error('Request cancelled')` (not an
+      // AbortError) when the caller's signal fires, so check the signal too.
+      if (ctx.signal.aborted || (error as { name?: string }).name === 'AbortError') {
         return { ok: false, reason: 'error', message: 'aborted' };
       }
-      console.error('MyDict lookup failed', error);
+      console.error(`MyDict lookup failed (${entry.url}): ${String(error)}`);
       return {
         ok: false,
         reason: 'error',
