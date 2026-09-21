@@ -2,6 +2,7 @@
 
 import clsx from 'clsx';
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from '@/hooks/useTranslation';
 import { MdStar, MdChevronRight } from 'react-icons/md';
 
 export interface MetaItem {
@@ -36,6 +37,7 @@ const MetaList: React.FC<MetaListProps> = ({
   onShowMore,
   showAll = false,
 }) => {
+  const _ = useTranslation();
   const [displayItems, setDisplayItems] = useState<MetaItem[]>([]);
 
   useEffect(() => {
@@ -115,7 +117,9 @@ const MetaList: React.FC<MetaListProps> = ({
   return (
     <div className='flex flex-col gap-3'>
       {/* Display items */}
-      <div className='flex flex-wrap gap-2'>{displayItems.map(renderBadge)}</div>
+      <div className='flex max-h-[calc(100vh-10rem)] flex-wrap gap-2 overflow-y-auto'>
+        {displayItems.map(renderBadge)}
+      </div>
 
       {/* Show more button */}
       {total > MAX_ITEMS && !showAll && onShowMore && (
@@ -123,7 +127,7 @@ const MetaList: React.FC<MetaListProps> = ({
           onClick={onShowMore}
           className='flex items-center gap-1 text-sm text-primary hover:text-primary/80 transition-colors self-start'
         >
-          <span>Show all ({total})</span>
+          <span>{_('Show all ({{total}})', { total })}</span>
           <MdChevronRight size={16} />
         </button>
       )}

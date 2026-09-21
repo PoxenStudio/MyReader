@@ -2100,5 +2100,6 @@
   "Audiobook Storage": "有聲書儲存空間",
   "Total": "總計",
   "Edge Translator": "Edge Translator",
-  "Failed to open audiobook": "開啟有聲書失敗"
+  "Failed to open audiobook": "開啟有聲書失敗",
+  "Show all ({{total}})": "顯示全部（{{total}}）"
 }
