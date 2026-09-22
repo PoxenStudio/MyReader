@@ -13,8 +13,6 @@ import { EXTS, sniffBinaryBookFormat } from '@/libs/document';
 import { isTauriAppPlatform } from '@/services/environment';
 import { getCloudBookId, getMyBooksId } from '@/utils/bookConverter';
 import { uploadBookToMyBooks, deleteBookFromMyBooks } from '@/services/mybooksService';
-import { useSettingsStore } from '@/store/settingsStore';
-import { NAS_CHROME_USER_AGENT, getNasCookies } from '@/services/mybooks/nasCookieStore';
 import { buildMyBooksCookieHeaders } from '@/services/mybooks/cookieHeaders';
 
 export async function deleteBook(
@@ -242,16 +240,20 @@ export async function downloadMyBooksBook(
     const { webDownload } = await import('@/utils/transfer');
     // `webDownload` uses `tauriFetch` on Tauri, same as `BookCover.tsx`'s
     // cover fetch — its cookie jar never sees cookies captured from the NAS
-    // login webview, so they have to be attached explicitly here too.
-    let headers: Record<string, string> | undefined;
-    if (isTauriAppPlatform()) {
-      const nasSettings = useSettingsStore.getState().settings.nas;
-      if (nasSettings?.enabled) {
-        const nasCookie = getNasCookies(new URL(downloadUrl).host);
-        headers = { 'User-Agent': NAS_CHROME_USER_AGENT, ...(nasCookie && { Cookie: nasCookie }) };
-      }
-    }
-    const { blob } = await webDownload(downloadUrl, onProgress, headers, 'include');
+    // login webview, so they have to be attached explicitly here too. Must
+    // merge in the MyBooks session cookie (not just the NAS relay cookie),
+    // otherwise the request clears the NAS gateway but MyBooks itself sees no
+    // session and serves its homepage HTML, which then gets silently
+    // "converted" into a garbage EPUB below.
+    const headers = isTauriAppPlatform()
+      ? buildMyBooksCookieHeaders(downloadUrl, { alwaysSession: true })
+      : undefined;
+    const { blob } = await webDownload(
+      downloadUrl,
+      onProgress,
+      headers && Object.keys(headers).length ? headers : undefined,
+      'include',
+    );
     const bookArrayBuffer = await blob.arrayBuffer();
     const probeFile = new File([bookArrayBuffer], `${book.sourceTitle || book.title}.txt`);
     const sniffedFormat = await sniffBinaryBookFormat(probeFile);
