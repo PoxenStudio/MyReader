@@ -92,9 +92,41 @@ describe('BookReadingStatsBanner', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders nothing when bookId is not resolvable', () => {
+  it('renders nothing when bookId is not resolvable and there are no local pending seconds', () => {
     const { container } = render(<BookReadingStatsBanner bookId={0} format='epub' />);
     expect(getBookReadingStatsMock).not.toHaveBeenCalled();
     expect(container.firstChild).toBeNull();
+  });
+
+  it('shows local offline reading time when bookId is not resolvable (local-only book)', () => {
+    render(<BookReadingStatsBanner bookId={0} format='epub' localPendingSeconds={300} />);
+    expect(getBookReadingStatsMock).not.toHaveBeenCalled();
+
+    const minutes = screen.getByText('5');
+    expect(minutes.className).toMatch(/font-bold/);
+    expect(screen.queryByText(/Started/)).toBeNull();
+  });
+
+  it('shows local offline reading time when the server has no stats yet', async () => {
+    getBookReadingStatsMock.mockResolvedValue([]);
+
+    render(<BookReadingStatsBanner bookId={42} format='epub' localPendingSeconds={120} />);
+
+    await waitFor(() => {
+      expect(getBookReadingStatsMock).toHaveBeenCalledWith(42, 'epub');
+    });
+
+    const minutes = await screen.findByText('2');
+    expect(minutes.className).toMatch(/font-bold/);
+  });
+
+  it('adds local pending offline seconds on top of the server total', async () => {
+    getBookReadingStatsMock.mockResolvedValue([makeStat({ total_seconds: 300 })]);
+
+    render(<BookReadingStatsBanner bookId={42} format='epub' localPendingSeconds={120} />);
+
+    // 300s server + 120s local = 420s = 7 minutes
+    const minutes = await screen.findByText('7');
+    expect(minutes.className).toMatch(/font-bold/);
   });
 });

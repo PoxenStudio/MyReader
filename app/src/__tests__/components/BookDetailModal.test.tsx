@@ -12,6 +12,7 @@ vi.mock('@/hooks/useTranslation', () => ({
 const appSvc = {
   getBookFileSize: vi.fn(async () => 1024),
   fetchBookDetails: vi.fn(async () => null),
+  loadBookConfig: vi.fn(async () => ({ pendingReadingSeconds: {} })),
 };
 
 vi.mock('@/context/EnvContext', () => ({

@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   MdOutlineCloudUpload,
   MdOutlineCloudDownload,
@@ -60,10 +60,40 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
   onReview,
 }) => {
   const _ = useTranslation();
-  const { envConfig } = useEnv();
+  const { envConfig, appService } = useEnv();
   const { settings } = useSettingsStore();
   const reviewAllowed = useMyBooksBookReviewAllowed();
   const { user } = useAuth();
+  const [localPendingReadingSeconds, setLocalPendingReadingSeconds] = useState(0);
+
+  useEffect(() => {
+    // Sums the local "active reading" timer's not-yet-synced seconds (see
+    // activeReadingTracker.ts) so offline reading still shows up here even
+    // before it reaches mybooks — read straight off disk since this view can
+    // be opened for a book that isn't currently open in the reader.
+    let cancelled = false;
+    if (!appService) {
+      setLocalPendingReadingSeconds(0);
+      return;
+    }
+    appService
+      .loadBookConfig(book, settings)
+      .then((config) => {
+        if (cancelled) return;
+        const total = Object.values(config.pendingReadingSeconds ?? {}).reduce(
+          (sum, seconds) => sum + seconds,
+          0,
+        );
+        setLocalPendingReadingSeconds(total);
+      })
+      .catch(() => {
+        if (!cancelled) setLocalPendingReadingSeconds(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book, appService]);
 
   const toggleSeriesCollapse = () => {
     saveSysSettings(envConfig, 'metadataSeriesCollapsed', !settings.metadataSeriesCollapsed);
@@ -148,9 +178,11 @@ const BookDetailView: React.FC<BookDetailViewProps> = ({
       </div>
 
       <div className='text-base-content my-4'>
-        {book.storageType === 'cloud' && (book.bookId ?? 0) > 0 && (
-          <BookReadingStatsBanner bookId={book.bookId!} format={book.format} />
-        )}
+        <BookReadingStatsBanner
+          bookId={getMyBooksId(book)}
+          format={book.format}
+          localPendingSeconds={localPendingReadingSeconds}
+        />
         <div className='metadata-others'>
           <button
             className={clsx(

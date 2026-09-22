@@ -7,6 +7,10 @@ import { getBookReadingStats, type MyBooksBookReadingStat } from '@/services/myb
 interface BookReadingStatsBannerProps {
   bookId: number;
   format: string;
+  // Seconds tracked by the local "active reading" timer that haven't been
+  // pushed to mybooks yet (see activeReadingTracker.ts) — covers offline
+  // reading, which the server total can't reflect until the next sync.
+  localPendingSeconds?: number;
 }
 
 // Private-use-area sentinels swapped in for {{hours}}/{{minutes}} so the
@@ -25,7 +29,11 @@ const MARKER_RE = new RegExp(`(${HOURS_MARKER}|${MINUTES_MARKER})`);
  * Data source: `/api/book/<id>/reading_stats` (document/MyBooks_WebAPI.md
  * §3.49), filtered to `format`.
  */
-const BookReadingStatsBanner: React.FC<BookReadingStatsBannerProps> = ({ bookId, format }) => {
+const BookReadingStatsBanner: React.FC<BookReadingStatsBannerProps> = ({
+  bookId,
+  format,
+  localPendingSeconds = 0,
+}) => {
   const _ = useTranslation();
   const [stat, setStat] = useState<MyBooksBookReadingStat | null>(null);
 
@@ -50,9 +58,10 @@ const BookReadingStatsBanner: React.FC<BookReadingStatsBannerProps> = ({ bookId,
     };
   }, [bookId, format]);
 
-  if (!stat) return null;
+  const totalSeconds = (stat?.total_seconds ?? 0) + localPendingSeconds;
+  if (totalSeconds <= 0) return null;
 
-  const totalMinutes = Math.round(stat.total_seconds / 60);
+  const totalMinutes = Math.round(totalSeconds / 60);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
 
@@ -78,7 +87,7 @@ const BookReadingStatsBanner: React.FC<BookReadingStatsBannerProps> = ({ bookId,
           ),
         )}
       </span>
-      {stat.start_time && (
+      {stat?.start_time && (
         <span className='text-neutral-content text-sm'>
           {_('Started {{date}}', { date: formatDate(stat.start_time, true) ?? '' })}
         </span>
