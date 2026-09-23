@@ -81,6 +81,7 @@ export function useDictionaryResults({
   const { dictionaries, settings } = useCustomDictionaryStore();
   const isDarkMode = useThemeStore((s) => s.isDarkMode);
   const themeCode = useThemeStore((s) => s.themeCode);
+  const _ = useTranslation();
 
   const computedProviders = getEnabledProviders({
     settings,
@@ -267,6 +268,7 @@ export function useDictionaryResults({
                 isDarkMode,
                 bg: themeCode.bg,
                 fg: themeCode.fg,
+                _,
               });
               if (controller.signal.aborted) return;
               if (outcome.ok || outcome.reason !== 'empty') break;
@@ -297,7 +299,7 @@ export function useDictionaryResults({
     });
 
     return () => controllers.forEach((c) => c.abort());
-  }, [currentWord, definitionProviders, lang, pushWord, isDarkMode, themeCode.bg, themeCode.fg]);
+  }, [currentWord, definitionProviders, lang, pushWord, isDarkMode, themeCode.bg, themeCode.fg, _]);
 
   // Visible cards = providers that are still loading or finished with a
   // result. Empty/unsupported/error cards are removed entirely.

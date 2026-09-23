@@ -32,6 +32,15 @@ export interface DictionaryLookupContext {
   bg?: string;
   /** Theme foreground color (e.g. `#1a1a1a`). Forwarded into shadow-scoped CSS. */
   fg?: string;
+  /**
+   * Real translation function (from `useTranslation`), for providers that
+   * build DOM text directly in `lookup()` instead of going through a React
+   * component. Module-level `stubTranslation` only marks keys for the i18n
+   * scanner and returns them untranslated — it must not be used for text
+   * that lands in `container` here. Optional so unit tests can omit it;
+   * providers should fall back to the identity function when absent.
+   */
+  _?: (key: string, options?: Record<string, number | string>) => string;
 }
 
 export type DictionaryLookupOutcome =

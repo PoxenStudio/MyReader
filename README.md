@@ -30,7 +30,44 @@ Android UI
 3. 增加对MyBooks书籍的下载及阅读支持。 书籍信息分为本地和云端两类, 但不需要做自动同步的操作。之前的多云端同步的功能需要禁用，只做为MyBooks中书籍下载和本地阅读的功能。
 4. Library中的搜索区分当前书架为本地图书时即搜索本地图书，其它情况则为使用MyBooks的搜索接口进行搜索，并使用书架展示。
 5. 支持将阅读数据同步到MyBooks。
+6. 支持MathML及Latex公式显示。
+7. 支持自建英汉词典、汉字词典等，以及百度百科词典。支持连接自己部署的MyDict服务提供的词典。
+
 注意：连接MyBooks服务不需要配置WebDAV同步数据，而是使用自定义协议自动同步阅读数据。
+
+## 词典与翻译
+
+<p align="center">
+  <img src="document/dict_manager.png" alt="MyBooks"></a>
+</p>
+
+其中MyBooks词典是我们基于我们自研的[MyDict](https://github.com/poxenstudio/mydict)服务搭建，内置英汉词典、汉语词典及古地名词典。
+
+看原著时遇到字词可以查：
+<p align="center">
+  <img src="document/dict_mybooks.png" alt="MyBooks"></a>
+</p>
+
+也有百度百科可查:
+<p align="center">
+  <img src="document/dict_baidu_baike.png" alt="Baike"></a>
+</p>
+
+看英文时查词：
+<p align="center">
+  <img src="document/dict_english.png" alt="English Dictionary"></a>
+</p>
+
+也可以选中进行翻译:
+<p align="center">
+  <img src="document/translation.png" alt="Translation"></a>
+</p>
+
+觉得词典不满意，可以自己部署MyDict服务，在词典中添加即可:
+<p align="center">
+  <img src="document/dict_add.png" alt="Add dict"></a>
+</p>
+
 
 ## 安装运行
 在Release中下载对应平台的安装包进行安装。所有安装包都没有进行签名，macOS下需要下载后对下载的dmg执行如下命令:

@@ -91,7 +91,7 @@ export const wikipediaProvider: DictionaryProvider = {
       if (!isTauri) link.target = '_blank';
       link.rel = 'noopener noreferrer';
       link.className = 'not-eink:text-primary underline';
-      link.textContent = _('Read on Wikipedia →');
+      link.textContent = (ctx._ ?? _)('Read on Wikipedia →');
       linkWrapper.appendChild(link);
       ctx.container.append(linkWrapper);
 

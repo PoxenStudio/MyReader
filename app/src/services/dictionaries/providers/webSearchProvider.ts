@@ -49,9 +49,10 @@ export const createWebSearchProvider = ({
     hgroup.append(sub);
     ctx.container.append(hgroup);
 
+    const t = ctx._ ?? _;
     const description = document.createElement('p');
     description.className = 'mt-3 text-sm';
-    description.textContent = _('Open the search result in your browser:');
+    description.textContent = t('Open the search result in your browser:');
     ctx.container.append(description);
 
     const linkWrapper = document.createElement('p');
@@ -66,7 +67,7 @@ export const createWebSearchProvider = ({
       'btn btn-sm btn-primary normal-case text-primary-content not-eink:no-underline';
     // `stubTranslation` is just an extraction marker — the runtime value is
     // the key itself. We interpolate the provider name manually.
-    link.textContent = _('Open in {{name}}').replace('{{name}}', template.name);
+    link.textContent = t('Open in {{name}}').replace('{{name}}', template.name);
     linkWrapper.append(link);
     ctx.container.append(linkWrapper);
 

@@ -50,6 +50,29 @@ describe('Baidu Baike provider', () => {
     expect(link?.href).toBe('https://wapbaike.baidu.com/item/%E8%8B%B9%E6%9E%9C/14822460');
   });
 
+  it('translates the "Read on Baidu Baike" link via ctx._ when the shell provides it', async () => {
+    tauriFetchMock.mockResolvedValueOnce({
+      ok: true,
+      url: 'https://wapbaike.baidu.com/item/%E8%8B%B9%E6%9E%9C/14822460',
+      text: async () => sampleHtml,
+    } as Response);
+    const container = document.createElement('div');
+    const controller = new AbortController();
+    const translate = vi.fn((key: string) =>
+      key === 'Read on Baidu Baike →' ? '在百度百科上阅读 →' : key,
+    );
+
+    await baiduBaikeProvider.lookup('苹果', {
+      signal: controller.signal,
+      container,
+      _: translate,
+    });
+
+    expect(translate).toHaveBeenCalledWith('Read on Baidu Baike →');
+    const link = container.querySelector<HTMLAnchorElement>('a');
+    expect(link?.textContent).toBe('在百度百科上阅读 →');
+  });
+
   it('reports an empty outcome when the entry is not found', async () => {
     tauriFetchMock.mockResolvedValueOnce({
       ok: true,
