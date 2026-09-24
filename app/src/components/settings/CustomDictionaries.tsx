@@ -538,7 +538,6 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
         continue;
       }
       if (id.startsWith('mydict:')) {
-        if (!isTauriAppPlatform()) continue;
         const m = myDictById.get(id);
         if (!m || m.deletedAt) continue;
         rows.push({ id, label: m.name, kind: 'mydict', badge: _('MyDict'), myDict: m });
@@ -940,34 +939,32 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
             {importing ? _('Importing…') : _('Import Dictionary')}
           </span>
         </button>
-        {isTauriAppPlatform() && (
-          <button
-            type='button'
-            onClick={openAddMyDict}
+        <button
+          type='button'
+          onClick={openAddMyDict}
+          className={clsx(
+            'eink-bordered group flex h-11 items-center justify-center gap-2.5',
+            'border-base-200 bg-base-100 rounded-lg border px-4',
+            'text-base-content text-sm font-medium',
+            'transition-colors duration-150',
+            'hover:border-base-300 hover:bg-base-300/40',
+            'active:bg-base-200/80',
+            'focus-visible:ring-base-content/15 focus-visible:outline-none focus-visible:ring-2',
+          )}
+        >
+          <span
             className={clsx(
-              'eink-bordered group flex h-11 items-center justify-center gap-2.5',
-              'border-base-200 bg-base-100 rounded-lg border px-4',
-              'text-base-content text-sm font-medium',
+              'eink-inverted',
+              'flex h-5 w-5 items-center justify-center rounded-full',
+              'bg-base-200 text-base-content/60',
               'transition-colors duration-150',
-              'hover:border-base-300 hover:bg-base-300/40',
-              'active:bg-base-200/80',
-              'focus-visible:ring-base-content/15 focus-visible:outline-none focus-visible:ring-2',
+              'group-hover:bg-base-content group-hover:text-base-100',
             )}
           >
-            <span
-              className={clsx(
-                'eink-inverted',
-                'flex h-5 w-5 items-center justify-center rounded-full',
-                'bg-base-200 text-base-content/60',
-                'transition-colors duration-150',
-                'group-hover:bg-base-content group-hover:text-base-100',
-              )}
-            >
-              <MdAdd className='h-3.5 w-3.5' />
-            </span>
-            <span className='line-clamp-1'>{_('Add MyDict')}</span>
-          </button>
-        )}
+            <MdAdd className='h-3.5 w-3.5' />
+          </span>
+          <span className='line-clamp-1'>{_('Add MyDict')}</span>
+        </button>
         <button
           type='button'
           onClick={openAddWebSearch}

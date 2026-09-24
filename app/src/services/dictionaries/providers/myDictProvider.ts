@@ -2,20 +2,34 @@
  * User-configured MyDict server provider (poxenstudio/mydict).
  *
  * Same API as the built-in MyBooks dictionary (`GET /api/v1/query?word=`,
- * bearer token). Tauri-only; requests go through `@tauri-apps/plugin-http`
+ * bearer token). On Tauri, requests go through `@tauri-apps/plugin-http`
  * with certificate validation disabled, since self-hosted servers are often
- * plain http or use self-signed https certificates.
+ * plain http or use self-signed https certificates. On the web build
+ * (embedded MyReader) MyDict sends no CORS headers, so lookups are relayed
+ * through the same-origin `/api/mydict/query` route instead.
  */
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { getAPIBaseUrl, isTauriAppPlatform } from '@/services/environment';
 import type { DictionaryProvider, DictionaryLookupOutcome, MyDictEntry } from '../types';
 import { renderMyBooksResults, type MyBooksResponse } from './myBooksDictProvider';
+import { buildMyDictQueryUrl } from './myDictUrl';
 
-export const buildMyDictQueryUrl = (baseUrl: string, word: string): string => {
-  let base = baseUrl.trim().replace(/\/+$/, '');
-  if (!/\/api\/v1\/query$/.test(base)) base += '/api/v1/query';
-  const url = new URL(base);
-  url.searchParams.set('word', word);
-  return url.toString();
+const queryMyDictViaProxy = async (
+  entry: Pick<MyDictEntry, 'url' | 'token'>,
+  word: string,
+  signal?: AbortSignal,
+): Promise<MyBooksResponse> => {
+  const response = await fetch(`${getAPIBaseUrl()}/mydict/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: entry.url, token: entry.token, word }),
+    signal,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error((data as { error?: string } | null)?.error || `HTTP ${response.status}`);
+  }
+  return data as MyBooksResponse;
 };
 
 const queryMyDict = async (
@@ -23,6 +37,7 @@ const queryMyDict = async (
   word: string,
   signal?: AbortSignal,
 ): Promise<MyBooksResponse> => {
+  if (!isTauriAppPlatform()) return queryMyDictViaProxy(entry, word, signal);
   const queryUrl = buildMyDictQueryUrl(entry.url, word);
   console.log(`[MyDict] GET ${queryUrl}`);
   const response = await tauriFetch(queryUrl, {

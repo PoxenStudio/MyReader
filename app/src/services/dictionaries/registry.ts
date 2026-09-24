@@ -91,8 +91,7 @@ const getOrCreate = (
     return builtin;
   }
   if (id.startsWith('mydict:')) {
-    // Tauri-only, same CORS reason as the built-in MyBooks provider.
-    if (!isTauriAppPlatform()) return undefined;
+    // Web builds relay through `/api/mydict/query` (see myDictProvider.ts).
     const entry = (settings.myDicts ?? []).find((d: MyDictEntry) => d.id === id);
     if (!entry || entry.deletedAt) return undefined;
     const provider = createMyDictProvider(entry);
