@@ -11,29 +11,31 @@
  * (`webserver/plugins/meta/baike/baidubaike/baidubaike.py`,
  * `CHROME_MOBILE_HEADERS`), reused here as the reference implementation.
  *
- * Tauri-only, for the same reason as `myBooksDictProvider`: the page sends
- * no CORS headers and a browser `fetch` can't override `User-Agent` anyway,
- * so this only works via `@tauri-apps/plugin-http`'s native request path.
- * The registry only instantiates this provider when `isTauriAppPlatform()`
- * is true.
+ * The page sends no CORS headers and a browser `fetch` can't override
+ * `User-Agent` anyway, so native builds go through `@tauri-apps/plugin-http`
+ * and the web build relays through the same-origin `/api/mybooks/baike` route.
  */
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { isTauriAppPlatform } from '@/services/environment';
 import type { DictionaryProvider, DictionaryLookupOutcome } from '../types';
 import { BUILTIN_PROVIDER_IDS } from '../types';
 import { stubTranslation as _ } from '@/utils/misc';
-
-const BAIKE_SEARCH_URL = 'https://baike.baidu.com/search/word';
-
-// Mirrors MyBooks' `CHROME_MOBILE_HEADERS` — a desktop UA (or no UA) gets a
-// "百度安全验证" captcha page instead of the article.
-const BAIKE_HEADERS = {
-  'User-Agent':
-    'Mozilla/5.0 (Linux; U; Android 16;) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36',
-  'Accept-Language': 'zh-CN,zh;q=0.8,zh-TW;q=0.6',
-  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-};
+import { BAIKE_HEADERS, BAIKE_URL_HEADER, buildBaikeSearchUrl } from './baiduBaikeRequest';
 
 const NOT_FOUND_MARKER = '百度百科尚未收录词条';
+
+/** Returns the response plus the final (post-redirect) item URL for the link. */
+const fetchBaike = async (word: string, signal: AbortSignal) => {
+  const searchUrl = buildBaikeSearchUrl(word);
+  if (isTauriAppPlatform()) {
+    const response = await tauriFetch(searchUrl, { headers: BAIKE_HEADERS, signal });
+    return { response, itemUrl: response.url || searchUrl };
+  }
+  // Same-origin relative path: in the embedded deployment nginx only routes
+  // `/api/mybooks/*` to MyReader (other `/api/*` goes to MyBooks).
+  const response = await fetch(`/api/mybooks/baike?word=${encodeURIComponent(word)}`, { signal });
+  return { response, itemUrl: response.headers.get(BAIKE_URL_HEADER) || searchUrl };
+};
 
 const getMetaContent = (doc: Document, property: string): string | undefined =>
   doc.querySelector(`meta[property="${property}"]`)?.getAttribute('content') ?? undefined;
@@ -46,14 +48,7 @@ export const baiduBaikeProvider: DictionaryProvider = {
     const trimmed = word.trim();
     if (!trimmed) return { ok: false, reason: 'empty' };
     try {
-      const url = new URL(BAIKE_SEARCH_URL);
-      url.searchParams.set('pic', '1');
-      url.searchParams.set('enc', 'utf-8');
-      url.searchParams.set('word', trimmed);
-      const response = await tauriFetch(url.toString(), {
-        headers: BAIKE_HEADERS,
-        signal: ctx.signal,
-      });
+      const { response, itemUrl } = await fetchBaike(trimmed, ctx.signal);
       if (!response.ok) {
         return { ok: false, reason: 'error', message: `HTTP ${response.status}` };
       }
@@ -106,7 +101,7 @@ export const baiduBaikeProvider: DictionaryProvider = {
       const linkWrapper = document.createElement('p');
       linkWrapper.className = 'mt-3 px-2 text-sm';
       const link = document.createElement('a');
-      link.href = response.url || url.toString();
+      link.href = itemUrl;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       link.className = 'not-eink:text-primary underline';

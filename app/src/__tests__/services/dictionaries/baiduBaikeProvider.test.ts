@@ -13,12 +13,17 @@ const sampleHtml = `<!DOCTYPE html><html><head>
 </head><body></body></html>`;
 
 describe('Baidu Baike provider', () => {
+  const originalPlatform = process.env['NEXT_PUBLIC_APP_PLATFORM'];
+
   beforeEach(() => {
     tauriFetchMock.mockReset();
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'tauri';
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalPlatform === undefined) delete process.env['NEXT_PUBLIC_APP_PLATFORM'];
+    else process.env['NEXT_PUBLIC_APP_PLATFORM'] = originalPlatform;
   });
 
   it('has the expected provider id', () => {
@@ -98,5 +103,29 @@ describe('Baidu Baike provider', () => {
 
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.reason).toBe('error');
+  });
+
+  it('relays through the same-origin /api/mybooks/baike proxy on a web build', async () => {
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'web';
+    const itemUrl = 'https://wapbaike.baidu.com/item/%E8%8B%B9%E6%9E%9C/14822460';
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(sampleHtml, { status: 200, headers: { 'X-Baike-Url': itemUrl } }),
+      );
+    const container = document.createElement('div');
+
+    const outcome = await baiduBaikeProvider.lookup('苹果', {
+      signal: new AbortController().signal,
+      container,
+    });
+
+    expect(tauriFetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      `/api/mybooks/baike?word=${encodeURIComponent('苹果')}`,
+    );
+    expect(outcome.ok).toBe(true);
+    expect(container.textContent).toContain('苹果是蔷薇科苹果属植物。');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe(itemUrl);
   });
 });

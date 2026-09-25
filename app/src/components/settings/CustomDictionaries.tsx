@@ -26,7 +26,6 @@ import { CSS } from '@dnd-kit/utilities';
 import { useEnv } from '@/context/EnvContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useFileSelector } from '@/hooks/useFileSelector';
-import { isTauriAppPlatform } from '@/services/environment';
 import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
 import { eventDispatcher } from '@/utils/event';
 import { evictProvider, isSystemDictionaryEnabled } from '@/services/dictionaries/registry';
@@ -499,19 +498,6 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
           reason: disabled
             ? _('System dictionary integration is coming soon on this platform.')
             : undefined,
-        });
-        continue;
-      }
-      if (id === BUILTIN_PROVIDER_IDS.myBooks || id === BUILTIN_PROVIDER_IDS.baiduBaike) {
-        // Both go through `@tauri-apps/plugin-http` — neither upstream sends
-        // CORS headers, so a web-build `fetch` would be blocked. Hide the
-        // row entirely on web rather than show a toggle that can't work.
-        if (!isTauriAppPlatform()) continue;
-        rows.push({
-          id,
-          label: builtinLabel(id, _),
-          kind: 'builtin',
-          badge: _('Built-in'),
         });
         continue;
       }

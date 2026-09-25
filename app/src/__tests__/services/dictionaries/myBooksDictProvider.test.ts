@@ -6,12 +6,17 @@ const { tauriFetchMock } = vi.hoisted(() => ({ tauriFetchMock: vi.fn() }));
 vi.mock('@tauri-apps/plugin-http', () => ({ fetch: tauriFetchMock }));
 
 describe('MyBooks dictionary provider', () => {
+  const originalPlatform = process.env['NEXT_PUBLIC_APP_PLATFORM'];
+
   beforeEach(() => {
     tauriFetchMock.mockReset();
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'tauri';
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalPlatform === undefined) delete process.env['NEXT_PUBLIC_APP_PLATFORM'];
+    else process.env['NEXT_PUBLIC_APP_PLATFORM'] = originalPlatform;
   });
 
   it('has the expected provider id', () => {
@@ -80,5 +85,40 @@ describe('MyBooks dictionary provider', () => {
 
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.reason).toBe('error');
+  });
+
+  it('relays through the same-origin MyDict proxy on a web build', async () => {
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'web';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          results: [
+            {
+              dictionary_name: 'ECDICT英汉词典',
+              word: 'apple',
+              phonetic: null,
+              definition: 'n. 苹果',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const container = document.createElement('div');
+
+    const outcome = await myBooksDictProvider.lookup('apple', {
+      signal: new AbortController().signal,
+      container,
+    });
+
+    expect(tauriFetchMock).not.toHaveBeenCalled();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('/api/mybooks/mydict/query');
+    const body = JSON.parse(String(init!.body));
+    expect(body.url).toBe('https://mybooks.top/dict');
+    expect(body.token).toMatch(/^sk-/);
+    expect(body.word).toBe('apple');
+    expect(outcome.ok).toBe(true);
+    expect(container.textContent).toContain('n. 苹果');
   });
 });
