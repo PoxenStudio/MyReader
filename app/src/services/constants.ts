@@ -30,13 +30,6 @@ import {
 } from '@/types/settings';
 import { getDefaultMaxBlockSize, getDefaultMaxInlineSize } from '@/utils/config';
 import { stubTranslation as _ } from '@/utils/misc';
-
-// Inlined rather than imported from '@/services/environment' — that module
-// imports `MYBOOKS_NODE_BASE_URL`/`MYBOOKS_WEB_BASE_URL` from this file, so
-// importing `isTauriAppPlatform` back here would create a circular import
-// (environment.ts ⇄ constants.ts) that leaves this binding `undefined` at
-// module-eval time depending on which side loads first.
-const isTauriBuild = () => process.env['NEXT_PUBLIC_APP_PLATFORM'] === 'tauri';
 import { DEFAULT_AI_SETTINGS } from './ai/constants';
 import { DEFAULT_ANNOTATION_TOOLBAR_ITEMS } from '@/utils/annotationToolbar';
 import { DEFAULT_SENTENCE_GAP_SEC } from './tts/EdgeTTSClient';
@@ -159,10 +152,10 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   // on load, appending anything missing to the END of this order. MyBooks and
   // Baidu Baike must therefore already be listed here (ahead of Wiktionary/
   // Wikipedia) rather than left for that backfill, or they'd land at the
-  // bottom of the list instead of the top. Wiktionary/Wikipedia are the
-  // default-open pair only on web, where MyBooks/Baidu Baike can't run (no
-  // CORS); Tauri's richer default flips this pair off in favor of those two
-  // instead — see `DEFAULT_DICTIONARY_SETTINGS` in `customDictionaryStore.ts`.
+  // bottom of the list instead of the top. MyBooks/Baidu Baike are the
+  // default-open pair on every platform (web relays them through
+  // `/api/mybooks/*`) — see `DEFAULT_DICTIONARY_SETTINGS` in
+  // `customDictionaryStore.ts`.
   dictionarySettings: {
     providerOrder: [
       'builtin:mybooks',
@@ -171,10 +164,10 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
       'builtin:wikipedia',
     ],
     providerEnabled: {
-      'builtin:mybooks': isTauriBuild(),
-      'builtin:baidu-baike': isTauriBuild(),
-      'builtin:wiktionary': !isTauriBuild(),
-      'builtin:wikipedia': !isTauriBuild(),
+      'builtin:mybooks': true,
+      'builtin:baidu-baike': true,
+      'builtin:wiktionary': false,
+      'builtin:wikipedia': false,
     },
   },
 

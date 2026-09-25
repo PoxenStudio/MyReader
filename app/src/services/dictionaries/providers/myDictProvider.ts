@@ -2,41 +2,11 @@
  * User-configured MyDict server provider (poxenstudio/mydict).
  *
  * Same API as the built-in MyBooks dictionary (`GET /api/v1/query?word=`,
- * bearer token). Tauri-only; requests go through `@tauri-apps/plugin-http`
- * with certificate validation disabled, since self-hosted servers are often
- * plain http or use self-signed https certificates.
+ * bearer token); see `myDictQuery.ts` for the Tauri / web request paths.
  */
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import type { DictionaryProvider, DictionaryLookupOutcome, MyDictEntry } from '../types';
-import { renderMyBooksResults, type MyBooksResponse } from './myBooksDictProvider';
-
-export const buildMyDictQueryUrl = (baseUrl: string, word: string): string => {
-  let base = baseUrl.trim().replace(/\/+$/, '');
-  if (!/\/api\/v1\/query$/.test(base)) base += '/api/v1/query';
-  const url = new URL(base);
-  url.searchParams.set('word', word);
-  return url.toString();
-};
-
-const queryMyDict = async (
-  entry: Pick<MyDictEntry, 'url' | 'token'>,
-  word: string,
-  signal?: AbortSignal,
-): Promise<MyBooksResponse> => {
-  const queryUrl = buildMyDictQueryUrl(entry.url, word);
-  console.log(`[MyDict] GET ${queryUrl}`);
-  const response = await tauriFetch(queryUrl, {
-    headers: entry.token ? { Authorization: `Bearer ${entry.token}` } : {},
-    signal,
-    danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
-  });
-  console.log(`[MyDict] ${response.status} ${queryUrl}`);
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`HTTP ${response.status} ${detail}`.trim());
-  }
-  return (await response.json()) as MyBooksResponse;
-};
+import { renderMyBooksResults } from './myBooksDictProvider';
+import { queryMyDict } from './myDictQuery';
 
 /** Connectivity/token check for the settings dialog. Throws on failure. */
 export const testMyDictConnection = async (

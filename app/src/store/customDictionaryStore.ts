@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { EnvConfigType, isTauriAppPlatform } from '@/services/environment';
+import { EnvConfigType } from '@/services/environment';
 import type {
   DictionarySettings,
   ImportedDictionary,
@@ -9,13 +9,11 @@ import type {
 import { BUILTIN_PROVIDER_IDS, BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
 import { useSettingsStore } from './settingsStore';
 
-// MyBooks and Baidu Baike are Tauri-only (see `registry.ts`'s `builtinFor`)
-// — on web they'd never resolve to a working provider, so Wiktionary/
-// Wikipedia stay the default-open pair there. On native builds these two
-// replace them as the default-open pair; existing users' persisted
-// `providerEnabled` still wins over this default on upgrade (see the merge
-// in `loadCustomDictionaries`), so nobody's current toggle choice is reset.
-const isTauri = isTauriAppPlatform();
+// MyBooks and Baidu Baike replace Wiktionary/Wikipedia as the default-open
+// pair on every platform (web relays them through `/api/mybooks/*`);
+// existing users' persisted `providerEnabled` still wins over this default on
+// upgrade (see the merge in `loadCustomDictionaries`), so nobody's current
+// toggle choice is reset.
 
 /**
  * Built-in web-search ids are seeded into `providerOrder` but disabled by
@@ -44,10 +42,10 @@ const DEFAULT_DICTIONARY_SETTINGS: DictionarySettings = {
     // vice versa) via the settings UI's exclusivity rule. Default off
     // so existing users see no behavior change on upgrade.
     [BUILTIN_PROVIDER_IDS.systemDictionary]: false,
-    [BUILTIN_PROVIDER_IDS.myBooks]: isTauri,
-    [BUILTIN_PROVIDER_IDS.baiduBaike]: isTauri,
-    [BUILTIN_PROVIDER_IDS.wiktionary]: !isTauri,
-    [BUILTIN_PROVIDER_IDS.wikipedia]: !isTauri,
+    [BUILTIN_PROVIDER_IDS.myBooks]: true,
+    [BUILTIN_PROVIDER_IDS.baiduBaike]: true,
+    [BUILTIN_PROVIDER_IDS.wiktionary]: false,
+    [BUILTIN_PROVIDER_IDS.wikipedia]: false,
     [BUILTIN_WEB_SEARCH_IDS.google]: false,
     [BUILTIN_WEB_SEARCH_IDS.urban]: false,
     [BUILTIN_WEB_SEARCH_IDS.merriamWebster]: false,

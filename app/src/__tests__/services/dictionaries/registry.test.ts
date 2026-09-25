@@ -163,7 +163,7 @@ describe('dictionary registry', () => {
     ]);
   });
 
-  describe('MyBooks / Baidu Baike — Tauri-only (no CORS on either upstream)', () => {
+  describe('MyBooks / Baidu Baike — available on every platform', () => {
     const settings: DictionarySettings = {
       providerOrder: [BUILTIN_PROVIDER_IDS.myBooks, BUILTIN_PROVIDER_IDS.baiduBaike],
       providerEnabled: {
@@ -178,10 +178,13 @@ describe('dictionary registry', () => {
       else process.env['NEXT_PUBLIC_APP_PLATFORM'] = originalPlatform;
     });
 
-    it('are skipped (no working provider) on a non-Tauri build', () => {
-      delete process.env['NEXT_PUBLIC_APP_PLATFORM'];
+    it('resolve to working providers on a web build (relayed via /api/mybooks)', () => {
+      process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'web';
       const providers = getEnabledProviders({ settings, dictionaries: [] });
-      expect(providers).toEqual([]);
+      expect(providers.map((p) => p.id)).toEqual([
+        BUILTIN_PROVIDER_IDS.myBooks,
+        BUILTIN_PROVIDER_IDS.baiduBaike,
+      ]);
     });
 
     it('resolve to working providers on a Tauri build', () => {

@@ -3,18 +3,16 @@
  *
  * Queries the user's self-hosted MyBooks dictionary API (ECDICT + Chinese
  * dictionaries) — `GET /api/v1/query?word=...` with a fixed bearer token.
- * Tauri-only: the API sends no `Access-Control-Allow-Origin` header, so a
- * web-build `fetch` would be blocked by CORS; native builds go through
- * `@tauri-apps/plugin-http`, whose requests are sent from the Rust side and
- * never touch the webview's network stack. The registry only instantiates
- * this provider when `isTauriAppPlatform()` is true (see `registry.ts`).
+ * Same API as user-added MyDict servers, so it shares `queryMyDict` — native
+ * builds go through `@tauri-apps/plugin-http`, the web build relays through
+ * `/api/mybooks/mydict/query` (the API sends no CORS headers).
  */
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import type { DictionaryProvider, DictionaryLookupOutcome } from '../types';
 import { BUILTIN_PROVIDER_IDS } from '../types';
 import { stubTranslation as _ } from '@/utils/misc';
+import { queryMyDict } from './myDictQuery';
 
-const MYBOOKS_DICT_URL = 'https://mybooks.top/dict/api/v1/query';
+const MYBOOKS_DICT_URL = 'https://mybooks.top/dict';
 
 // MyBooks词典服务分配的token, 限流控制
 const MYBOOKS_DICT_TOKEN = 'sk-ut5X97HcuelppOw90x3rcPuyyO5oYZLFCBAxE6LA6_g';
@@ -60,16 +58,11 @@ export const myBooksDictProvider: DictionaryProvider = {
     const trimmed = word.trim();
     if (!trimmed) return { ok: false, reason: 'empty' };
     try {
-      const url = new URL(MYBOOKS_DICT_URL);
-      url.searchParams.set('word', trimmed);
-      const response = await tauriFetch(url.toString(), {
-        headers: { Authorization: `Bearer ${MYBOOKS_DICT_TOKEN}` },
-        signal: ctx.signal,
-      });
-      if (!response.ok) {
-        return { ok: false, reason: 'error', message: `HTTP ${response.status}` };
-      }
-      const data = (await response.json()) as MyBooksResponse;
+      const data = await queryMyDict(
+        { url: MYBOOKS_DICT_URL, token: MYBOOKS_DICT_TOKEN },
+        trimmed,
+        ctx.signal,
+      );
       if (ctx.signal.aborted) return { ok: false, reason: 'error', message: 'aborted' };
       if (!data.results || data.results.length === 0) {
         return { ok: false, reason: 'empty' };
