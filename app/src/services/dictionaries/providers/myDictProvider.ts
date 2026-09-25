@@ -6,10 +6,10 @@
  * with certificate validation disabled, since self-hosted servers are often
  * plain http or use self-signed https certificates. On the web build
  * (embedded MyReader) MyDict sends no CORS headers, so lookups are relayed
- * through the same-origin `/api/mydict/query` route instead.
+ * through the same-origin `/api/mybooks/mydict/query` route instead.
  */
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
-import { getAPIBaseUrl, isTauriAppPlatform } from '@/services/environment';
+import { isTauriAppPlatform } from '@/services/environment';
 import type { DictionaryProvider, DictionaryLookupOutcome, MyDictEntry } from '../types';
 import { renderMyBooksResults, type MyBooksResponse } from './myBooksDictProvider';
 import { buildMyDictQueryUrl } from './myDictUrl';
@@ -19,7 +19,9 @@ const queryMyDictViaProxy = async (
   word: string,
   signal?: AbortSignal,
 ): Promise<MyBooksResponse> => {
-  const response = await fetch(`${getAPIBaseUrl()}/mydict/query`, {
+  // Same-origin relative path: in the embedded deployment nginx only routes
+  // `/api/mybooks/*` to MyReader (other `/api/*` goes to MyBooks).
+  const response = await fetch('/api/mybooks/mydict/query', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: entry.url, token: entry.token, word }),

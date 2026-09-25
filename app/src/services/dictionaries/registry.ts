@@ -91,7 +91,7 @@ const getOrCreate = (
     return builtin;
   }
   if (id.startsWith('mydict:')) {
-    // Web builds relay through `/api/mydict/query` (see myDictProvider.ts).
+    // Web builds relay through `/api/mybooks/mydict/query` (see myDictProvider.ts).
     const entry = (settings.myDicts ?? []).find((d: MyDictEntry) => d.id === id);
     if (!entry || entry.deletedAt) return undefined;
     const provider = createMyDictProvider(entry);
