@@ -1028,6 +1028,8 @@
   "StarDict bundles need .ifo, .idx, and .dict.dz files (.syn optional).": "StarDict 词典包需要 .ifo、.idx 和 .dict.dz 文件(.syn 可选)。",
   "Select all the bundle files together when importing.": "导入时请同时选择词典包内的所有文件。",
   "Manage Dictionaries": "管理词典",
+  "Other language": "其他语言",
+  "MyDict (server)": "MyDict（服务器）",
   "Select Dictionary Files": "选择词典文件",
   "Read on Wikipedia →": "在维基百科上阅读 →",
   "This link can't be opened": "无法打开此链接",

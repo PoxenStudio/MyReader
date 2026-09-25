@@ -475,6 +475,14 @@ export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
                 tabIndex={0}
                 aria-expanded={expanded}
                 onClick={(e) => {
+                  // Clicks inside a provider's shadow-root content (MDict, the
+                  // server dictionary, …) arrive retargeted to the shadow host:
+                  // they are text selection and link taps inside an entry, not
+                  // "fold this card". Folding here clips the card to `max-h-40`,
+                  // which reads as the results vanishing mid-read.
+                  if ((e.target as Element | null)?.classList?.contains('dict-shadow-host')) {
+                    return;
+                  }
                   const path = e.nativeEvent.composedPath();
                   for (const node of path) {
                     if (node === e.currentTarget) break;

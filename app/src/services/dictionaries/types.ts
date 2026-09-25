@@ -200,6 +200,13 @@ export interface DictionarySettings {
    * `font-size` rules and the MDict shadow `::part(dict-content)` rule alike.
    */
   fontScale?: number;
+  /**
+   * Local bookkeeping for the embedded web build's dictionary-settings sync
+   * (see customDictionaryStore): when THIS device last saved its dictionary
+   * settings. Never synced — the boot pull compares it against the server's
+   * `updatedAt` so a slower server response cannot revert a newer local edit.
+   */
+  dictModifiedAt?: number;
 }
 
 /** Stable ids for the built-in providers. */
@@ -229,6 +236,16 @@ export const BUILTIN_PROVIDER_IDS = {
    * Tauri-only for the same CORS reason as {@link BUILTIN_PROVIDER_IDS.myBooks}.
    */
   baiduBaike: 'builtin:baidu-baike',
+  /**
+   * The MyDict server configured **on the MyBooks deployment itself** (via the
+   * `MYDICT_SERVER_URL` / `MYDICT_SERVER_TOKEN` environment variables of the
+   * embedded-reader container). Web-embed only: the queries go through the
+   * app's own `/api/mybooks/mydict/server-query` route, so the address and the
+   * token stay server-side and no browser has to configure anything. On other
+   * platforms the provider reports itself unsupported (there is no such
+   * server to ask).
+   */
+  mydictServer: 'builtin:mydict-server',
 } as const;
 
 export type BuiltinProviderId = (typeof BUILTIN_PROVIDER_IDS)[keyof typeof BUILTIN_PROVIDER_IDS];

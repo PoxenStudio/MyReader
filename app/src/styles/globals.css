@@ -729,6 +729,22 @@ input[type='range'].slider-input {
   font-size: calc(var(--dict-font-scale, 1) * 0.875rem);
 }
 
+/* Providers that render into a shadow root (MDict, MyDict / MyBooks) put the
+ * actual result there — `<details>` groups that the user expands, dictionaries'
+ * own styled markup. There is no plain-text preview to clamp: with the
+ * collapsed-card clamp active, expanding one of those groups grows content
+ * that is already clipped to `max-h-40`, so every dictionary below it stays
+ * invisible no matter how far the panel is scrolled ("the other dictionaries
+ * disappeared"). Cards whose content root directly hosts a shadow root always
+ * render at full height; `dict-shadow-host` is the stable marker those
+ * providers put on their host element. */
+[data-dict-content]:has(> .dict-shadow-host) {
+  display: block !important;
+  max-height: none !important;
+  overflow: visible !important;
+  -webkit-line-clamp: unset !important;
+}
+
 .no-transitions * {
   transition: none !important;
 }
