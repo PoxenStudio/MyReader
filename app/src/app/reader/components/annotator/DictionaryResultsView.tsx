@@ -42,6 +42,8 @@ export interface DictionaryResultsState {
   canGoBack: boolean;
   goBack: () => void;
   visibleDefinitionProviders: DictionaryProvider[];
+  /** Labels of enabled providers that report `unsupported` on this platform. */
+  unavailableDefinitionLabels: string[];
   webSearchProviders: DictionaryProvider[];
   /** Whether the web-search section renders above the dictionaries one (#5083). */
   webSearchFirst: boolean;
@@ -309,6 +311,14 @@ export function useDictionaryResults({
     return card.state === 'loading' || card.state === 'loaded';
   });
 
+  // Providers that exist but cannot serve here (the web-only "MyDict (server)"
+  // provider on the Android/desktop app, encrypted MDX, …). Their cards are
+  // dropped from the list, which used to leave the popup completely blank —
+  // say why instead of showing nothing.
+  const unavailableDefinitionLabels = definitionProviders
+    .filter((p) => cards[p.id]?.state === 'unsupported')
+    .map((p) => _(p.label));
+
   const resolveWebSearchUrl = useCallback(
     (id: string): string | undefined => {
       if (id.startsWith('web:builtin:')) {
@@ -344,6 +354,7 @@ export function useDictionaryResults({
     canGoBack,
     goBack,
     visibleDefinitionProviders,
+    unavailableDefinitionLabels,
     webSearchProviders,
     webSearchFirst,
     cards,
@@ -438,6 +449,7 @@ interface DictionaryResultsBodyProps extends DictionaryResultsState {}
 
 export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
   visibleDefinitionProviders,
+  unavailableDefinitionLabels,
   webSearchProviders,
   webSearchFirst,
   cards,
@@ -454,6 +466,17 @@ export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
   // `first:pt-2` keeps the leading section's tighter top padding whichever of
   // the two comes first.
   const sectionClassName = 'px-4 pt-4 first:pt-2';
+
+  // No dictionary could serve here (web-only provider on the app, encrypted
+  // MDX, …) — previously the popup rendered nothing at all.
+  const unavailableSection = visibleDefinitionProviders.length === 0 &&
+    unavailableDefinitionLabels.length > 0 && (
+      <section className={sectionClassName}>
+        <p className='not-eink:opacity-70 text-sm'>
+          {_('Not available on this device:')} {unavailableDefinitionLabels.join('、')}
+        </p>
+      </section>
+    );
 
   const definitionsSection = visibleDefinitionProviders.length > 0 && (
     <section className={sectionClassName}>
@@ -578,10 +601,12 @@ export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
           <>
             {webSearchSection}
             {definitionsSection}
+            {unavailableSection}
           </>
         ) : (
           <>
             {definitionsSection}
+            {unavailableSection}
             {webSearchSection}
           </>
         )}

@@ -123,6 +123,20 @@ if (!gradleContent.includes('missingDimensionStrategy')) {
   );
 }
 
+// `tauri android init` puts `usesCleartextTraffic = "false"` in defaultConfig
+// (debug overrides it to true), so release builds refuse every plain-HTTP
+// request. Self-hosted dictionary/LAN servers are http by default, and that
+// single flag silently kills their images, stylesheets and pronunciation
+// audio in the Android app — the web build has no such restriction. Flip it
+// for release too; the app only ever talks to servers the user configured.
+if (gradleContent.includes('manifestPlaceholders["usesCleartextTraffic"] = "false"')) {
+  console.error('Enabling cleartext traffic for release (http dictionary servers)');
+  gradleContent = gradleContent.replace(
+    'manifestPlaceholders["usesCleartextTraffic"] = "false"',
+    'manifestPlaceholders["usesCleartextTraffic"] = "true"',
+  );
+}
+
 fs.writeFileSync(gradleFilePath, gradleContent);
 
 const extraArgs = process.argv.slice(2);

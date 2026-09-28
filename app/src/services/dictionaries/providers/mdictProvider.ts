@@ -388,6 +388,9 @@ function wireMdxAnchors(
       } catch {
         target = rawTarget.trim();
       }
+      // `entry://word#anchor`（牛津系 idm 链接）指向词条内的锚点：词库按
+      // 词头索引，带锚点整串查不到，去掉锚点跳词头。
+      target = target.split('#')[0]!.trim();
       if (!target) continue;
       anchor.addEventListener('click', (e) => {
         e.preventDefault();

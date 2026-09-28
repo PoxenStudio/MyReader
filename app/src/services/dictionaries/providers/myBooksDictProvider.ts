@@ -277,9 +277,20 @@ const wireLinks = (root: HTMLElement, onNavigate?: (word: string) => void): void
     const href = anchor.getAttribute('href') ?? '';
     if (href.startsWith(ENTRY_LINK_PREFIX)) {
       if (!onNavigate) return;
+      // 目标是百分号编码的（Weblio 系词典：`entry://%E5%BA%83%E3%81%8F`），
+      // 不解码就会拿 `%E5%BA%83…` 去查词；牛津系还会带锚点
+      // （`entry://dirty_1#down_idmg_5`），整串查也命中不到——两者都表现为
+      // "跳转错误"。先解码再去锚点，拿真正的词头去查。
+      const rawWord = href.slice(ENTRY_LINK_PREFIX.length);
+      let word = rawWord;
+      try {
+        word = decodeURIComponent(rawWord);
+      } catch {
+        // 非法百分号序列（词典名里裸带 % 的），按原样用。
+      }
+      word = word.split('#')[0]!.trim();
+      if (!word) return;
       anchor.addEventListener('click', (event) => {
-        const word = href.slice(ENTRY_LINK_PREFIX.length).trim();
-        if (!word) return;
         event.preventDefault();
         onNavigate(word);
       });

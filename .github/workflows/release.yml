@@ -305,6 +305,14 @@ jobs:
           # dependency resolution error. Re-inject the same fix documented
           # in README.md's local Android setup steps on every fresh init.
           sed -i '/defaultConfig {/a\        missingDimensionStrategy("store", "foss", "googleplay")' src-tauri/gen/android/app/build.gradle.kts
+          # `tauri android init` sets usesCleartextTraffic = "false" in
+          # defaultConfig (only debug overrides it), which makes the release
+          # build refuse every plain-HTTP request: a self-hosted MyDict server
+          # on the LAN (http://…) then loses its images, the dictionaries'
+          # stylesheets and all pronunciation audio, while the web build has no
+          # such restriction. Enable it for release too — the app only talks to
+          # servers the user configured. Mirrors build-signed-apk.ts.
+          sed -i '0,/manifestPlaceholders\["usesCleartextTraffic"\] = "false"/s//manifestPlaceholders["usesCleartextTraffic"] = "true"/' src-tauri/gen/android/app/build.gradle.kts
           pnpm tauri icon ../data/icons/myreader-book.png
           git checkout .
 

@@ -326,6 +326,60 @@ describe('MyBooks dictionary provider', () => {
     expect(onNavigate).toHaveBeenCalledWith('apple');
   });
 
+  it('decodes percent-encoded entry:// targets (Weblio dictionaries)', async () => {
+    tauriFetchMock.mockResolvedValueOnce(
+      okResponse([
+        {
+          dictionary_id: 30,
+          dictionary_name: 'Weblio類語辞典',
+          word: '人気',
+          phonetic: null,
+          // 広く（URL 编码）——不解码就会拿 %E5%BA%83%E3%81%8F 去查词，命中不到
+          definition: '<a class="crosslink" href="entry://%E5%BA%83%E3%81%8F">広く</a>',
+        },
+      ]),
+    );
+    const container = document.createElement('div');
+    const onNavigate = vi.fn();
+
+    await myBooksDictProvider.lookup('人気', {
+      signal: new AbortController().signal,
+      container,
+      onNavigate,
+    });
+
+    const link = shadowOf(container).querySelector('a')!;
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(onNavigate).toHaveBeenCalledWith('広く');
+  });
+
+  it('strips the anchor from entry://word#anchor targets', async () => {
+    tauriFetchMock.mockResolvedValueOnce(
+      okResponse([
+        {
+          dictionary_id: 59,
+          dictionary_name: '牛津高阶英汉双解词典（第10版）V3',
+          word: 'dirty',
+          phonetic: null,
+          // 牛津系 idm 交叉引用：词头 + 词条内锚点，整串查不到词
+          definition: '<a href="entry://dirty_1#down_idmg_5">dirty</a>',
+        },
+      ]),
+    );
+    const container = document.createElement('div');
+    const onNavigate = vi.fn();
+
+    await myBooksDictProvider.lookup('dirty', {
+      signal: new AbortController().signal,
+      container,
+      onNavigate,
+    });
+
+    const link = shadowOf(container).querySelector('a')!;
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(onNavigate).toHaveBeenCalledWith('dirty_1');
+  });
+
   it('reports an empty outcome when results is empty', async () => {
     tauriFetchMock.mockResolvedValueOnce(okResponse([]));
     const container = document.createElement('div');
