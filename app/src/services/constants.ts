@@ -159,12 +159,19 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   dictionarySettings: {
     providerOrder: [
       'builtin:mybooks',
+      // The MyDict server configured on the MyBooks deployment itself
+      // (MYDICT_SERVER_URL / MYDICT_SERVER_TOKEN). Queries are relayed
+      // server-side, so this costs a browser zero configuration — the
+      // address and the token never leave the host. Harmless elsewhere:
+      // without those env vars the provider reports itself unsupported.
+      'builtin:mydict-server',
       'builtin:baidu-baike',
       'builtin:wiktionary',
       'builtin:wikipedia',
     ],
     providerEnabled: {
       'builtin:mybooks': true,
+      'builtin:mydict-server': true,
       'builtin:baidu-baike': true,
       'builtin:wiktionary': false,
       'builtin:wikipedia': false,

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { EnvConfigType } from '@/services/environment';
+import { EnvConfigType, isWebAppPlatform } from '@/services/environment';
 import type {
   DictionarySettings,
   ImportedDictionary,
@@ -8,6 +8,92 @@ import type {
 } from '@/services/dictionaries/types';
 import { BUILTIN_PROVIDER_IDS, BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
 import { useSettingsStore } from './settingsStore';
+
+// ---------------------------------------------------------------------------
+// Cross-device sync of the dictionary panel settings (embedded web build).
+//
+// The panel settings live in each browser's IndexedDB and are excluded from
+// settings sync upstream (myDicts is not even in Readest's settings
+// whitelist), so a toggle made on one device never reached another. The
+// embedded Next server stores a small per-MyBooks-user JSON file
+// (`/api/mybooks/mydict/user-settings` -> /data/reader/dict-settings/), and
+// this store pulls it on boot (server wins) and pushes on every save.
+
+let serverDictSyncedAt = 0;
+
+const fetchServerDictSettings = async (): Promise<{
+  updatedAt: number;
+  settings: Partial<DictionarySettings>;
+} | null> => {
+  try {
+    const res = await fetch('/api/mybooks/mydict/user-settings', {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      updatedAt?: number;
+      settings?: Partial<DictionarySettings>;
+    };
+    if (typeof data.updatedAt !== 'number' || !data.settings) return null;
+    return { updatedAt: data.updatedAt, settings: data.settings };
+  } catch {
+    return null;
+  }
+};
+
+const pushServerDictSettings = async (fields: Partial<DictionarySettings>): Promise<void> => {
+  try {
+    const res = await fetch('/api/mybooks/mydict/user-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: fields }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return;
+    const data = (await res.json()) as { updatedAt?: number };
+    if (typeof data.updatedAt === 'number') serverDictSyncedAt = data.updatedAt;
+  } catch {
+    // Best-effort: the local save already happened; the next toggle re-pushes.
+  }
+};
+
+/**
+ * Overlay the remote dictionary fields onto `base`, then re-run the same
+ * reconciliation the local load does: prune user-added MyDict entries that the
+ * remote copy tombstoned, and backfill builtins the remote snapshot predates
+ * (e.g. the server dictionary provider) with their default-enable semantics.
+ */
+const applyRemoteDictSettings = (
+  base: DictionarySettings,
+  remote: Partial<DictionarySettings>,
+): DictionarySettings => {
+  const merged: DictionarySettings = { ...base };
+  if (remote.providerOrder) merged.providerOrder = remote.providerOrder;
+  if (remote.providerEnabled) merged.providerEnabled = remote.providerEnabled;
+  if (remote.myDicts) merged.myDicts = remote.myDicts;
+  if (remote.webSearches) merged.webSearches = remote.webSearches;
+  if (typeof remote.fontScale === 'number') merged.fontScale = remote.fontScale;
+
+  const liveMyDictIds = new Set(
+    (merged.myDicts ?? []).filter((m) => !m.deletedAt).map((m) => m.id),
+  );
+  merged.providerOrder = merged.providerOrder.filter(
+    (id) => !id.startsWith('mydict:') || liveMyDictIds.has(id),
+  );
+
+  const orderSet = new Set(merged.providerOrder);
+  for (const id of DEFAULT_DICTIONARY_SETTINGS.providerOrder) {
+    if (!orderSet.has(id)) {
+      merged.providerOrder = [...merged.providerOrder, id];
+      orderSet.add(id);
+    }
+  }
+  merged.providerEnabled = {
+    ...DEFAULT_DICTIONARY_SETTINGS.providerEnabled,
+    ...merged.providerEnabled,
+  };
+  return merged;
+};
 
 // MyBooks and Baidu Baike replace Wiktionary/Wikipedia as the default-open
 // pair on every platform (web relays them through `/api/mybooks/*`);
@@ -32,6 +118,12 @@ const DEFAULT_DICTIONARY_SETTINGS: DictionarySettings = {
   providerOrder: [
     BUILTIN_PROVIDER_IDS.systemDictionary,
     BUILTIN_PROVIDER_IDS.myBooks,
+    // The MyDict server configured on the MyBooks deployment itself
+    // (MYDICT_SERVER_URL / MYDICT_SERVER_TOKEN): queries are relayed
+    // server-side, so it costs a browser zero configuration. Harmless
+    // elsewhere — without those env vars the provider reports itself
+    // unsupported and its card is dropped from the popup.
+    BUILTIN_PROVIDER_IDS.mydictServer,
     BUILTIN_PROVIDER_IDS.baiduBaike,
     BUILTIN_PROVIDER_IDS.wiktionary,
     BUILTIN_PROVIDER_IDS.wikipedia,
@@ -43,6 +135,7 @@ const DEFAULT_DICTIONARY_SETTINGS: DictionarySettings = {
     // so existing users see no behavior change on upgrade.
     [BUILTIN_PROVIDER_IDS.systemDictionary]: false,
     [BUILTIN_PROVIDER_IDS.myBooks]: true,
+    [BUILTIN_PROVIDER_IDS.mydictServer]: true,
     [BUILTIN_PROVIDER_IDS.baiduBaike]: true,
     [BUILTIN_PROVIDER_IDS.wiktionary]: false,
     [BUILTIN_PROVIDER_IDS.wikipedia]: false,
@@ -456,8 +549,30 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
         webSearches: persistedSettings.webSearches ?? [],
         myDicts: persistedSettings.myDicts ?? [],
         fontScale: persistedSettings.fontScale ?? DEFAULT_DICTIONARY_SETTINGS.fontScale,
+        // Local bookkeeping — must survive the merge or the boot pull's
+        // staleness guard reads 0 and reverts newer local edits.
+        dictModifiedAt: persistedSettings.dictModifiedAt,
       };
       set({ dictionaries, settings: settingsMerged });
+
+      // Pull the cross-device copy (embedded web build). The server copy wins
+      // only when it is newer than this device's last local save — otherwise a
+      // slow boot-time pull would revert edits the user just made here (drag
+      // order, toggles) before the pull landed.
+      if (isWebAppPlatform()) {
+        const remote = await fetchServerDictSettings();
+        const localModifiedAt = get().settings.dictModifiedAt ?? 0;
+        if (remote && remote.updatedAt > localModifiedAt && remote.updatedAt > serverDictSyncedAt) {
+          serverDictSyncedAt = remote.updatedAt;
+          const reconciled = applyRemoteDictSettings(settingsMerged, remote.settings);
+          set({ settings: reconciled });
+          // Keep the SystemSettings copy in step: loadCustomDictionaries reads
+          // its dictionarySettings back on the next run, and a stale copy here
+          // would resurrect pre-sync values over the freshly pulled ones.
+          const { settings: sysSettings, setSettings } = useSettingsStore.getState();
+          setSettings({ ...sysSettings, dictionarySettings: reconciled });
+        }
+      }
     } catch (error) {
       console.error('Failed to load custom dictionaries settings:', error);
     }
@@ -466,6 +581,11 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
   saveCustomDictionaries: async (envConfig) => {
     try {
       const { settings, setSettings, saveSettings } = useSettingsStore.getState();
+      // Stamp the local modification time BEFORE persisting: the boot pull
+      // compares the server's updatedAt against it and must never revert a
+      // newer local edit.
+      const dictModifiedAt = Date.now();
+      set({ settings: { ...get().settings, dictModifiedAt } });
       const { dictionaries, settings: dictSettings } = get();
       const next = {
         ...settings,
@@ -474,6 +594,17 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
       };
       setSettings(next);
       saveSettings(envConfig, next);
+      // Push the cross-device copy (embedded web build). Awaited so the server
+      // always carries this device's state before anything else can pull.
+      if (isWebAppPlatform()) {
+        await pushServerDictSettings({
+          providerOrder: dictSettings.providerOrder,
+          providerEnabled: dictSettings.providerEnabled,
+          myDicts: dictSettings.myDicts,
+          webSearches: dictSettings.webSearches,
+          fontScale: dictSettings.fontScale,
+        });
+      }
     } catch (error) {
       console.error('Failed to save custom dictionaries settings:', error);
       throw error;

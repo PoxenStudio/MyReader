@@ -117,6 +117,7 @@ const builtinLabel = (id: string, _: (key: string) => string): string => {
   if (id === BUILTIN_PROVIDER_IDS.wikipedia) return _('Wikipedia');
   if (id === BUILTIN_PROVIDER_IDS.systemDictionary) return _('System Dictionary');
   if (id === BUILTIN_PROVIDER_IDS.myBooks) return _('MyBooks Dictionary');
+  if (id === BUILTIN_PROVIDER_IDS.mydictServer) return _('MyDict (server)');
   if (id === BUILTIN_PROVIDER_IDS.baiduBaike) return _('Baidu Baike');
   return id;
 };

@@ -25,6 +25,7 @@ import { isSystemDictionarySupported } from './systemDictionary';
 import { wiktionaryProvider } from './providers/wiktionaryProvider';
 import { wikipediaProvider } from './providers/wikipediaProvider';
 import { myBooksDictProvider } from './providers/myBooksDictProvider';
+import { serverDictProvider } from './providers/serverDictProvider';
 import { baiduBaikeProvider } from './providers/baiduBaikeProvider';
 import { createStarDictProvider, type DictionaryFileOpener } from './providers/starDictProvider';
 import { createMdictProvider } from './providers/mdictProvider';
@@ -53,6 +54,10 @@ const builtinFor = (id: string): DictionaryProvider | undefined => {
   // Neither upstream sends CORS headers; web builds relay through
   // `/api/mybooks/*` (see the providers).
   if (id === BUILTIN_PROVIDER_IDS.myBooks) return myBooksDictProvider;
+  // The MyDict server configured on the MyBooks deployment itself; its
+  // lookup route only exists in the embedded web server, and the provider
+  // reports itself unsupported everywhere else.
+  if (id === BUILTIN_PROVIDER_IDS.mydictServer) return serverDictProvider;
   if (id === BUILTIN_PROVIDER_IDS.baiduBaike) return baiduBaikeProvider;
   // System dictionary is a sentinel — it has no in-popup UI. The
   // annotator handles it before reaching the popup; the registry

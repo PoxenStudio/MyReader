@@ -27,7 +27,15 @@ export const createMyDictProvider = (entry: MyDictEntry): DictionaryProvider => 
       const data = await queryMyDict(entry, trimmed, ctx.signal);
       if (ctx.signal.aborted) return { ok: false, reason: 'error', message: 'aborted' };
       if (!data.results || data.results.length === 0) return { ok: false, reason: 'empty' };
-      renderMyBooksResults(data.results, ctx.container);
+      renderMyBooksResults(data.results, ctx.container, {
+        // Entry resources come back root-relative (`/dict-res/…`), so they must
+        // be re-anchored to this server, not to the reader's own origin.
+        baseUrl: entry.url,
+        onNavigate: ctx.onNavigate,
+        _: ctx._,
+        lang: ctx.lang,
+        isDarkMode: ctx.isDarkMode,
+      });
       return { ok: true, headword: trimmed, sourceLabel: entry.name };
     } catch (error) {
       // plugin-http throws a plain `Error('Request cancelled')` (not an

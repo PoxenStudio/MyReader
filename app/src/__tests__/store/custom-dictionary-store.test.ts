@@ -369,6 +369,9 @@ describe('customDictionaryStore — loadCustomDictionaries reconciliation', () =
       'imp-known',
       'builtin:system',
       'builtin:mybooks',
+      // The server-configured MyDict provider was added to the default
+      // order, so hydration backfills it right after builtin:mybooks.
+      'builtin:mydict-server',
       'builtin:baidu-baike',
       'web:builtin:google',
       'web:builtin:urban',

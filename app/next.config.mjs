@@ -7,6 +7,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isDev = process.env['NODE_ENV'] === 'development';
 const appPlatform = process.env['NEXT_PUBLIC_APP_PLATFORM'];
+// The self-hosted embedded deployment (NEXT_PUBLIC_DISABLE_LOCAL_DB=true, see
+// document/MyReader_Embedded_WebApp.md) is server-backed: books, covers and
+// dictionary lookups all come from the host. Its service worker's `/reader`
+// page cache (`client-pages`: NetworkFirst, 3s network timeout, one-year
+// expiry, one cache key for every /reader/* page) served stale app shells
+// after each deploy, which reads as "the fix never landed". An offline shell
+// buys nothing here, so the embedded build ships without the PWA.
+const isEmbeddedStandalone = process.env['NEXT_PUBLIC_DISABLE_LOCAL_DB'] === 'true';
 
 if (isDev) {
   const { initOpenNextCloudflareForDev } = await import('@opennextjs/cloudflare');
@@ -134,6 +142,30 @@ const nextConfig = {
         ],
       },
       {
+        // The reader entry pages are prerendered, and `next start` serves them
+        // with `Cache-Control: s-maxage=31536000` — fine on deploys that purge
+        // (Readest's Cloudflare), but on a self-hosted box behind an
+        // unpurgeable reverse proxy it pins browsers to the previous build.
+        // The HTML must revalidate; the hashed `/_next/static` assets above
+        // stay immutable.
+        source: '/reader/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'private, no-cache, max-age=0, must-revalidate',
+          },
+        ],
+      },
+      {
+        source: '/readerx/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'private, no-cache, max-age=0, must-revalidate',
+          },
+        ],
+      },
+      {
         source: '/_next/static/:path*',
         headers: [
           {
@@ -148,7 +180,7 @@ const nextConfig = {
   },
 };
 
-const pwaDisabled = isDev || appPlatform !== 'web';
+const pwaDisabled = isDev || appPlatform !== 'web' || isEmbeddedStandalone;
 
 const withPWA = pwaDisabled
   ? (config) => config

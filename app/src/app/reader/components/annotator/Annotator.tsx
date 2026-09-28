@@ -196,7 +196,12 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   // Tall enough to fit a header + 2-3 expanded cards comfortably. The popup
   // shows all enabled providers stacked (no tabs) so it needs more vertical
   // room than the legacy single-tab layout.
-  const dictPopupHeight = Math.min(360, maxHeight);
+  // Grouped dictionary results (one collapsible section per dictionary) need
+  // real vertical room: a MyDict lookup can hit a dozen dictionaries with long
+  // entries. The old 360 cap left a ~320px scroll area — expanding one group
+  // pushed every dictionary below it out of view. 720 still respects the
+  // viewport: the Popup clamps itself to the space around the selection.
+  const dictPopupHeight = Math.min(720, maxHeight);
   const transPopupWidth = Math.min(480, maxWidth);
   const transPopupHeight = Math.min(265, maxHeight);
   const proofreadPopupWidth = Math.min(440, maxWidth);
