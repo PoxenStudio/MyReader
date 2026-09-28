@@ -347,14 +347,11 @@ export const handleClick = (
 
     // In reflowable books a single tap on an image/table opens the image gallery
     // / table zoom (#4584) — it is the only gesture that does, since long-press
-    // fired mid-scroll and was removed (#5069). Fixed-layout books
-    // (PDF/comics/manga) keep tap-to-turn, since there the tap is the page-turn
-    // gesture (media is null there).
-    if (media) {
-      window.postMessage({ type: 'iframe-open-media', bookKey, ...media }, '*');
-      return;
-    }
-
+    // fired mid-scroll and was removed (#5069). The tap is still reported as a
+    // single click carrying the media: usePagination opens the viewer only from
+    // the centre zone, so a tap in a page-turn zone keeps turning the page even
+    // when an illustration fills it. Fixed-layout books (PDF/comics/manga) keep
+    // plain tap-to-turn (media is null there).
     window.postMessage(
       {
         type: 'iframe-single-click',
@@ -365,6 +362,7 @@ export const handleClick = (
         clientY: event.clientY,
         offsetX: event.offsetX,
         offsetY: event.offsetY,
+        ...(media && { media }),
         ...getKeyStatus(event),
       },
       '*',

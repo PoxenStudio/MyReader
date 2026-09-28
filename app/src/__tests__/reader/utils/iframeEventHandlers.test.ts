@@ -110,7 +110,9 @@ describe('iframeEventHandlers click gestures', () => {
   });
 });
 
-describe('single-tap opens image gallery / table zoom in reflowable books (#4584)', () => {
+// The iframe only reports WHAT was tapped; whether a media tap opens the viewer
+// or turns the page depends on the tap zone, which usePagination decides.
+describe('single-tap on an image/table carries the media in reflowable books (#4584)', () => {
   let postSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -142,23 +144,25 @@ describe('single-tap opens image gallery / table zoom in reflowable books (#4584
     vi.advanceTimersByTime(260);
   };
 
-  test('reflowable: tap on an image posts iframe-open-media (image), not iframe-single-click', async () => {
+  const singleClickMedia = () =>
+    postedMessages().find((m) => m['type'] === 'iframe-single-click')?.['media'] as
+      | Record<string, unknown>
+      | undefined;
+
+  test('reflowable: tap on an image posts iframe-single-click carrying the image', async () => {
     const handlers = await importHandlers();
     const img = document.createElement('img');
     img.src = 'blob:http://localhost/abc';
 
     tap(handlers, false, img);
 
-    const messages = postedMessages();
-    const types = messages.map((m) => m['type']);
-    expect(types).toContain('iframe-open-media');
-    expect(types).not.toContain('iframe-single-click');
-    const media = messages.find((m) => m['type'] === 'iframe-open-media')!;
+    expect(postedMessages().map((m) => m['type'])).not.toContain('iframe-open-media');
+    const media = singleClickMedia()!;
     expect(media['elementType']).toBe('image');
     expect(media['src']).toBe(img.src);
   });
 
-  test('reflowable: tap on a table posts iframe-open-media (table), not iframe-single-click', async () => {
+  test('reflowable: tap on a table posts iframe-single-click carrying the table', async () => {
     const handlers = await importHandlers();
     const table = document.createElement('table');
     const cell = document.createElement('td');
@@ -166,11 +170,7 @@ describe('single-tap opens image gallery / table zoom in reflowable books (#4584
 
     tap(handlers, false, cell); // tap lands inside the table
 
-    const messages = postedMessages();
-    const types = messages.map((m) => m['type']);
-    expect(types).toContain('iframe-open-media');
-    expect(types).not.toContain('iframe-single-click');
-    const media = messages.find((m) => m['type'] === 'iframe-open-media')!;
+    const media = singleClickMedia()!;
     expect(media['elementType']).toBe('table');
     expect(media['html']).toBe(table.outerHTML);
   });
@@ -182,9 +182,8 @@ describe('single-tap opens image gallery / table zoom in reflowable books (#4584
 
     tap(handlers, true, img);
 
-    const types = postedMessages().map((m) => m['type']);
-    expect(types).toContain('iframe-single-click');
-    expect(types).not.toContain('iframe-open-media');
+    expect(postedMessages().map((m) => m['type'])).toContain('iframe-single-click');
+    expect(singleClickMedia()).toBeUndefined();
   });
 
   test('reflowable: tap on a linked image opens the viewer instead of following the link (#4757)', async () => {
@@ -197,11 +196,7 @@ describe('single-tap opens image gallery / table zoom in reflowable books (#4584
 
     tap(handlers, false, img);
 
-    const messages = postedMessages();
-    const types = messages.map((m) => m['type']);
-    expect(types).toContain('iframe-open-media');
-    expect(types).not.toContain('iframe-single-click');
-    const media = messages.find((m) => m['type'] === 'iframe-open-media')!;
+    const media = singleClickMedia()!;
     expect(media['elementType']).toBe('image');
     expect(media['src']).toBe(img.src);
   });
@@ -217,8 +212,7 @@ describe('single-tap opens image gallery / table zoom in reflowable books (#4584
 
     tap(handlers, false, img);
 
-    const types = postedMessages().map((m) => m['type']);
-    expect(types).not.toContain('iframe-open-media');
+    expect(singleClickMedia()).toBeUndefined();
   });
 });
 

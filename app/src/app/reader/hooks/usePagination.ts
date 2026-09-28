@@ -252,10 +252,15 @@ export const usePagination = (
             if (!consumed) {
               const centerStartX = viewStartX + viewRect.width * 0.375;
               const centerEndX = viewStartX + viewRect.width * 0.625;
-              if (
-                viewSettings.disableClick! ||
-                (screenX >= centerStartX && screenX <= centerEndX)
-              ) {
+              const inCenter = screenX >= centerStartX && screenX <= centerEndX;
+              // A tap on an image/table opens the media viewer only where a tap
+              // wouldn't turn the page, so paging through illustrations doesn't
+              // keep opening it by accident.
+              if (msg.data.media && (viewSettings.disableClick || inCenter)) {
+                window.postMessage({ type: 'iframe-open-media', bookKey, ...msg.data.media }, '*');
+                return;
+              }
+              if (viewSettings.disableClick! || inCenter) {
                 // toggle visibility of the header bar and the footer bar
                 setHoveredBookKey(hoveredBookKey ? null : bookKey);
                 return;
