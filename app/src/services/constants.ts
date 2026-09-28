@@ -488,9 +488,8 @@ export const CJK_SERIF_FONTS = [
   _('LXGW WenKai GB Screen'),
   _('LXGW WenKai TC'),
   _('GuanKiapTsingKhai-T'),
-  _('Source Han Serif CN'),
-  _('Huiwen-MinchoGBK'),
-  _('KingHwa_OldSong'),
+  _('Source Han Serif CN VF'),
+  _('Huiwen-mincho'),
 ];
 
 export const CJK_SANS_SERIF_FONTS = ['Noto Sans SC', 'Noto Sans TC'];
