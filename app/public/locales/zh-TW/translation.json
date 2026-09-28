@@ -1008,6 +1008,7 @@
   "Skipped incomplete bundles: {{names}}": "已略過不完整的詞典套件:{{names}}",
   "Failed to import dictionary: {{message}}": "匯入詞典失敗:{{message}}",
   "Dictionaries": "詞典",
+  "Not available on this device:": "以下詞典在此裝置上不可用：",
   "Delete Dictionary": "刪除詞典",
   "Importing…": "正在匯入…",
   "Import Dictionary": "匯入詞典",
