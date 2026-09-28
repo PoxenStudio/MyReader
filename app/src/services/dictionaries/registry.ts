@@ -20,7 +20,7 @@ import type {
   MyDictEntry,
   WebSearchEntry,
 } from './types';
-import { BUILTIN_PROVIDER_IDS } from './types';
+import { BUILTIN_PROVIDER_IDS, SITE_DICT_PREFIX } from './types';
 import { isSystemDictionarySupported } from './systemDictionary';
 import { wiktionaryProvider } from './providers/wiktionaryProvider';
 import { wikipediaProvider } from './providers/wikipediaProvider';
@@ -33,6 +33,7 @@ import { createDictProvider } from './providers/dictProvider';
 import { createSlobProvider } from './providers/slobProvider';
 import { createWebSearchProvider } from './providers/webSearchProvider';
 import { createMyDictProvider } from './providers/myDictProvider';
+import { createSiteDictProvider } from './providers/siteDictProvider';
 import { getBuiltinWebSearch } from './webSearchTemplates';
 
 const instanceCache = new Map<string, DictionaryProvider>();
@@ -54,7 +55,8 @@ const builtinFor = (id: string): DictionaryProvider | undefined => {
   // Neither upstream sends CORS headers; web builds relay through
   // `/api/mybooks/*` (see the providers).
   if (id === BUILTIN_PROVIDER_IDS.myBooks) return myBooksDictProvider;
-  // The MyDict server configured on the MyBooks deployment itself; its
+  // The MyDict server configured on the MyBooks deployment itself
+  // (MYDICT_SERVER_URL); transitional alongside the site dictionaries. Its
   // lookup route only exists in the embedded web server, and the provider
   // reports itself unsupported everywhere else.
   if (id === BUILTIN_PROVIDER_IDS.mydictServer) return serverDictProvider;
@@ -95,6 +97,14 @@ const getOrCreate = (
     const entry = (settings.myDicts ?? []).find((d: MyDictEntry) => d.id === id);
     if (!entry || entry.deletedAt) return undefined;
     const provider = createMyDictProvider(entry);
+    instanceCache.set(id, provider);
+    return provider;
+  }
+  if (id.startsWith(SITE_DICT_PREFIX)) {
+    // MyBooks-configured MyDict servers, queried by MyBooks itself.
+    const entry = (settings.serverDicts ?? []).find((d) => d.id === id);
+    if (!entry) return undefined;
+    const provider = createSiteDictProvider(entry);
     instanceCache.set(id, provider);
     return provider;
   }
@@ -157,7 +167,7 @@ export const getEnabledProviders = ({
       if (provider) out.push(provider);
       continue;
     }
-    if (id.startsWith('web:') || id.startsWith('mydict:')) {
+    if (id.startsWith('web:') || id.startsWith('mydict:') || id.startsWith(SITE_DICT_PREFIX)) {
       const provider = getOrCreate(id, undefined, undefined, settings);
       if (provider) out.push(provider);
       continue;

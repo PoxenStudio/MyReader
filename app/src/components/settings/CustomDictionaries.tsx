@@ -29,7 +29,7 @@ import { useFileSelector } from '@/hooks/useFileSelector';
 import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
 import { eventDispatcher } from '@/utils/event';
 import { evictProvider, isSystemDictionaryEnabled } from '@/services/dictionaries/registry';
-import { BUILTIN_PROVIDER_IDS } from '@/services/dictionaries/types';
+import { BUILTIN_PROVIDER_IDS, SITE_DICT_PREFIX } from '@/services/dictionaries/types';
 import {
   clearRememberedLookupApp,
   getRememberedLookupApp,
@@ -67,7 +67,7 @@ interface CustomDictionariesProps {
 interface ProviderRow {
   id: string;
   label: string;
-  kind: 'builtin' | 'stardict' | 'mdict' | 'dict' | 'slob' | 'web' | 'mydict';
+  kind: 'builtin' | 'stardict' | 'mdict' | 'dict' | 'slob' | 'web' | 'mydict' | 'server';
   badge: string;
   imported?: ImportedDictionary;
   /** Set on `kind: 'web'` rows. The shape distinguishes deletable custom
@@ -117,7 +117,7 @@ const builtinLabel = (id: string, _: (key: string) => string): string => {
   if (id === BUILTIN_PROVIDER_IDS.wikipedia) return _('Wikipedia');
   if (id === BUILTIN_PROVIDER_IDS.systemDictionary) return _('System Dictionary');
   if (id === BUILTIN_PROVIDER_IDS.myBooks) return _('MyBooks Dictionary');
-  if (id === BUILTIN_PROVIDER_IDS.mydictServer) return _('MyDict (server)');
+  if (id === BUILTIN_PROVIDER_IDS.mydictServer) return _('MyDict Service');
   if (id === BUILTIN_PROVIDER_IDS.baiduBaike) return _('Baidu Baike');
   return id;
 };
@@ -475,6 +475,7 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
     const dictById = new Map(dictionaries.map((d) => [d.id, d]));
     const webById = new Map((settings.webSearches ?? []).map((w) => [w.id, w]));
     const myDictById = new Map((settings.myDicts ?? []).map((m) => [m.id, m]));
+    const serverDictById = new Map((settings.serverDicts ?? []).map((d) => [d.id, d]));
     const rows: ProviderRow[] = [];
     // Cache cross-row platform checks so we don't re-walk navigator
     // for every system-id encounter (and so the first iteration
@@ -522,6 +523,14 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
           webSearch: tpl,
           builtinWeb: true,
         });
+        continue;
+      }
+      if (id.startsWith(SITE_DICT_PREFIX)) {
+        // Configured by the MyBooks admin: togglable and sortable here, but
+        // edited only on the MyBooks settings page.
+        const entry = serverDictById.get(id);
+        if (!entry) continue;
+        rows.push({ id, label: entry.name, kind: 'server', badge: _('Server') });
         continue;
       }
       if (id.startsWith('mydict:')) {

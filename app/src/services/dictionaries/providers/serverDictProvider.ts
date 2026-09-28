@@ -27,7 +27,7 @@ const SERVER_QUERY_URL = '/api/mybooks/mydict/server-query';
 export const serverDictProvider: DictionaryProvider = {
   id: BUILTIN_PROVIDER_IDS.mydictServer,
   kind: 'builtin',
-  label: _('MyDict (server)'),
+  label: _('MyDict Service'),
   async lookup(word, ctx): Promise<DictionaryLookupOutcome> {
     if (!isWebAppPlatform()) return { ok: false, reason: 'unsupported' };
     const trimmed = word.trim();
@@ -57,7 +57,7 @@ export const serverDictProvider: DictionaryProvider = {
         lang: ctx.lang,
         isDarkMode: ctx.isDarkMode,
       });
-      return { ok: true, headword: trimmed, sourceLabel: 'MyDict (server)' };
+      return { ok: true, headword: trimmed, sourceLabel: 'MyDict Service' };
     } catch (error) {
       if ((error as { name?: string }).name === 'AbortError') {
         return { ok: false, reason: 'error', message: 'aborted' };

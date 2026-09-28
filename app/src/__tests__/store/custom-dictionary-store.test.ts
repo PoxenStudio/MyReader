@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
 import { BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
@@ -482,5 +482,134 @@ describe('customDictionaryStore — fontScale (dictionary popup font size, #4443
 
     await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
     expect(useCustomDictionaryStore.getState().settings.fontScale).toBe(1.15);
+  });
+});
+
+describe('customDictionaryStore — site dictionaries (embedded web build)', () => {
+  type SettingsState = ReturnType<typeof useSettingsStore.getState>;
+  const SITE_CONFIG = {
+    mybooks: false,
+    baike: true,
+    mydicts: [{ id: 'a', name: 'Han', enabled: true }],
+  };
+  const fakeEnv = {
+    getAppService: () => Promise.resolve({ exists: vi.fn().mockResolvedValue(true) }),
+  } as unknown as EnvConfigType;
+  const originalPlatform = process.env['NEXT_PUBLIC_APP_PLATFORM'];
+  let userSettingsStatus = 404;
+  let siteConfigOk = true;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.startsWith('/api/mybooks/mydict/user-settings')) {
+      if (init?.method === 'PUT') return new Response(JSON.stringify({ updatedAt: 1 }));
+      return new Response('{}', { status: userSettingsStatus });
+    }
+    if (url === '/api/mybooks/site-dict/https%3A%2F%2Fbooks.example.com/config') {
+      return siteConfigOk
+        ? new Response(JSON.stringify(SITE_CONFIG))
+        : new Response('{}', { status: 502 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  });
+
+  const seed = (dictionarySettings?: Record<string, unknown>) => {
+    useSettingsStore.setState({
+      settings: {
+        customDictionaries: [],
+        dictionarySettings,
+      } as unknown as SettingsState['settings'],
+      setSettings: (s: SettingsState['settings']) => useSettingsStore.setState({ settings: s }),
+      saveSettings: vi.fn().mockResolvedValue(undefined),
+    } as unknown as SettingsState);
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'web';
+    localStorage.setItem('mybooks_host', 'https://books.example.com/');
+    userSettingsStatus = 404;
+    siteConfigOk = true;
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.removeItem('mybooks_host');
+    if (originalPlatform === undefined) delete process.env['NEXT_PUBLIC_APP_PLATFORM'];
+    else process.env['NEXT_PUBLIC_APP_PLATFORM'] = originalPlatform;
+  });
+
+  it('seeds a brand-new reader from the site defaults and saves them', async () => {
+    seed(undefined);
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    const after = useCustomDictionaryStore.getState().settings;
+    expect(after.providerEnabled['builtin:mybooks']).toBe(false);
+    expect(after.providerEnabled['builtin:baidu-baike']).toBe(true);
+    expect(after.providerEnabled['server:a']).toBe(true);
+    expect(after.dictModifiedAt).toBeTypeOf('number');
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true);
+  });
+
+  it('does not treat an unreachable synced copy as a first run', async () => {
+    userSettingsStatus = 500;
+    seed(undefined);
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    const after = useCustomDictionaryStore.getState().settings;
+    // The site dictionary is still picked up, but MyBooks keeps its built-in default.
+    expect(after.providerEnabled['server:a']).toBe(true);
+    expect(after.providerEnabled['builtin:mybooks']).toBe(true);
+  });
+
+  it("keeps an existing reader's toggles, including the env-configured server dictionary", async () => {
+    seed({
+      providerOrder: ['builtin:mybooks', 'builtin:mydict-server', 'builtin:baidu-baike'],
+      providerEnabled: {
+        'builtin:mybooks': true,
+        'builtin:mydict-server': true,
+        'builtin:baidu-baike': false,
+      },
+      webSearches: [],
+      dictModifiedAt: 5,
+    });
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    const after = useCustomDictionaryStore.getState().settings;
+    expect(after.providerEnabled['builtin:mybooks']).toBe(true);
+    expect(after.providerEnabled['builtin:baidu-baike']).toBe(false);
+    expect(after.providerEnabled['builtin:mydict-server']).toBe(true);
+    expect(after.providerEnabled['server:a']).toBe(true);
+  });
+
+  it('syncSiteDictionaries applies the server state and turns the rest off', async () => {
+    seed({
+      providerOrder: ['builtin:wiktionary', 'builtin:mybooks'],
+      providerEnabled: { 'builtin:wiktionary': true, 'builtin:mybooks': true },
+      webSearches: [],
+      dictModifiedAt: 5,
+    });
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    await expect(useCustomDictionaryStore.getState().syncSiteDictionaries(fakeEnv)).resolves.toBe(
+      true,
+    );
+    const after = useCustomDictionaryStore.getState().settings;
+    expect(after.providerEnabled['builtin:wiktionary']).toBe(false);
+    expect(after.providerEnabled['builtin:mybooks']).toBe(false);
+    expect(after.providerEnabled['server:a']).toBe(true);
+    expect(after.providerOrder[0]).toBe('server:a');
+  });
+
+  it('syncSiteDictionaries leaves settings untouched when the config is unavailable', async () => {
+    seed({
+      providerOrder: ['builtin:wiktionary'],
+      providerEnabled: { 'builtin:wiktionary': true },
+      webSearches: [],
+      dictModifiedAt: 5,
+    });
+    siteConfigOk = false;
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    const before = useCustomDictionaryStore.getState().settings;
+    await expect(useCustomDictionaryStore.getState().syncSiteDictionaries(fakeEnv)).resolves.toBe(
+      false,
+    );
+    expect(useCustomDictionaryStore.getState().settings).toBe(before);
   });
 });

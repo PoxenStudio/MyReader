@@ -30,8 +30,19 @@ const MYDICT_RESOURCE_RELAY = '/api/mybooks/mydict/res';
  * the MyBooks deployment itself (`MYDICT_SERVER_URL`). The client never learns
  * that address — it passes this sentinel and the relay resolves it against the
  * configured server. Kept short so resource URLs stay readable.
+ *
+ * Transitional: superseded by the site dictionaries below, kept working for
+ * deployments already configured through the environment variables.
  */
 export const SERVER_DICT_RESOURCE_BASE = 'server';
+
+/**
+ * Prefix of the site dictionaries' relay (`siteDictProvider.ts`). Their
+ * resource base is already a same-origin relay path, e.g.
+ * `/api/mybooks/site-dict/<host>/<siteId>/res`, so resources are appended to
+ * it as-is instead of being wrapped in {@link MYDICT_RESOURCE_RELAY}.
+ */
+const SITE_DICT_RELAY = '/api/mybooks/site-dict/';
 
 /**
  * Builds the URL a rendered entry should load one of its resources from —
@@ -54,11 +65,13 @@ export const buildMyDictResourceUrl = (baseUrl: string, resourcePath: string): s
   //    会得到 /res/server/api/.../res/server/... 的双前缀（上游 400）。
   if (/^https?:\/\//i.test(resourcePath)) return resourcePath;
   if (resourcePath.startsWith(`${MYDICT_RESOURCE_RELAY}/`)) return resourcePath;
+  if (resourcePath.startsWith(SITE_DICT_RELAY)) return resourcePath;
   const base = baseUrl.trim().replace(/\/+$/, '');
   if (isTauriAppPlatform()) return `${base}${resourcePath}`;
   const encodedPath = resourcePath
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/');
+  if (base.startsWith(SITE_DICT_RELAY)) return `${base}${encodedPath}`;
   return `${MYDICT_RESOURCE_RELAY}/${encodeURIComponent(base)}${encodedPath}`;
 };

@@ -1029,7 +1029,7 @@
   "Select all the bundle files together when importing.": "匯入時請同時選擇詞典套件內的所有檔案。",
   "Manage Dictionaries": "管理詞典",
   "Other language": "其他語言",
-  "MyDict (server)": "MyDict（伺服器）",
+  "MyDict Service": "MyDict伺服器",
   "Select Dictionary Files": "選擇詞典檔案",
   "Read on Wikipedia →": "在維基百科上閱讀 →",
   "This link can't be opened": "無法開啟此連結",
@@ -2103,5 +2103,11 @@
   "Total": "總計",
   "Edge Translator": "Edge Translator",
   "Failed to open audiobook": "開啟有聲書失敗",
-  "Show all ({{total}})": "顯示全部（{{total}}）"
+  "Show all ({{total}})": "顯示全部（{{total}}）",
+  "Sync Dictionary Settings": "同步詞典設定",
+  "Use the dictionary settings from the server": "使用伺服器端的詞典設定",
+  "Apply the server's dictionary settings? Server dictionaries follow the server's on/off state, and all other dictionaries will be turned off.": "使用伺服器端的詞典設定？伺服器端詞典將依伺服器端的啟停狀態設定，其他詞典將全部停用。",
+  "Dictionary settings synced from the server.": "已從伺服器端同步詞典設定。",
+  "Failed to load dictionary settings from the server.": "無法從伺服器端取得詞典設定。",
+  "Server": "伺服器"
 }

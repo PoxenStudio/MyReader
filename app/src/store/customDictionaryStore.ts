@@ -7,6 +7,13 @@ import type {
   WebSearchEntry,
 } from '@/services/dictionaries/types';
 import { BUILTIN_PROVIDER_IDS, BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
+import { evictProvider } from '@/services/dictionaries/registry';
+import {
+  applySiteDefaults,
+  fetchSiteDictConfig,
+  reconcileSiteDicts,
+  syncWithSiteConfig,
+} from '@/services/dictionaries/siteDictionaries';
 import { useSettingsStore } from './settingsStore';
 
 // ---------------------------------------------------------------------------
@@ -18,17 +25,32 @@ import { useSettingsStore } from './settingsStore';
 // embedded Next server stores a small per-MyBooks-user JSON file
 // (`/api/mybooks/mydict/user-settings` -> /data/reader/dict-settings/), and
 // this store pulls it on boot (server wins) and pushes on every save.
+//
+// Separately, the MyBooks admin's site dictionaries (siteDictionaries.ts)
+// seed a brand-new reader's settings, are reconciled on every load, and can
+// be re-applied on demand via `syncSiteDictionaries`.
 
 let serverDictSyncedAt = 0;
 
-const fetchServerDictSettings = async (): Promise<{
-  updatedAt: number;
-  settings: Partial<DictionarySettings>;
-} | null> => {
+/** The user has never saved dictionary settings on any device. */
+const NO_SYNCED_SETTINGS = 'missing' as const;
+
+const fetchServerDictSettings = async (): Promise<
+  | {
+      updatedAt: number;
+      settings: Partial<DictionarySettings>;
+    }
+  | typeof NO_SYNCED_SETTINGS
+  | null
+> => {
   try {
     const res = await fetch('/api/mybooks/mydict/user-settings', {
       signal: AbortSignal.timeout(8000),
     });
+    // Only an explicit 404 means "nothing synced yet" — a network failure must
+    // not be mistaken for it, or first-run defaults would overwrite (and then
+    // push over) the user's real synced copy.
+    if (res.status === 404) return NO_SYNCED_SETTINGS;
     if (!res.ok) return null;
     const data = (await res.json()) as {
       updatedAt?: number;
@@ -71,6 +93,7 @@ const applyRemoteDictSettings = (
   if (remote.providerOrder) merged.providerOrder = remote.providerOrder;
   if (remote.providerEnabled) merged.providerEnabled = remote.providerEnabled;
   if (remote.myDicts) merged.myDicts = remote.myDicts;
+  if (remote.serverDicts) merged.serverDicts = remote.serverDicts;
   if (remote.webSearches) merged.webSearches = remote.webSearches;
   if (typeof remote.fontScale === 'number') merged.fontScale = remote.fontScale;
 
@@ -122,7 +145,8 @@ const DEFAULT_DICTIONARY_SETTINGS: DictionarySettings = {
     // (MYDICT_SERVER_URL / MYDICT_SERVER_TOKEN): queries are relayed
     // server-side, so it costs a browser zero configuration. Harmless
     // elsewhere — without those env vars the provider reports itself
-    // unsupported and its card is dropped from the popup.
+    // unsupported and its card is dropped from the popup. Transitional
+    // alongside the admin-configured site dictionaries.
     BUILTIN_PROVIDER_IDS.mydictServer,
     BUILTIN_PROVIDER_IDS.baiduBaike,
     BUILTIN_PROVIDER_IDS.wiktionary,
@@ -145,6 +169,7 @@ const DEFAULT_DICTIONARY_SETTINGS: DictionarySettings = {
     [BUILTIN_WEB_SEARCH_IDS.goodreads]: false,
   },
   webSearches: [],
+  serverDicts: [],
   fontScale: 1,
 };
 
@@ -206,7 +231,19 @@ interface DictionaryStoreState {
   loadCustomDictionaries(envConfig: EnvConfigType): Promise<void>;
   /** Persist current state back into settings. */
   saveCustomDictionaries(envConfig: EnvConfigType): Promise<void>;
+  /**
+   * "Sync Dictionary Settings" (embedded web build): re-apply the MyBooks
+   * admin's dictionary config and turn every other dictionary off, then save.
+   * Resolves `false`, leaving the settings untouched, when the config can't
+   * be fetched.
+   */
+  syncSiteDictionaries(envConfig: EnvConfigType): Promise<boolean>;
 }
+
+/** Site dictionaries are named by the admin; drop cached providers so a rename shows up. */
+const evictSiteProviders = (...lists: (DictionarySettings['serverDicts'] | undefined)[]) => {
+  for (const list of lists) for (const entry of list ?? []) evictProvider(entry.id);
+};
 
 function toSettingsDict(dict: ImportedDictionary): ImportedDictionary {
   // Strip transient fields before persisting. `unavailable` is recomputed at
@@ -548,6 +585,7 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
         defaultProviderId: persistedSettings.defaultProviderId,
         webSearches: persistedSettings.webSearches ?? [],
         myDicts: persistedSettings.myDicts ?? [],
+        serverDicts: persistedSettings.serverDicts ?? [],
         fontScale: persistedSettings.fontScale ?? DEFAULT_DICTIONARY_SETTINGS.fontScale,
         // Local bookkeeping — must survive the merge or the boot pull's
         // staleness guard reads 0 and reverts newer local edits.
@@ -560,9 +598,17 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
       // slow boot-time pull would revert edits the user just made here (drag
       // order, toggles) before the pull landed.
       if (isWebAppPlatform()) {
-        const remote = await fetchServerDictSettings();
+        const [remote, siteConfig] = await Promise.all([
+          fetchServerDictSettings(),
+          fetchSiteDictConfig(),
+        ]);
         const localModifiedAt = get().settings.dictModifiedAt ?? 0;
-        if (remote && remote.updatedAt > localModifiedAt && remote.updatedAt > serverDictSyncedAt) {
+        if (
+          remote &&
+          remote !== NO_SYNCED_SETTINGS &&
+          remote.updatedAt > localModifiedAt &&
+          remote.updatedAt > serverDictSyncedAt
+        ) {
           serverDictSyncedAt = remote.updatedAt;
           const reconciled = applyRemoteDictSettings(settingsMerged, remote.settings);
           set({ settings: reconciled });
@@ -572,10 +618,39 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
           const { settings: sysSettings, setSettings } = useSettingsStore.getState();
           setSettings({ ...sysSettings, dictionarySettings: reconciled });
         }
+
+        // Site dictionaries (MyBooks admin config). A reader with no settings
+        // here and none synced from another device starts from the admin's
+        // defaults; everyone else keeps their own toggles and only picks up
+        // added / removed / renamed site dictionaries.
+        if (siteConfig) {
+          const current = get().settings;
+          const isFirstRun = !current.dictModifiedAt && remote === NO_SYNCED_SETTINGS;
+          const next = isFirstRun
+            ? applySiteDefaults(current, siteConfig)
+            : reconcileSiteDicts(current, siteConfig);
+          if (next !== current) {
+            evictSiteProviders(current.serverDicts, next.serverDicts);
+            set({ settings: next });
+            await get().saveCustomDictionaries(envConfig);
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to load custom dictionaries settings:', error);
     }
+  },
+
+  syncSiteDictionaries: async (envConfig) => {
+    if (!isWebAppPlatform()) return false;
+    const siteConfig = await fetchSiteDictConfig();
+    if (!siteConfig) return false;
+    const current = get().settings;
+    const next = syncWithSiteConfig(current, siteConfig);
+    evictSiteProviders(current.serverDicts, next.serverDicts);
+    set({ settings: next });
+    await get().saveCustomDictionaries(envConfig);
+    return true;
   },
 
   saveCustomDictionaries: async (envConfig) => {
@@ -601,6 +676,7 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
           providerOrder: dictSettings.providerOrder,
           providerEnabled: dictSettings.providerEnabled,
           myDicts: dictSettings.myDicts,
+          serverDicts: dictSettings.serverDicts,
           webSearches: dictSettings.webSearches,
           fontScale: dictSettings.fontScale,
         });

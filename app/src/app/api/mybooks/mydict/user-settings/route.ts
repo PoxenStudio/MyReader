@@ -30,6 +30,7 @@ const ALLOWED_KEYS = new Set([
   'providerOrder',
   'providerEnabled',
   'myDicts',
+  'serverDicts',
   'webSearches',
   'fontScale',
   'defaultProviderId',
@@ -71,6 +72,7 @@ const sanitize = (input: unknown): Record<string, unknown> | null => {
       continue;
     if (key === 'providerEnabled' && !isPlainObject(value)) continue;
     if (key === 'myDicts' && !Array.isArray(value)) continue;
+    if (key === 'serverDicts' && !Array.isArray(value)) continue;
     if (key === 'webSearches' && !Array.isArray(value)) continue;
     if (key === 'fontScale' && typeof value !== 'number') continue;
     if (key === 'defaultProviderId' && typeof value !== 'string' && value !== null) continue;
@@ -130,7 +132,10 @@ export async function PUT(request: NextRequest) {
     console.error(`[MyDict Settings] write failed for user ${userId}:`, error);
     return NextResponse.json({ error: 'Write failed' }, { status: 502 });
   }
-  return NextResponse.json({ updatedAt }, {
-    headers: { 'Cache-Control': 'no-store' },
-  });
+  return NextResponse.json(
+    { updatedAt },
+    {
+      headers: { 'Cache-Control': 'no-store' },
+    },
+  );
 }

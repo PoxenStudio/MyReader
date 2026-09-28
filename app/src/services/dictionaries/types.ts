@@ -178,6 +178,20 @@ export interface MyDictEntry {
   deletedAt?: number;
 }
 
+/**
+ * MyDict server configured by the MyBooks admin for the embedded web reader
+ * (MyBooks settings → reader → dictionaries). The reader only knows its id
+ * and name: lookups go through MyBooks' `/api/reader/dict/<siteId>/*`, so the
+ * server address and token never reach the browser. Web-embed only.
+ */
+export interface SiteDictEntry {
+  /** `server:<siteId>` */
+  id: string;
+  /** Id of the entry in MyBooks' `READER_MYDICTS`. */
+  siteId: string;
+  name: string;
+}
+
 export interface DictionarySettings {
   /** Provider id order shown in the popup tab strip. Includes builtin ids. */
   providerOrder: string[];
@@ -192,6 +206,13 @@ export interface DictionarySettings {
   webSearches?: WebSearchEntry[];
   /** User-added MyDict servers (Tauri-only). */
   myDicts?: MyDictEntry[];
+  /**
+   * The site dictionaries this reader last saw from MyBooks (embedded web
+   * build). Doubles as the "already seen" set: a site dictionary missing here
+   * is new and gets added with the admin's default, one present here keeps
+   * the user's own toggle.
+   */
+  serverDicts?: SiteDictEntry[];
   /**
    * Font-size multiplier for the dictionary popup content (independent of the
    * main reading view, #4443). `1` = the default sizes; larger values scale
@@ -236,17 +257,15 @@ export const BUILTIN_PROVIDER_IDS = {
    * Tauri-only for the same CORS reason as {@link BUILTIN_PROVIDER_IDS.myBooks}.
    */
   baiduBaike: 'builtin:baidu-baike',
+
   /**
-   * The MyDict server configured **on the MyBooks deployment itself** (via the
-   * `MYDICT_SERVER_URL` / `MYDICT_SERVER_TOKEN` environment variables of the
-   * embedded-reader container). Web-embed only: the queries go through the
-   * app's own `/api/mybooks/mydict/server-query` route, so the address and the
-   * token stay server-side and no browser has to configure anything. On other
-   * platforms the provider reports itself unsupported (there is no such
-   * server to ask).
+   * MyDict Service
    */
   mydictServer: 'builtin:mydict-server',
 } as const;
+
+/** Provider-id prefix of the site dictionaries (see {@link SiteDictEntry}). */
+export const SITE_DICT_PREFIX = 'server:';
 
 export type BuiltinProviderId = (typeof BUILTIN_PROVIDER_IDS)[keyof typeof BUILTIN_PROVIDER_IDS];
 

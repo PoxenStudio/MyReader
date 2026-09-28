@@ -5,6 +5,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useReaderStore } from '@/store/readerStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
+import { isWebAppPlatform } from '@/services/environment';
+import { eventDispatcher } from '@/utils/event';
 import { saveViewSettings } from '@/helpers/settings';
 import {
   getTranslatorDisplayLabel,
@@ -52,6 +55,8 @@ const LangPanel: React.FC<SettingsPanelPanelProp> = ({ bookKey, onRegisterReset 
     viewSettings.convertChineseVariant,
   );
   const [showCustomDictionaries, setShowCustomDictionaries] = useState(false);
+  const [syncingDictionaries, setSyncingDictionaries] = useState(false);
+  const { syncSiteDictionaries } = useCustomDictionaryStore();
   const [showWordLens, setShowWordLens] = useState(false);
 
   // Android Back / Esc: when a sub-page is open, intercept and step back to the
@@ -292,6 +297,31 @@ const LangPanel: React.FC<SettingsPanelPanelProp> = ({ bookKey, onRegisterReset 
     return <WordLensPanel bookKey={bookKey} onBack={() => setShowWordLens(false)} />;
   }
 
+  // Embedded web build only: re-apply the MyBooks admin's dictionary config
+  // (see services/dictionaries/siteDictionaries.ts).
+  const handleSyncDictionaries = async () => {
+    const appService = await envConfig.getAppService();
+    const confirmed = await appService.ask(
+      _(
+        "Apply the server's dictionary settings? Server dictionaries follow the server's on/off state, and all other dictionaries will be turned off.",
+      ),
+    );
+    if (!confirmed) return;
+    setSyncingDictionaries(true);
+    try {
+      const ok = await syncSiteDictionaries(envConfig);
+      eventDispatcher.dispatch('toast', {
+        type: ok ? 'info' : 'error',
+        message: ok
+          ? _('Dictionary settings synced from the server.')
+          : _('Failed to load dictionary settings from the server.'),
+        timeout: 4000,
+      });
+    } finally {
+      setSyncingDictionaries(false);
+    }
+  };
+
   return (
     <div className={clsx('my-4 w-full space-y-6')}>
       <BoxedList title={_('Language')} data-setting-id='settings.language.interfaceLanguage'>
@@ -315,6 +345,15 @@ const LangPanel: React.FC<SettingsPanelPanelProp> = ({ bookKey, onRegisterReset 
           onClick={() => setShowCustomDictionaries(true)}
           className='h-14'
         />
+        {isWebAppPlatform() && (
+          <NavigationRow
+            title={_('Sync Dictionary Settings')}
+            status={_('Use the dictionary settings from the server')}
+            onClick={handleSyncDictionaries}
+            disabled={syncingDictionaries}
+            data-setting-id='settings.language.syncDictionaries'
+          />
+        )}
       </BoxedList>
 
       <BoxedList
