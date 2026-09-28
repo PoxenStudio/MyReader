@@ -47,6 +47,13 @@ export const SERVER_DICT_RESOURCE_BASE = 'server';
  * the stylesheet is served from our origin.
  */
 export const buildMyDictResourceUrl = (baseUrl: string, resourcePath: string): string => {
+  // 幂等保护（两次都真实发生过）：
+  //  - 绝对 http(s) URL 是最终地址，不需要也不允许走中继；
+  //  - 已经带中继前缀的路径不能再包一层——发音点击绑定发生在
+  //    absolutizeResourceRefs 把词条 href 改写成中继 URL 之后，直接 resolve
+  //    会得到 /res/server/api/.../res/server/... 的双前缀（上游 400）。
+  if (/^https?:\/\//i.test(resourcePath)) return resourcePath;
+  if (resourcePath.startsWith(`${MYDICT_RESOURCE_RELAY}/`)) return resourcePath;
   const base = baseUrl.trim().replace(/\/+$/, '');
   if (isTauriAppPlatform()) return `${base}${resourcePath}`;
   const encodedPath = resourcePath

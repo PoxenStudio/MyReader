@@ -54,6 +54,7 @@ export const serverDictProvider: DictionaryProvider = {
         baseUrl: SERVER_DICT_RESOURCE_BASE,
         onNavigate: ctx.onNavigate,
         _: ctx._,
+        lang: ctx.lang,
         isDarkMode: ctx.isDarkMode,
       });
       return { ok: true, headword: trimmed, sourceLabel: 'MyDict (server)' };

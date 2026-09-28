@@ -12,6 +12,10 @@ const shadowOf = (container: HTMLElement): ShadowRoot => {
   return host!.shadowRoot!;
 };
 
+/** One dictionary group per light-DOM `<details>`; content sits in a shadow scope inside. */
+const groupDetailsOf = (container: HTMLElement): HTMLDetailsElement[] =>
+  Array.from(container.querySelectorAll('details'));
+
 const okResponse = (results: unknown[]) =>
   ({
     ok: true,
@@ -66,12 +70,14 @@ describe('MyBooks dictionary provider', () => {
 
     expect(outcome.ok).toBe(true);
     const shadow = shadowOf(container);
-    expect(shadow.textContent).toContain('ECDICT英汉词典');
+    // 词条内容在 shadow 里；词典名在 light DOM 的 summary 上。
     expect(shadow.textContent).toContain('苹果');
+    expect(container.textContent).toContain('ECDICT英汉词典');
     // Markup survives instead of being flattened into plain text.
     expect(shadow.querySelector('strong')?.textContent).toBe('n.');
-    // Not the same node as the light-DOM container, which stays empty.
-    expect(container.textContent).toBe('');
+    // Not the same node as the light-DOM container: the light side only carries
+    // the collapse chrome, never entry content.
+    expect(container.textContent).not.toContain('苹果');
   });
 
   it('sanitizes entry HTML before injecting it', async () => {
@@ -239,7 +245,7 @@ describe('MyBooks dictionary provider', () => {
     container.addEventListener('click', () => {
       reachedCard = true;
     });
-    shadow
+    container
       .querySelector('summary')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
     expect(reachedCard).toBe(false);
@@ -260,14 +266,15 @@ describe('MyBooks dictionary provider', () => {
       container,
     });
 
-    const shadow = shadowOf(container);
-    const groups = shadow.querySelectorAll('details');
+    const groups = groupDetailsOf(container);
     expect(groups).toHaveLength(2);
     expect(groups[0]!.open).toBe(true);
     expect(groups[1]!.open).toBe(false);
-    // Homographs inside one dictionary get an index header.
-    expect(groups[0]!.querySelectorAll('section').length).toBe(2);
-    expect(groups[0]!.textContent).toContain('1/2');
+    // Homographs inside one dictionary get an index header (rendered in the
+    // group's shadow scope, not in the light DOM).
+    const firstScope = groups[0]!.querySelector('.dict-shadow-host')!.shadowRoot!;
+    expect(firstScope.querySelectorAll('section').length).toBe(2);
+    expect(firstScope.textContent).toContain('1/2');
   });
 
   it('marks hits that only matched after a fallback to another language', async () => {
@@ -290,9 +297,7 @@ describe('MyBooks dictionary provider', () => {
       container,
     });
 
-    expect(shadowOf(container).querySelector('.mydict-lang-badge')?.textContent).toBe(
-      'Other language',
-    );
+    expect(container.querySelector('.mydict-lang-badge')?.textContent).toBe('Other language');
   });
 
   it('follows entry:// cross-references through onNavigate', async () => {

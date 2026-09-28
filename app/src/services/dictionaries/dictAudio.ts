@@ -147,6 +147,7 @@ const playSpeexDecoded = (
   el: HTMLAudioElement,
   spxUrl: string,
   fail: (message: string) => void,
+  succeed?: () => void,
 ): void => {
   const decode = async (): Promise<void> => {
     await loadSpeexDecoder();
@@ -161,7 +162,8 @@ const playSpeexDecoded = (
       decodedBlobs.set(spxUrl, url);
       setDecodedSource(el, blob);
     }
-    await el.play().catch(fail);
+    await el.play();
+    succeed?.();
   };
   decode().catch((error: unknown) => {
     fail(error instanceof Error ? error.message : String(error));
@@ -174,8 +176,8 @@ export const audioCandidates = (url: string): string[] => {
   return [url.replace(SPX_EXT_RE, '.mp3'), url.replace(SPX_EXT_RE, '.opus'), url];
 };
 
-/** 播放一个音频 URL；全部候选失败时调 `fail`（调用方据此提示）。 */
-const playAudio = (url: string, fail: (message: string) => void): void => {
+/** 播放一个音频 URL；全部候选失败时调 `fail`，成功起播时调 `succeed`（调用方据此提示）。 */
+const playAudio = (url: string, fail: (message: string) => void, succeed?: () => void): void => {
   const candidates = audioCandidates(url);
   let index = 0;
   const attempt = (): void => {
@@ -197,13 +199,16 @@ const playAudio = (url: string, fail: (message: string) => void): void => {
     // onerror，否则解码结果播放失败时会再触发一次 attempt，重复上报。
     if (SPX_EXT_RE.test(current)) {
       el.onerror = null;
-      playSpeexDecoded(el, current, fail);
+      playSpeexDecoded(el, current, fail, succeed);
       return;
     }
     el.onerror = advance;
     el.src = current;
     const played = el.play();
-    if (played && played.catch) played.catch(advance);
+    if (played) {
+      void played.then(() => succeed?.()).catch(() => {});
+      void played.catch(advance);
+    }
   };
   attempt();
 };
@@ -222,12 +227,17 @@ export const wireDictAudio = (
   root: HTMLElement,
   resolve: (resourcePath: string) => string,
   onFail?: (message: string) => void,
+  onSuccess?: () => void,
 ): void => {
   const play = (url: string): void => {
-    playAudio(url, (message) => {
-      console.warn('发音播放失败', url, message);
-      onFail?.(message);
-    });
+    playAudio(
+      url,
+      (message) => {
+        console.warn('发音播放失败', url, message);
+        onFail?.(message);
+      },
+      onSuccess,
+    );
   };
 
   // `<a href="….mp3/.spx/…">`：sound:// 改写产物与词条自带的音频链接

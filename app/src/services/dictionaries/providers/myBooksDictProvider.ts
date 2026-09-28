@@ -88,27 +88,46 @@ const BASELINE_CSS = `
   th, td { padding: 0.25em 0.5em; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
   hr { border: 0; border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
   a { color: inherit; }
-  details.mydict-group[hidden] { display: none !important; }
-  .mydict-lang-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35em;
-    margin: 0.4em 0 0.6em;
+  .mydict-entry + .mydict-entry {
+    margin-top: 0.6em;
+    padding-top: 0.5em;
+    border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
   }
-  .mydict-lang-tab {
-    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
-    border-radius: 999px;
-    padding: 0.1em 0.7em;
+  .mydict-entry-head {
+    margin-bottom: 0.35em;
+    font-size: 0.8em;
+    opacity: 0.75;
+  }
+  .mydict-entry-index {
+    display: inline-block;
+    min-width: 1.8em;
+    margin-right: 0.3em;
+    font-variant-numeric: tabular-nums;
+  }
+  .mydict-entry-word { font-weight: 600; }
+  .mydict-entry-phonetic { margin-left: 0.35em; }
+  /* 发音播放失败提示：播放链路（取回/解码/自动播放策略）任一步失败都不该
+     悄无声息——用户只看到"没声音"，无从上报原因。 */
+  .mydict-audio-note {
+    margin-top: 0.4em;
     font-size: 0.78em;
-    cursor: pointer;
-    opacity: 0.7;
-    background: transparent;
-    color: inherit;
+    color: color-mix(in srgb, currentColor 60%, #d64545);
   }
-  .mydict-lang-tab.active {
-    background: color-mix(in srgb, currentColor 12%, transparent);
-    opacity: 1;
-  }
+`;
+
+/**
+ * Everything the renderer owns but lives OUTSIDE the shadow scopes — language
+ * tabs, the per-dictionary `<details>`/`<summary>` collapse chrome — plus the
+ * styling they need, injected once into the light DOM.
+ *
+ * 为什么 `<details>` 在 light DOM：词典 CSS 会用裸元素选择器（牛津高阶第10版的
+ * oald10.css 有 `details { display: inline-block }`、
+ * `details[open] > summary > span { display: none }`——它自己的页面用 details
+ * 做折叠框），folded 结构留在 shadow 里就会被打进来的词典 CSS 重新排版，表现为
+ * 该词典整块错乱。放 light DOM 后词典样式（在 shadow 内）永远够不着它。
+ */
+const DICT_CHROME_CSS = `
+  details.mydict-group[hidden] { display: none !important; }
   details.mydict-group + details.mydict-group {
     margin-top: 0.6em;
     padding-top: 0.6em;
@@ -140,7 +159,6 @@ const BASELINE_CSS = `
     transform-origin: 25% 50%;
     transition: transform 0.15s ease;
   }
-  details[open] > summary.mydict-group-chevron,
   details[open] > summary .mydict-group-chevron {
     transform: rotate(90deg);
   }
@@ -158,25 +176,27 @@ const BASELINE_CSS = `
     border-radius: 4px;
     padding: 0 0.35em;
   }
-  .mydict-group-body { margin-top: 0.4em; }
-  .mydict-entry + .mydict-entry {
-    margin-top: 0.6em;
-    padding-top: 0.5em;
-    border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  .mydict-lang-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35em;
+    margin: 0.4em 0 0.6em;
   }
-  .mydict-entry-head {
-    margin-bottom: 0.35em;
-    font-size: 0.8em;
-    opacity: 0.75;
+  .mydict-lang-tab {
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-radius: 999px;
+    padding: 0.1em 0.7em;
+    font-size: 0.78em;
+    cursor: pointer;
+    opacity: 0.7;
+    background: transparent;
+    color: inherit;
   }
-  .mydict-entry-index {
-    display: inline-block;
-    min-width: 1.8em;
-    margin-right: 0.3em;
-    font-variant-numeric: tabular-nums;
+  .mydict-lang-tab-active {
+    background: color-mix(in srgb, currentColor 12%, transparent);
+    opacity: 1;
   }
-  .mydict-entry-word { font-weight: 600; }
-  .mydict-entry-phonetic { margin-left: 0.35em; }
 `;
 
 /**
@@ -343,13 +363,19 @@ const adaptToDarkTheme = (root: HTMLElement): void => {
  * Render MyDict-API results (shared by the built-in MyBooks dictionary and
  * user-added MyDict servers).
  *
- * Entries are grouped by dictionary and each group is a native `<details>`
- * with the first one open: a single lookup can hit several dictionaries, and
- * a 搜韵-style entry can hold dozens of homographs, so showing everything
- * expanded at once buries the word the reader actually wanted.
+ * Hits are grouped by dictionary and **each dictionary gets its own shadow
+ * scope**: dictionaries style bare elements (`div`, `li { float: left }`,
+ * `table { … }`) and a shared shadow lets 千篇's rules reflow the English
+ * dictionary's lists. Per-scope isolation costs one extra shadow per
+ * dictionary and buys exact containment.
  *
- * The markup goes into a shadow root — the entries bring their own CSS, and
- * that must not apply to the reader chrome (nor the chrome's styles to them).
+ * Each dictionary folds into a native `<details>` that wraps its scope (first
+ * one open); with several
+ * languages hit, a language tab strip (全部 / 中文 / 日本語 …) sits above
+ * them — a single lookup can hit a dozen dictionaries, and the reader's own
+ * language picks the default tab. `entry://word` cross-references follow the
+ * shell's `onNavigate`; hits the server only matched after falling back to
+ * another language (`lang_match`) are marked in the strip.
  */
 export const renderMyBooksResults = (
   results: MyDictResult[],
@@ -357,37 +383,6 @@ export const renderMyBooksResults = (
   options: MyBooksRenderOptions,
 ): void => {
   const translate = options._ ?? ((key: string) => key);
-
-  const shadowHost = document.createElement('div');
-  shadowHost.className = 'dict-shadow-host mt-1 text-sm';
-  container.appendChild(shadowHost);
-  const shadow = shadowHost.attachShadow({ mode: 'open' });
-
-  const style = document.createElement('style');
-  style.textContent = BASELINE_CSS;
-  shadow.appendChild(style);
-
-  // `part="dict-content"` is the only hook that reaches across the shadow
-  // boundary, so the popup's font-size rule can scale entries (#4443).
-  const body = document.createElement('div');
-  body.setAttribute('part', 'dict-content');
-  shadow.appendChild(body);
-
-  // Entry stylesheets, deduped — every entry of a dictionary links the same
-  // CSS file, and a group can hold dozens of entries.
-  const pendingStyles: (HTMLLinkElement | HTMLStyleElement)[] = [];
-  const seenStyles = new Set<string>();
-  const collectStyles = (html: string): void => {
-    for (const node of extractEntryStyles(html)) {
-      const key =
-        node instanceof HTMLLinkElement
-          ? `link:${node.getAttribute('href')}`
-          : `css:${node.textContent}`;
-      if (seenStyles.has(key)) continue;
-      seenStyles.add(key);
-      pendingStyles.push(node);
-    }
-  };
 
   // The server orders hits by dictionary, so folding runs of the same name
   // preserves that order without a lookup table.
@@ -400,8 +395,6 @@ export const renderMyBooksResults = (
     else groups.push({ name, lang, items: [result] });
   }
 
-  // CJK 输入在 all_langs 模式下会同时带回中日两侧的命中——语言标签让用户可以
-  // 按语言聚焦。只有一种语言时不渲染。
   const langOrder: string[] = [];
   for (const group of groups) {
     if (!langOrder.includes(group.lang)) langOrder.push(group.lang);
@@ -409,40 +402,53 @@ export const renderMyBooksResults = (
   // 默认聚焦与书内容语言一致的组：读日文书时查汉字词，日文词典才是第一顺位。
   // 书语言没有命中时回退「全部」。
   const bookLang = langBucket(options.lang);
-  const defaultTab = langOrder.includes(bookLang) ? bookLang : '';
+  const activeLang = langOrder.includes(bookLang) ? bookLang : '';
 
-  let langTabs: HTMLDivElement | null = null;
+  /** 非「全部」标签时，其它语言的分组整块隐藏。 */
+  const scopes: { det: HTMLDetailsElement; lang: string }[] = [];
+  let openedVisibleGroup = false;
+  const applyLangFilter = (lang: string): void => {
+    for (const scope of scopes) {
+      scope.det.style.display = lang !== '' && scope.lang !== lang ? 'none' : '';
+    }
+  };
+
+  // 折叠 chrome + 语言标签都住 light DOM，样式在这里一次性注入（BASELINE_CSS
+  // 在各 shadow 内够不着它们；词条 CSS 在 shadow 内也不该够着我们的骨架）。
+  const chromeCss = document.createElement('style');
+  chromeCss.textContent = DICT_CHROME_CSS;
+  container.appendChild(chromeCss);
+
+  // 语言标签条（≥2 种语言才渲染）。
   if (langOrder.length > 1) {
-    langTabs = document.createElement('div');
-    langTabs.className = 'mydict-lang-tabs';
-    langTabs.addEventListener('click', (event) => event.stopPropagation());
+    const tabs = document.createElement('div');
+    tabs.className = 'mydict-lang-tabs flex flex-wrap items-center gap-1.5';
+    tabs.addEventListener('click', (event) => event.stopPropagation());
     const mkTab = (lang: string, label: string) => {
       const tab = document.createElement('button');
       tab.type = 'button';
-      tab.className = 'mydict-lang-tab' + (lang === defaultTab ? ' active' : '');
-      tab.dataset['lang'] = lang;
       tab.textContent = label;
+      tab.className = 'mydict-lang-tab' + (lang === activeLang ? ' mydict-lang-tab-active' : '');
       tab.addEventListener('click', () => {
-        for (const t of [...langTabs!.children]) t.classList.toggle('active', t === tab);
-        for (const det of body.querySelectorAll('details')) {
-          det.hidden = lang !== '' && det.dataset['lang'] !== lang;
-        }
+        for (const t of [...tabs.children]) t.classList.toggle('mydict-lang-tab-active', t === tab);
+        applyLangFilter(lang);
       });
       return tab;
     };
-    langTabs.appendChild(mkTab('', translate('All')));
+    tabs.appendChild(mkTab('', translate('All')));
     for (const lang of langOrder) {
-      langTabs.appendChild(mkTab(lang, LANG_TAB_NAMES[lang] ?? lang));
+      tabs.appendChild(mkTab(lang, LANG_TAB_NAMES[lang] ?? lang));
     }
+    container.appendChild(tabs);
   }
 
-  groups.forEach((group, groupIndex) => {
+  for (const group of groups) {
+    // 该词典一个原生 `<details>`：一组可能命中几十个同形词（搜韵），
+    // 全部展开会把读者要查的那个词埋掉。第一组默认展开。
     const details = document.createElement('details');
     details.className = 'mydict-group';
     details.dataset['lang'] = group.lang;
-    // 默认聚焦书语言组时，其余语言整组隐藏（点标签再展开）。
-    details.hidden = defaultTab !== '' && group.lang !== defaultTab;
-    details.open = groupIndex === 0 && (defaultTab === '' || group.lang === defaultTab);
+    container.appendChild(details);
 
     const summary = document.createElement('summary');
     summary.className = 'mydict-group-head';
@@ -479,10 +485,42 @@ export const renderMyBooksResults = (
 
     details.appendChild(summary);
 
-    const groupBody = document.createElement('div');
-    groupBody.className = 'mydict-group-body';
+    const scopeHost = document.createElement('div');
+    scopeHost.className = 'dict-shadow-host mydict-scope mt-1 text-sm';
+    details.appendChild(scopeHost);
+    const shadow = scopeHost.attachShadow({ mode: 'open' });
+
+    const style = document.createElement('style');
+    style.textContent = BASELINE_CSS;
+    shadow.appendChild(style);
+
+    // 该词典自己的样式表（DOMPurify 无条件丢弃 <link>/<style>，这里逐条挂回）；
+    // 挂在自己的 scope 里就不会漂进别的词典，也够不着 light DOM 的折叠骨架。
+    const dictStyles: (HTMLLinkElement | HTMLStyleElement)[] = [];
+    const seenStyles = new Set<string>();
+    for (const item of group.items) {
+      for (const node of extractEntryStyles(item.definition ?? '')) {
+        const key =
+          node instanceof HTMLLinkElement
+            ? `link:${node.getAttribute('href')}`
+            : `css:${node.textContent}`;
+        if (seenStyles.has(key)) continue;
+        seenStyles.add(key);
+        dictStyles.push(node);
+      }
+    }
+    for (const node of dictStyles) shadow.appendChild(node);
+
+    // `part="dict-content"` is the only hook that reaches across the shadow
+    // boundary, so the popup's font-size rule can scale entries (#4443).
+    const body = document.createElement('div');
+    body.setAttribute('part', 'dict-content');
+    shadow.appendChild(body);
+
     const multiple = group.items.length > 1;
-    group.items.forEach((item, itemIndex) => {
+    let entryIndex = 0;
+    for (const item of group.items) {
+      entryIndex += 1;
       const section = document.createElement('section');
       section.className = 'mydict-entry';
 
@@ -495,7 +533,7 @@ export const renderMyBooksResults = (
         head.className = 'mydict-entry-head';
         const index = document.createElement('span');
         index.className = 'mydict-entry-index';
-        index.textContent = `${itemIndex + 1}/${group.items.length}`;
+        index.textContent = `${entryIndex}/${group.items.length}`;
         head.appendChild(index);
         if (item.word) {
           const word = document.createElement('span');
@@ -515,30 +553,44 @@ export const renderMyBooksResults = (
       const content = document.createElement('div');
       content.className = 'mydict-entry-body';
       const definition = item.definition ?? '';
-      // The entry's own stylesheets go to the shadow root below; the rest of
-      // the markup goes through the sanitizer. `innerHTML` never executes a
+      // The entry's own stylesheets go to this scope above; the rest of the
+      // markup goes through the sanitizer. `innerHTML` never executes a
       // `<script>` — `sanitizeDictionaryHtml` covers the rest (handlers,
       // iframes, `javascript:` URLs).
-      collectStyles(definition);
       content.innerHTML = sanitizeDictionaryHtml(definition);
       section.appendChild(content);
 
-      groupBody.appendChild(section);
-    });
-    details.appendChild(groupBody);
-    body.appendChild(details);
-  });
+      body.appendChild(section);
+    }
 
-  // A dictionary's CSS is referenced by every one of its entries, so mount each
-  // sheet once. Inserting before `body` keeps the cascade readable: baseline,
-  // then the dictionaries' own rules, then the content they style.
-  for (const node of pendingStyles) shadow.insertBefore(node, body);
-  if (langTabs) shadow.insertBefore(langTabs, body);
+    // Re-anchor the server's root-relative `/dict-res/<id>/res/…` references to
+    // the server they came from (web 构建里经中继取回)，然后接上词条内的链接行为。
+    const audioNote = document.createElement('div');
+    audioNote.className = 'mydict-audio-note';
+    audioNote.hidden = true;
+    body.appendChild(audioNote);
+    absolutizeResourceRefs(shadow, options.baseUrl);
+    wireDictAudio(
+      body,
+      (resourcePath) => buildMyDictResourceUrl(options.baseUrl, resourcePath),
+      (message) => {
+        audioNote.textContent = `发音播放失败：${message}`;
+        audioNote.hidden = false;
+      },
+      () => {
+        audioNote.hidden = true;
+      },
+    );
+    wireLinks(body, options.onNavigate);
+    if (options.isDarkMode) adaptToDarkTheme(body);
 
-  absolutizeResourceRefs(shadow, options.baseUrl);
-  wireDictAudio(body, (resourcePath) => buildMyDictResourceUrl(options.baseUrl, resourcePath));
-  wireLinks(body, options.onNavigate);
-  if (options.isDarkMode) adaptToDarkTheme(body);
+    // 初始可见性跟随默认标签；默认标签下可见的第一组才展开。
+    const visible = activeLang === '' || group.lang === activeLang;
+    details.style.display = visible ? '' : 'none';
+    details.open = visible && !openedVisibleGroup;
+    if (visible) openedVisibleGroup = true;
+    scopes.push({ det: details, lang: group.lang });
+  }
 };
 
 export const myBooksDictProvider: DictionaryProvider = {
