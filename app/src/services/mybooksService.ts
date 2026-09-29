@@ -165,6 +165,8 @@ export interface MyBooksSysInfo {
     book_review?: boolean;
     folder?: boolean;
   };
+  // Sidebar whitelist (SIDEBAR_ITEMS); empty means show all.
+  sidebar_items?: string[];
 }
 
 export interface MyBooksReadingStatsTotals {

@@ -114,6 +114,10 @@ export const useMyBooksFolderAllowed = (): boolean => {
   return sysInfo?.allow?.folder === true;
 };
 
+// Admin sidebar whitelist; undefined/empty means every optional item is shown.
+export const useMyBooksSidebarItems = (): string[] | undefined =>
+  useMyBooksStatusStore((state) => state.sysInfo?.sidebar_items);
+
 // Whether `note` (a BookNote) belongs to the current mybooks account — notes
 // with no `userId` are local/not-yet-synced and treated as the user's own.
 export const useIsOwnBooknote = (userId: string | undefined): boolean => {

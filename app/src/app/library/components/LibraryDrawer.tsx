@@ -5,7 +5,11 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useEnv } from '@/context/EnvContext';
 import { useAuth } from '@/context/AuthContext';
-import { useMyBooksConnectionStatus, useMyBooksFolderAllowed } from '@/store/mybooksStatusStore';
+import {
+  useMyBooksConnectionStatus,
+  useMyBooksFolderAllowed,
+  useMyBooksSidebarItems,
+} from '@/store/mybooksStatusStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import UserSettingsDialog from '@/components/user/UserSettingsDialog';
 import DeviceManagementDialog from '@/components/user/DeviceManagementDialog';
@@ -54,6 +58,18 @@ interface NavGroupItem {
   groups: NavSubItem[];
 }
 
+// Nav link type -> server SIDEBAR_ITEMS key; types not listed are always shown.
+const SIDEBAR_ITEM_KEYS: Record<string, string> = {
+  audiobooks: 'audiobooks',
+  categories: 'categories',
+  folder: 'folders',
+  tag: 'tags',
+  publisher: 'publishers',
+  series: 'series',
+  language: 'languages',
+  rating: 'rating',
+};
+
 interface LibraryDrawerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -75,6 +91,7 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
   const { status } = useAuth();
   const connectionStatus = useMyBooksConnectionStatus();
   const isFolderAllowed = useMyBooksFolderAllowed();
+  const sidebarItems = useMyBooksSidebarItems();
   const settings = useSettingsStore((s) => s.settings);
   const viewSettings = settings?.globalViewSettings;
 
@@ -290,7 +307,10 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
       source: 'cloud',
       type: 'rating',
     },
-  ];
+  ].filter((link) => {
+    const key = SIDEBAR_ITEM_KEYS[link.type];
+    return !key || !sidebarItems?.length || sidebarItems.includes(key);
+  });
 
   // A link whose source+type already match the current view won't actually
   // navigate (e.g. clicking "Home" again while already on the local
