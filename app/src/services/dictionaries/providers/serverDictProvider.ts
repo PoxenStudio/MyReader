@@ -18,16 +18,21 @@ import { isWebAppPlatform } from '@/services/environment';
 import { stubTranslation as _ } from '@/utils/misc';
 import { BUILTIN_PROVIDER_IDS } from '../types';
 import type { DictionaryLookupOutcome, DictionaryProvider } from '../types';
+import { createServerVocab } from '../mydictVocab';
 import { renderMyBooksResults } from './myBooksDictProvider';
 import type { MyDictResult } from './myDictQuery';
 import { SERVER_DICT_RESOURCE_BASE } from './myDictUrl';
 
 const SERVER_QUERY_URL = '/api/mybooks/mydict/server-query';
 
+/** 生词本走服务端中继（token 不出容器）；由渲染层在每个词典分组头画星标。 */
+const SERVER_VOCAB = createServerVocab(_('MyDict Service'));
+
 export const serverDictProvider: DictionaryProvider = {
   id: BUILTIN_PROVIDER_IDS.mydictServer,
   kind: 'builtin',
   label: _('MyDict Service'),
+  vocab: SERVER_VOCAB,
   async lookup(word, ctx): Promise<DictionaryLookupOutcome> {
     if (!isWebAppPlatform()) return { ok: false, reason: 'unsupported' };
     const trimmed = word.trim();
@@ -52,6 +57,7 @@ export const serverDictProvider: DictionaryProvider = {
         // Resources are re-anchored through the same relay with this sentinel
         // instead of a server address the client doesn't know.
         baseUrl: SERVER_DICT_RESOURCE_BASE,
+        vocab: SERVER_VOCAB,
         onNavigate: ctx.onNavigate,
         _: ctx._,
         lang: ctx.lang,

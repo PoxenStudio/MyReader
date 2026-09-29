@@ -59,3 +59,50 @@ export const relayResourceHeaders = (
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "sandbox; default-src 'none'",
   });
+
+/**
+ * POST/DELETE `url` with a JSON body and buffer the JSON/text response.
+ *
+ * The wordbook (生词本) relay is the only writer among the dictionary relays:
+ * it needs POST (add) and DELETE (remove) against `/api/v1/vocab`. Same
+ * certificate handling as {@link httpGetText}.
+ */
+export const httpJsonRequest = (
+  method: 'POST' | 'DELETE',
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+  timeoutMs: number,
+): Promise<{ status: number; text: string }> =>
+  new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const client = target.protocol === 'https:' ? https : http;
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const req = client.request(
+      target,
+      {
+        method,
+        headers: {
+          ...(payload
+            ? {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload),
+              }
+            : {}),
+          ...headers,
+        },
+        rejectUnauthorized: false,
+      },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => (text += chunk));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, text }));
+        res.on('error', reject);
+      },
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('Request timed out')));
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });

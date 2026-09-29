@@ -47,6 +47,42 @@ export type DictionaryLookupOutcome =
   | { ok: true; headword?: string; sourceLabel?: string }
   | { ok: false; reason: 'empty' | 'unsupported' | 'error'; message?: string };
 
+/**
+ * 生词本的一条记录是**词条级**的：`(词, 词典)`。同一部词典里一个词只有一条，
+ * 不同词典的同名词条互不冲突（中文词典的『人気』与 NHK 的『人気』都能收藏）。
+ */
+export interface VocabEntryRef {
+  dictionaryId: number;
+  /** 词条词头——服务端按 `(dictionary_id, word)` 精确查找，不能发选区原文 */
+  word: string;
+}
+
+/** 生词本操作的结果（成功 / 重复 / 未授权 / 其它错误）。 */
+export type VocabResult =
+  | { status: 'ok' }
+  /** 409：该词典下已收藏，或生词本达上限；`message` 是服务端原文 */
+  | { status: 'duplicate'; message?: string }
+  | { status: 'unauthorized' }
+  | { status: 'error'; message: string };
+
+/**
+ * Optional provider capability: the dictionary server's wordbook (生词本).
+ * Only the MyDict-family providers have it — the notebook lives on the
+ * server, which snapshots the entry's phonetic/definition itself (following
+ * `@@@LINK=` redirects) and de-duplicates per (word, dictionary).
+ *
+ * Declared as a capability rather than a provider-id check so the
+ * per-dictionary star appears exactly when a usable wordbook exists.
+ */
+export interface VocabCapability {
+  /** Human-readable source name, used in toasts ("已加入生词本（MyDict）"). */
+  label: string;
+  /** 该词已收藏的「词典 id → 生词本条目 id」，用于星标状态与取消收藏 */
+  listSaved(word: string): Promise<Map<number, number>>;
+  addEntry(ref: VocabEntryRef): Promise<VocabResult>;
+  removeItem(itemId: number): Promise<VocabResult>;
+}
+
 export interface DictionaryProvider {
   /** Stable id, e.g. `builtin:wiktionary`, `stardict:abc123`, `mdict:xyz`. */
   id: string;
@@ -59,6 +95,11 @@ export interface DictionaryProvider {
   lookup(word: string, ctx: DictionaryLookupContext): Promise<DictionaryLookupOutcome>;
   /** Release object URLs / caches. Called when the provider is removed or replaced. */
   dispose?(): void;
+  /**
+   * Set when the provider's server offers a wordbook (生词本) — the renderer
+   * then draws the per-dictionary star in each group header.
+   */
+  vocab?: VocabCapability;
 }
 
 /**
