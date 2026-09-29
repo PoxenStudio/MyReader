@@ -16,7 +16,7 @@
  * plain text unless asked, and this client renders the markup — see
  * `renderMyBooksResults`.
  */
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { fetchWithAbort } from '../tauriFetch';
 import { isTauriAppPlatform } from '@/services/environment';
 import type { MyDictEntry } from '../types';
 import { buildMyDictQueryUrl } from './myDictUrl';
@@ -68,7 +68,7 @@ export const queryMyDict = async (
   if (isTauriAppPlatform()) {
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const response = await tauriFetch(buildMyDictQueryUrl(entry.url, word), {
+    const response = await fetchWithAbort(buildMyDictQueryUrl(entry.url, word), {
       headers,
       signal,
     });
