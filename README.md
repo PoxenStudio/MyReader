@@ -119,6 +119,23 @@ pnpm install
 pnpm --filter @poxenstudio/myreader setup-vendors
 ```
 
+`app/public/vendor/` 是由上面命令生成的（不入库）。**每次 `git submodule update` 带来 foliate-js 更新后，都要重新运行一次 `setup-vendors`**，否则 public 里仍是旧版 pdfjs，构建会报类型错误：
+
+```
+./public/vendor/pdfjs/pdf.min.mjs
+Type error: Declaration emit for this file requires using private name 'BaseException'.
+```
+
+`setup-pdfjs`、`setup-vendors` 等脚本定义在 `app/package.json` 中，在仓库根目录直接运行 `pnpm setup-pdfjs` 会报"不是内部或外部命令"。请使用 `--filter`，或先进入 `app` 目录：
+
+```bash
+pnpm --filter @poxenstudio/myreader setup-pdfjs
+# 或
+cd app && pnpm setup-pdfjs
+```
+
+GitHub Actions 与 Docker 构建每次都会在检出后重新运行 `setup-vendors`，不受影响。
+
 ### 3. 验证依赖安装
 
 运行以下命令确认所有依赖已正确安装：
