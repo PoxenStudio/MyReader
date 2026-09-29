@@ -1008,7 +1008,6 @@
   "Skipped incomplete bundles: {{names}}": "已跳过不完整的词典包:{{names}}",
   "Failed to import dictionary: {{message}}": "导入词典失败:{{message}}",
   "Dictionaries": "词典",
-  "Not available on this device:": "以下词典在此设备上不可用：",
   "Delete Dictionary": "删除词典",
   "Importing…": "正在导入…",
   "Import Dictionary": "导入词典",
@@ -2111,5 +2110,5 @@
   "Failed to load dictionary settings from the server.": "无法从服务端获取词典设置。",
   "Server": "服务端",
   "Pronunciation playback failed: {{message}}": "发音播放失败：{{message}}",
-  ", ": "、"
+  "No results available": "无可用结果"
 }
