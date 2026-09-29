@@ -211,13 +211,13 @@ pnpm tauri ios build
 pnpm tauri ios build --no-sign
 ```
 
-> **注意（本地 Xcode 26.5+）：** 链接时 `$(TOOLCHAIN_DIR)` 可能被解析为 Metal 工具链，找不到 Swift 兼容库，会报 `Undefined symbols: __swift_FORCE_LOAD_$_swiftCompatibility56` 或 `library 'swiftCompatibility56' not found`。需在 `app/src-tauri/gen/apple/project.yml` 的 `MyReader_iOS` → `settings.base` 中加入：
+> **注意（本地 Xcode 26.5+）：** 链接时 `$(TOOLCHAIN_DIR)` 可能被解析为 Metal 工具链，找不到 Swift 兼容库，会报 `Undefined symbols: __swift_FORCE_LOAD_$_swiftCompatibility56` 或 `library 'swiftCompatibility56' not found`。在仓库根目录运行 `./patch_ios_swift_compat.sh` 即可自动修改（可重复运行）。脚本做的是：在 `app/src-tauri/gen/apple/project.yml` 的 `MyReader_iOS` → `settings.base` 中加入：
 >
 > ```yaml
 > OTHER_LDFLAGS: $(inherited) -L$(DT_TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) -lswiftCompatibility56
 > ```
 >
-> 并在 `MyReader.xcodeproj/project.pbxproj` 的 debug、release 两个 target 配置中同样加入 `OTHER_LDFLAGS = ("$(inherited)", "-L$(DT_TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)", "-lswiftCompatibility56");`（或在 Xcode 的 Build Settings → Other Linker Flags 中添加）。`gen` 目录不入库，每次 `pnpm tauri ios init` 后都要重新加；CI 不受影响。
+> 并在 `MyReader.xcodeproj/project.pbxproj` 的 debug、release 两个 target 配置中同样加入 `OTHER_LDFLAGS = ("$(inherited)", "-L$(DT_TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)", "-lswiftCompatibility56");`（或在 Xcode 的 Build Settings → Other Linker Flags 中添加）。`gen` 目录不入库，每次 `pnpm tauri ios init` 后都要重新运行脚本；CI 不受影响。
 
 ### 6. 使用 Nix 设置开发环境
 
