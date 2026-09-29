@@ -90,7 +90,7 @@ describe('mydictVocab', () => {
     expect(await target.addWord('x')).toEqual({ status: 'error', message: 'network down' });
   });
 
-  it('goes through the same-origin relay on the web build', async () => {
+  it('goes through the same-origin relay on the web build, carrying url + token', async () => {
     process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'web';
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -106,8 +106,14 @@ describe('mydictVocab', () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('/api/mybooks/mydict/vocab');
     expect(init!.method).toBe('POST');
-    // 浏览器不带 token——由中继按 body 里的 url/token 重建请求
-    expect(JSON.stringify(init!.body)).not.toContain('sk-xyz');
+    // 中继要靠 body 里的 url/token 重建请求（漏掉它就会得到
+    // "Missing url or word"），且不能走 Authorization 头。
+    expect(JSON.parse(String(init!.body))).toEqual({
+      word: 'apple',
+      url: 'http://lan.example:4815',
+      token: 'sk-xyz',
+    });
+    expect((init!.headers as Record<string, string>)['Authorization']).toBeUndefined();
   });
 
   it('sends only the word through the deployment relay (credentials stay server-side)', async () => {

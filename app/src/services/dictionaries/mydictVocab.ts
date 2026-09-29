@@ -32,6 +32,16 @@ interface VocabRequestBody {
   dictionary_id?: number;
 }
 
+/**
+ * Body of the user-configured-server relay: unlike the deployment relay it
+ * has to carry the address and token, because the relay rebuilds the upstream
+ * request from them (the browser can't reach the server itself).
+ */
+interface VocabRelayBody extends VocabRequestBody {
+  url: string;
+  token: string;
+}
+
 /** The server's error envelope: `{code, message, detail}`. */
 const serverMessage = (body: unknown): string | undefined => {
   if (!body || typeof body !== 'object') return undefined;
@@ -95,8 +105,12 @@ export const createMyDictVocab = (
           return await resultFromResponse(response);
         }
         // The web build can't call the server directly (mixed content + no
-        // CORS) — the relay rebuilds the request from the same fields.
-        return await postVocab(RELAY_URL, body, {});
+        // CORS): the relay rebuilds the request _from these fields_, so the
+        // address and token have to ride in the body. (The deployment-
+        // configured server is the opposite case — see createServerVocab,
+        // where the relay adds credentials the browser never sees.)
+        const relayBody: VocabRelayBody = { ...body, url: entry.url, token };
+        return await postVocab(RELAY_URL, relayBody, {});
       } catch (error) {
         return { status: 'error', message: error instanceof Error ? error.message : String(error) };
       }
