@@ -15,7 +15,7 @@
  * `User-Agent` anyway, so native builds go through `@tauri-apps/plugin-http`
  * and the web build relays through the same-origin `/api/mybooks/baike` route.
  */
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { fetchWithAbort } from '../tauriFetch';
 import { isTauriAppPlatform } from '@/services/environment';
 import type { DictionaryProvider, DictionaryLookupOutcome } from '../types';
 import { BUILTIN_PROVIDER_IDS } from '../types';
@@ -28,7 +28,7 @@ const NOT_FOUND_MARKER = '百度百科尚未收录词条';
 const fetchBaike = async (word: string, signal: AbortSignal) => {
   const searchUrl = buildBaikeSearchUrl(word);
   if (isTauriAppPlatform()) {
-    const response = await tauriFetch(searchUrl, { headers: BAIKE_HEADERS, signal });
+    const response = await fetchWithAbort(searchUrl, { headers: BAIKE_HEADERS, signal });
     return { response, itemUrl: response.url || searchUrl };
   }
   // Same-origin relative path: in the embedded deployment nginx only routes
