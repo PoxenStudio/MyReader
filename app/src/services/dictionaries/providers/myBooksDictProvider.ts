@@ -13,7 +13,7 @@ import { stubTranslation as _ } from '@/utils/misc';
 import { sanitizeDictionaryHtml } from '@/utils/sanitize';
 import { BUILTIN_PROVIDER_IDS } from '../types';
 import type { DictionaryLookupOutcome, DictionaryProvider } from '../types';
-import { queryMyDict, type MyDictResult } from './myDictQuery';
+import { pickVocabEntry, queryMyDict, type MyDictResult } from './myDictQuery';
 import { buildMyDictResourceUrl } from './myDictUrl';
 import { AUDIO_BOUND, wireDictAudio } from '../dictAudio';
 
@@ -632,9 +632,9 @@ export const myBooksDictProvider: DictionaryProvider = {
 
       return {
         ok: true,
-        headword: trimmed,
+        headword: pickVocabEntry(data.results, trimmed)?.word ?? trimmed,
         sourceLabel: 'MyBooks',
-        dictionaryId: data.results[0]?.dictionary_id,
+        dictionaryId: pickVocabEntry(data.results, trimmed)?.dictionary_id,
       };
     } catch (error) {
       if ((error as { name?: string }).name === 'AbortError') {

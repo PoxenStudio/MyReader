@@ -328,6 +328,34 @@ describe('MyBooks dictionary provider', () => {
     expect(onNavigate).toHaveBeenCalledWith('apple');
   });
 
+  it('reports the entry headword, not the queried word, for the wordbook', async () => {
+    tauriFetchMock.mockResolvedValueOnce(
+      okResponse([
+        {
+          // 前缀匹配：查 ran 命中 ranch（词库里没有 ran 这个词头）
+          dictionary_id: 4,
+          dictionary_name: 'D',
+          word: 'ranch',
+          phonetic: null,
+          definition: '<p>ranch</p>',
+        },
+      ]),
+    );
+    const container = document.createElement('div');
+
+    const outcome = await myBooksDictProvider.lookup('ran', {
+      signal: new AbortController().signal,
+      container,
+    });
+
+    expect(outcome.ok).toBe(true);
+    // 生词本按 (dictionary_id, word) 精确查找，发查询词会得到「该词典下未找到该单词」
+    if (outcome.ok) {
+      expect(outcome.headword).toBe('ranch');
+      expect(outcome.dictionaryId).toBe(4);
+    }
+  });
+
   it('decodes percent-encoded entry:// targets (Weblio dictionaries)', async () => {
     tauriFetchMock.mockResolvedValueOnce(
       okResponse([

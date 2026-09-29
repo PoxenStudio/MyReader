@@ -185,9 +185,11 @@ export function useDictionaryResults({
     [definitionProviders],
   );
   const vocabCapability = vocabProvider?.vocab;
-  // 带上首个命中的词典 id：MyDict 对纯词按语言路由查找，日语词会被当成中文词
-  // 找不到（实测「人気」报 404，带 dictionary_id 才成功）。
+  // 用词条的真实词头（服务端返回的 word）而不是选区原文：MyDict 查询是前缀/模糊
+  // 匹配（查 `ran` 命中 `ranch`），而生词本按 (dictionary_id, word) 精确查找——
+  // 发选区原文会得到「该词典下未找到该单词，无法收藏」。词典 id 同理。
   const vocabOutcome = vocabProvider ? cards[vocabProvider.id]?.outcome : undefined;
+  const vocabWord = vocabOutcome?.ok ? (vocabOutcome.headword ?? currentWord) : currentWord;
   const vocabDictionaryId = vocabOutcome?.ok ? vocabOutcome.dictionaryId : undefined;
   useEffect(() => {
     setVocabState('idle');
@@ -195,32 +197,30 @@ export function useDictionaryResults({
   const addToVocab = useCallback(() => {
     if (!vocabCapability || vocabState === 'saving') return;
     setVocabState('saving');
-    void vocabCapability
-      .addWord(currentWord, { dictionaryId: vocabDictionaryId })
-      .then((result) => {
-        if (result.status === 'added') {
-          setVocabState('saved');
-          eventDispatcher.dispatch('toast', {
-            type: 'success',
-            timeout: 3000,
-            message: `${_('Added to Wordbook')}（${vocabCapability.label}）`,
-          });
-          return;
-        }
-        setVocabState('idle');
-        const message =
-          result.status === 'duplicate'
-            ? (result.message ?? _('Already in Wordbook'))
-            : result.status === 'unauthorized'
-              ? _('Wordbook unavailable — check the MyDict token')
-              : result.message;
+    void vocabCapability.addWord(vocabWord, { dictionaryId: vocabDictionaryId }).then((result) => {
+      if (result.status === 'added') {
+        setVocabState('saved');
         eventDispatcher.dispatch('toast', {
-          type: result.status === 'error' ? 'error' : 'warning',
-          timeout: 4000,
-          message,
+          type: 'success',
+          timeout: 3000,
+          message: `${_('Added to Wordbook')}（${vocabCapability.label}）`,
         });
+        return;
+      }
+      setVocabState('idle');
+      const message =
+        result.status === 'duplicate'
+          ? (result.message ?? _('Already in Wordbook'))
+          : result.status === 'unauthorized'
+            ? _('Wordbook unavailable — check the MyDict token')
+            : result.message;
+      eventDispatcher.dispatch('toast', {
+        type: result.status === 'error' ? 'error' : 'warning',
+        timeout: 4000,
+        message,
       });
-  }, [vocabCapability, vocabState, currentWord, vocabDictionaryId, _]);
+    });
+  }, [vocabCapability, vocabState, vocabWord, vocabDictionaryId, _]);
   const vocabAction = useMemo<VocabAction | undefined>(
     () =>
       vocabCapability

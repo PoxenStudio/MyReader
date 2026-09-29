@@ -85,3 +85,17 @@ export const queryMyDict = async (
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as MyDictQueryResponse;
 };
+
+/**
+ * The hit to treat as "the entry the reader is showing", for follow-ups that
+ * address an entry by (dictionary_id, word) — the wordbook.
+ *
+ * MyDict matches by prefix/fuzziness (querying `ran` returns `ranch`,
+ * `rancid`, …), so the selection and the headword often differ, and the
+ * server's wordbook lookup is exact. Prefer an exact headword match, else
+ * fall back to the first hit (what the popup renders first).
+ */
+export const pickVocabEntry = (results: MyDictResult[], word: string): MyDictResult | undefined => {
+  const wanted = word.trim().toLowerCase();
+  return results.find((r) => (r.word ?? '').trim().toLowerCase() === wanted) ?? results[0];
+};

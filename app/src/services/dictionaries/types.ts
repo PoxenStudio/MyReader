@@ -46,6 +46,11 @@ export interface DictionaryLookupContext {
 export type DictionaryLookupOutcome =
   | {
       ok: true;
+      /**
+       * 词条的真实词头（服务端返回的 `word`），可能与用户选中的词不同——
+       * MyDict 查询是前缀/模糊匹配（查 `ran` 命中 `ranch`），生词本按词头精确
+       * 定位，所以保存时必须用它而不是选区原文。
+       */
       headword?: string;
       sourceLabel?: string;
       /**

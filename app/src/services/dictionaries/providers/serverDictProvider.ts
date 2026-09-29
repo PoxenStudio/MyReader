@@ -20,7 +20,7 @@ import { BUILTIN_PROVIDER_IDS } from '../types';
 import type { DictionaryLookupOutcome, DictionaryProvider } from '../types';
 import { createServerVocab } from '../mydictVocab';
 import { renderMyBooksResults } from './myBooksDictProvider';
-import type { MyDictResult } from './myDictQuery';
+import { pickVocabEntry, type MyDictResult } from './myDictQuery';
 import { SERVER_DICT_RESOURCE_BASE } from './myDictUrl';
 
 const SERVER_QUERY_URL = '/api/mybooks/mydict/server-query';
@@ -62,9 +62,9 @@ export const serverDictProvider: DictionaryProvider = {
       });
       return {
         ok: true,
-        headword: trimmed,
+        headword: pickVocabEntry(data.results, trimmed)?.word ?? trimmed,
         sourceLabel: 'MyDict Service',
-        dictionaryId: data.results[0]?.dictionary_id,
+        dictionaryId: pickVocabEntry(data.results, trimmed)?.dictionary_id,
       };
     } catch (error) {
       if ((error as { name?: string }).name === 'AbortError') {

@@ -7,7 +7,7 @@
 import type { DictionaryProvider, DictionaryLookupOutcome, MyDictEntry } from '../types';
 import { createMyDictVocab } from '../mydictVocab';
 import { renderMyBooksResults } from './myBooksDictProvider';
-import { queryMyDict } from './myDictQuery';
+import { pickVocabEntry, queryMyDict } from './myDictQuery';
 
 /** Connectivity/token check for the settings dialog. Throws on failure. */
 export const testMyDictConnection = async (
@@ -41,11 +41,11 @@ export const createMyDictProvider = (entry: MyDictEntry): DictionaryProvider => 
       });
       return {
         ok: true,
-        headword: trimmed,
+        headword: pickVocabEntry(data.results, trimmed)?.word ?? trimmed,
         sourceLabel: entry.name,
         // 首个命中所属词典：生词本按 (dictionary_id, word) 精确定位，避免语言路由把
         // 日语词丢到中文词典里查不到。
-        dictionaryId: data.results[0]?.dictionary_id,
+        dictionaryId: pickVocabEntry(data.results, trimmed)?.dictionary_id,
       };
     } catch (error) {
       // plugin-http throws a plain `Error('Request cancelled')` (not an
