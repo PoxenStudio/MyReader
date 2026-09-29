@@ -21,6 +21,7 @@ vi.mock('@/context/EnvContext', () => ({
 
 let mockAuthStatus: 'logged_out' | 'logged_in' = 'logged_out';
 let mockConnectionStatus: 'unconfigured' | 'connected' = 'unconfigured';
+let mockFolderAllowed = false;
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ status: mockAuthStatus }),
@@ -28,6 +29,7 @@ vi.mock('@/context/AuthContext', () => ({
 
 vi.mock('@/store/mybooksStatusStore', () => ({
   useMyBooksConnectionStatus: () => mockConnectionStatus,
+  useMyBooksFolderAllowed: () => mockFolderAllowed,
 }));
 
 vi.mock('@/components/user/UserSettingsDialog', () => ({
@@ -79,9 +81,20 @@ afterEach(() => {
   cleanup();
   mockAuthStatus = 'logged_out';
   mockConnectionStatus = 'unconfigured';
+  mockFolderAllowed = false;
 });
 
 describe('LibraryDrawer', () => {
+  it('shows the Folders link only when MyBooks enables folder browsing', () => {
+    render(<LibraryDrawer isOpen onClose={vi.fn()} />);
+    expect(screen.queryByText('Folders')).toBeNull();
+    cleanup();
+
+    mockFolderAllowed = true;
+    render(<LibraryDrawer isOpen onClose={vi.fn()} />);
+    expect(screen.getByText('Folders')).toBeTruthy();
+  });
+
   it('marks Home as active when pathname is /library with no source param', () => {
     mockPathname = '/library';
     render(<LibraryDrawer isOpen onClose={vi.fn()} />);

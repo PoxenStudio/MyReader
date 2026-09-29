@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useEnv } from '@/context/EnvContext';
 import { useAuth } from '@/context/AuthContext';
-import { useMyBooksConnectionStatus } from '@/store/mybooksStatusStore';
+import { useMyBooksConnectionStatus, useMyBooksFolderAllowed } from '@/store/mybooksStatusStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import UserSettingsDialog from '@/components/user/UserSettingsDialog';
 import DeviceManagementDialog from '@/components/user/DeviceManagementDialog';
@@ -32,6 +32,7 @@ import {
   MdKeyboardArrowDown,
   MdKeyboardArrowRight,
   MdHeadphones,
+  MdFolderCopy,
 } from 'react-icons/md';
 
 interface NavSubItem {
@@ -73,6 +74,7 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
   const { appService } = useEnv();
   const { status } = useAuth();
   const connectionStatus = useMyBooksConnectionStatus();
+  const isFolderAllowed = useMyBooksFolderAllowed();
   const settings = useSettingsStore((s) => s.settings);
   const viewSettings = settings?.globalViewSettings;
 
@@ -220,6 +222,18 @@ const LibraryDrawer: React.FC<LibraryDrawerProps> = ({
       source: 'cloud',
       type: 'categories',
     },
+    ...(isFolderAllowed
+      ? [
+          {
+            icon: <MdFolderCopy className='w-5 h-5' />,
+            href: '/library?source=cloud&type=folder',
+            text: _('Folders'),
+            color: 'text-amber-600',
+            source: 'cloud',
+            type: 'folder',
+          },
+        ]
+      : []),
     {
       icon: <MdPeople className='w-5 h-5' />,
       href: '/library?source=cloud&type=author',

@@ -121,6 +121,7 @@ import LibraryDrawer from './components/LibraryDrawer';
 import { getBooksByType, searchBooks } from '@/services/mybooksService';
 import { convertMyBooksToLocalBooks, resolveCloudBooksPageAppend } from '@/utils/bookConverter';
 import MetaList from './components/MetaList';
+import FolderBrowser from './components/FolderBrowser';
 import { useMetaList } from './hooks/useMetaList';
 
 /** Skip tiny non-book artifacts during folder auto-scan (matches the manual import dialog default). */
@@ -1972,6 +1973,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                         'rating',
                       ].includes(type) &&
                       !itemName;
+                    const showFolderBrowser = source === 'cloud' && type === 'folder';
 
                     // Get meta list data based on type
                     const metaListConfig: Record<
@@ -2005,7 +2007,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                       navigateToLibrary(router, `${params.toString()}`);
                     };
 
-                    if (!hasBooks && !showMetaList) {
+                    if (!hasBooks && !showMetaList && !showFolderBrowser) {
                       return (
                         <div className='flex-1 flex items-center justify-center'>
                           <LibraryEmptyState
@@ -2041,6 +2043,21 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                                 refreshMeta();
                               }}
                               showAll={showAllMeta}
+                            />
+                          </div>
+                        )}
+
+                        {showFolderBrowser && (
+                          <div className='p-4 border-b'>
+                            <FolderBrowser
+                              path={itemName || ''}
+                              hasBooks={hasBooks}
+                              onNavigate={(path) => {
+                                const params = new URLSearchParams(searchParams?.toString());
+                                if (path) params.set('item', path);
+                                else params.delete('item');
+                                navigateToLibrary(router, `${params.toString()}`);
+                              }}
                             />
                           </div>
                         )}

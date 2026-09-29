@@ -2110,5 +2110,7 @@
   "Failed to load dictionary settings from the server.": "無法從伺服器端取得詞典設定。",
   "Server": "伺服器",
   "Pronunciation playback failed: {{message}}": "發音播放失敗：{{message}}",
-  "No results available": "無可用結果"
+  "No results available": "無可用結果",
+  "Folders": "目錄瀏覽",
+  "This folder is empty": "此目錄為空"
 }

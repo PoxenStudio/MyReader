@@ -750,6 +750,8 @@ export const getBookshelfTitleKey = (source: string, type: string): string => {
       return 'Private Books';
     case 'categories':
       return 'Categories';
+    case 'folder':
+      return 'Folders';
     case 'author':
       return 'Authors';
     case 'tag':

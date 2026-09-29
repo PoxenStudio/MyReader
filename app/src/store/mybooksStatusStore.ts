@@ -109,6 +109,11 @@ export const useMyBooksBookReviewAllowed = (): boolean => {
   return sysInfo?.allow?.book_review !== false;
 };
 
+export const useMyBooksFolderAllowed = (): boolean => {
+  const sysInfo = useMyBooksStatusStore((state) => state.sysInfo);
+  return sysInfo?.allow?.folder === true;
+};
+
 // Whether `note` (a BookNote) belongs to the current mybooks account — notes
 // with no `userId` are local/not-yet-synced and treated as the user's own.
 export const useIsOwnBooknote = (userId: string | undefined): boolean => {

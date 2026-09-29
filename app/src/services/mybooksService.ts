@@ -62,6 +62,12 @@ export interface MyBooksMetaItem {
   count: number;
 }
 
+export interface MyBooksFolderNode {
+  name: string;
+  count: number;
+  children: MyBooksFolderNode[];
+}
+
 export interface MyBooksUserInfo {
   id: number;
   username: string;
@@ -157,6 +163,7 @@ export interface MyBooksSysInfo {
     read?: boolean;
     sync?: boolean;
     book_review?: boolean;
+    folder?: boolean;
   };
 }
 
@@ -205,6 +212,7 @@ export interface MyBooksResponse<T = unknown> {
   authors?: MyBooksMetaItem[];
   items?: MyBooksMetaItem[];
   pins?: MyBooksMetaItem[];
+  folders?: MyBooksFolderNode[];
   user?: MyBooksUserInfo | MyBooksUserDetailInfo;
   sys?: MyBooksSysInfo;
   avatar_url?: string;
@@ -423,6 +431,16 @@ export async function getBooksByType(
     };
   }
 
+  if (type === 'folder') {
+    if (!name) return { books: [], total: 0 };
+    const response = await fetchMyBooks<{ books: MyBooksBook[]; total: number }>('/folder/books', {
+      path: name,
+      start: (page - 1) * num,
+      size: num,
+    });
+    return { books: response.books || [], total: response.total || 0 };
+  }
+
   let endpoint = `/${type}`;
   if (name) {
     endpoint = `/${type}/${encodeURIComponent(name)}`;
@@ -437,6 +455,11 @@ export async function getBooksByType(
     books: response.books || [],
     total: response.total || 0,
   };
+}
+
+export async function getFolderTree(): Promise<MyBooksFolderNode[]> {
+  const response = await fetchMyBooks('/folders');
+  return response.folders || [];
 }
 
 /**
