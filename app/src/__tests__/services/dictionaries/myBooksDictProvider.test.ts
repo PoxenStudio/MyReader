@@ -441,3 +441,78 @@ describe('MyBooks dictionary provider', () => {
     expect(shadowOf(container).textContent).toContain('苹果');
   });
 });
+
+describe('renderMyBooksResults — resource URLs', () => {
+  it('never puts an un-relayed /dict-res/ URL into the live DOM', async () => {
+    const { renderMyBooksResults } = await import(
+      '@/services/dictionaries/providers/myBooksDictProvider'
+    );
+    // Any src/href rewritten after insertion means the browser already fetched
+    // the root-relative URL from the reader's own origin (a 404).
+    const rewrittenLive: string[] = [];
+    const observers: MutationObserver[] = [];
+    const attachShadow = Element.prototype.attachShadow;
+    vi.spyOn(Element.prototype, 'attachShadow').mockImplementation(function (
+      this: Element,
+      init: ShadowRootInit,
+    ) {
+      const root = attachShadow.call(this, init);
+      const observer = new MutationObserver((records) => {
+        for (const r of records) {
+          if (r.type === 'attributes' && r.oldValue?.startsWith('/dict-res/')) {
+            rewrittenLive.push(r.oldValue);
+          }
+        }
+      });
+      observer.observe(root, {
+        subtree: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: ['src', 'href'],
+      });
+      observers.push(observer);
+      return root;
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderMyBooksResults(
+      [
+        {
+          dictionary_id: 9,
+          dictionary_name: 'D',
+          word: 'w',
+          definition:
+            '<link rel="stylesheet" href="/dict-res/9/res/a.css"><img src="/dict-res/9/res/v.png">',
+        },
+      ],
+      container,
+      { baseUrl: 'http://mydict.test' },
+    );
+    await Promise.resolve();
+    observers.forEach((o) => o.disconnect());
+
+    const shadow = container.querySelector('.dict-shadow-host')!.shadowRoot!;
+    expect(shadow.querySelector('img')!.getAttribute('src')).toContain('mydict.test');
+    expect(shadow.querySelector('link')!.getAttribute('href')).toContain('mydict.test');
+    expect(rewrittenLive).toEqual([]);
+    container.remove();
+  });
+});
+
+describe('renderMyBooksResults — script-dependent dictionaries', () => {
+  it('shows The little dict pronunciation icons that its own script would reveal', async () => {
+    const { renderMyBooksResults } = await import(
+      '@/services/dictionaries/providers/myBooksDictProvider'
+    );
+    const container = document.createElement('div');
+    renderMyBooksResults(
+      [{ dictionary_id: 9, dictionary_name: 'D', word: 'w', definition: '<div class="pf"></div>' }],
+      container,
+      { baseUrl: '' },
+    );
+    const shadow = container.querySelector('.dict-shadow-host')!.shadowRoot!;
+    const css = shadow.querySelector('style')!.textContent!.replace(/\s+/g, ' ');
+    expect(css).toContain('.pf > a > img { display: inline-block !important; }');
+  });
+});

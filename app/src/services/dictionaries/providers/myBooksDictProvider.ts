@@ -71,6 +71,13 @@ const LANG_TAB_NAMES: Record<string, string> = {
  * based — the entries themselves carry the dictionaries' own styling, and the
  * app theme supplies the rest.
  */
+// Stand-ins for what a dictionary's own script would do (entry scripts never
+// run here). One rule per dictionary, named after it.
+const DICTIONARY_COMPAT_CSS = `
+  /* The little dict (fy.js): shows the icon of each .pf link its CSS made visible. */
+  .pf > a > img { display: inline-block !important; }
+`;
+
 const BASELINE_CSS = `
   /* overflow-x: clip (not hidden) — "clip" may pair with a visible vertical
      axis, so this doesn't turn the card into a scroll container.
@@ -212,17 +219,19 @@ const DICT_CHROME_CSS = `
  * `sound://` links it turned into `<a href="/dict-res/…">`. `url(…)` inside the
  * dictionaries' own CSS resolves relative to that CSS file and needs no help.
  *
- * Runs over the whole shadow root, so it also fixes up the `<link>`s the caller
- * lifted out of the entries.
+ * Must run before the nodes are connected: the browser starts fetching as soon
+ * as they are, and a root-relative URL would hit the reader's own origin.
  */
-const absolutizeResourceRefs = (root: ShadowRoot, baseUrl: string): void => {
+const resolveResourceRef = (raw: string, baseUrl: string): string =>
+  baseUrl.trim() && raw.startsWith(RESOURCE_PREFIX) ? buildMyDictResourceUrl(baseUrl, raw) : raw;
+
+const absolutizeResourceRefs = (root: ParentNode, baseUrl: string): void => {
   if (!baseUrl.trim()) return;
   const selector = 'img[src], audio[src], video[src], source[src], track[src], a[href], link[href]';
   root.querySelectorAll<HTMLElement>(selector).forEach((el) => {
     const attr = el.hasAttribute('src') ? 'src' : 'href';
     const raw = el.getAttribute(attr);
-    if (!raw || !raw.startsWith(RESOURCE_PREFIX)) return;
-    el.setAttribute(attr, buildMyDictResourceUrl(baseUrl, raw));
+    if (raw) el.setAttribute(attr, resolveResourceRef(raw, baseUrl));
   });
 };
 
@@ -248,7 +257,10 @@ const attrValue = (tag: string, re: RegExp): string | undefined => {
   return match ? (match[1] ?? match[2] ?? match[3]) : undefined;
 };
 
-const extractEntryStyles = (html: string): (HTMLLinkElement | HTMLStyleElement)[] => {
+const extractEntryStyles = (
+  html: string,
+  baseUrl: string,
+): (HTMLLinkElement | HTMLStyleElement)[] => {
   const nodes: (HTMLLinkElement | HTMLStyleElement)[] = [];
 
   for (const match of html.matchAll(STYLE_LINK_RE)) {
@@ -258,7 +270,7 @@ const extractEntryStyles = (html: string): (HTMLLinkElement | HTMLStyleElement)[
     if (!href) continue;
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.setAttribute('href', href);
+    link.setAttribute('href', resolveResourceRef(href, baseUrl));
     nodes.push(link);
   }
 
@@ -513,7 +525,7 @@ export const renderMyBooksResults = (
     const shadow = scopeHost.attachShadow({ mode: 'open' });
 
     const style = document.createElement('style');
-    style.textContent = BASELINE_CSS;
+    style.textContent = BASELINE_CSS + DICTIONARY_COMPAT_CSS;
     shadow.appendChild(style);
 
     // The dictionary's own stylesheets (DOMPurify drops <link>/<style>
@@ -523,7 +535,7 @@ export const renderMyBooksResults = (
     const dictStyles: (HTMLLinkElement | HTMLStyleElement)[] = [];
     const seenStyles = new Set<string>();
     for (const item of group.items) {
-      for (const node of extractEntryStyles(item.definition ?? '')) {
+      for (const node of extractEntryStyles(item.definition ?? '', options.baseUrl)) {
         const key =
           node instanceof HTMLLinkElement
             ? `link:${node.getAttribute('href')}`
@@ -581,7 +593,11 @@ export const renderMyBooksResults = (
       // markup goes through the sanitizer. `innerHTML` never executes a
       // `<script>` — `sanitizeDictionaryHtml` covers the rest (handlers,
       // iframes, `javascript:` URLs).
-      content.innerHTML = sanitizeDictionaryHtml(definition);
+      // Parsed in an inert <template> so nothing loads before URLs are re-anchored.
+      const template = document.createElement('template');
+      template.innerHTML = sanitizeDictionaryHtml(definition);
+      absolutizeResourceRefs(template.content, options.baseUrl);
+      content.appendChild(template.content);
       section.appendChild(content);
 
       body.appendChild(section);
@@ -594,7 +610,6 @@ export const renderMyBooksResults = (
     audioNote.className = 'mydict-audio-note';
     audioNote.hidden = true;
     body.appendChild(audioNote);
-    absolutizeResourceRefs(shadow, options.baseUrl);
     wireDictAudio(
       body,
       (resourcePath) => buildMyDictResourceUrl(options.baseUrl, resourcePath),
