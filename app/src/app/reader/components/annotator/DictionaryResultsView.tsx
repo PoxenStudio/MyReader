@@ -1,12 +1,20 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MdArrowBack, MdChevronRight, MdSettings, MdVolumeUp } from 'react-icons/md';
+import {
+  MdArrowBack,
+  MdBookmarkAdd,
+  MdBookmarkAdded,
+  MdChevronRight,
+  MdSettings,
+  MdVolumeUp,
+} from 'react-icons/md';
 import clsx from 'clsx';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { useEnv } from '@/context/EnvContext';
+import { eventDispatcher } from '@/utils/event';
 import { useThemeStore } from '@/store/themeStore';
 import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
 import { getEnabledProviders } from '@/services/dictionaries/registry';
@@ -41,6 +49,11 @@ export interface DictionaryResultsState {
   currentWord: string;
   canGoBack: boolean;
   goBack: () => void;
+  /**
+   * "加入生词本" for the current word, when an enabled provider's server has a
+   * wordbook (MyDict family). Absent → the header shows no button.
+   */
+  vocabAction?: VocabAction;
   visibleDefinitionProviders: DictionaryProvider[];
   /** Labels of enabled providers that report `unsupported` on this platform. */
   unavailableDefinitionLabels: string[];
@@ -162,6 +175,64 @@ export function useDictionaryResults({
     cancelWordPronounce();
     setIsSpeaking(false);
   }, [currentWord]);
+
+  // "加入生词本": the word goes to the dictionary server's own wordbook (MyDict
+  // family only — the server snapshots the entry itself, so we send just the
+  // word). Which notebook it lands in is the token's business.
+  const [vocabState, setVocabState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const vocabProvider = useMemo(
+    () => definitionProviders.find((p) => p.vocab),
+    [definitionProviders],
+  );
+  const vocabCapability = vocabProvider?.vocab;
+  // 带上首个命中的词典 id：MyDict 对纯词按语言路由查找，日语词会被当成中文词
+  // 找不到（实测「人気」报 404，带 dictionary_id 才成功）。
+  const vocabOutcome = vocabProvider ? cards[vocabProvider.id]?.outcome : undefined;
+  const vocabDictionaryId = vocabOutcome?.ok ? vocabOutcome.dictionaryId : undefined;
+  useEffect(() => {
+    setVocabState('idle');
+  }, [currentWord, vocabCapability]);
+  const addToVocab = useCallback(() => {
+    if (!vocabCapability || vocabState === 'saving') return;
+    setVocabState('saving');
+    void vocabCapability
+      .addWord(currentWord, { dictionaryId: vocabDictionaryId })
+      .then((result) => {
+        if (result.status === 'added') {
+          setVocabState('saved');
+          eventDispatcher.dispatch('toast', {
+            type: 'success',
+            timeout: 3000,
+            message: `${_('Added to Wordbook')}（${vocabCapability.label}）`,
+          });
+          return;
+        }
+        setVocabState('idle');
+        const message =
+          result.status === 'duplicate'
+            ? (result.message ?? _('Already in Wordbook'))
+            : result.status === 'unauthorized'
+              ? _('Wordbook unavailable — check the MyDict token')
+              : result.message;
+        eventDispatcher.dispatch('toast', {
+          type: result.status === 'error' ? 'error' : 'warning',
+          timeout: 4000,
+          message,
+        });
+      });
+  }, [vocabCapability, vocabState, currentWord, vocabDictionaryId, _]);
+  const vocabAction = useMemo<VocabAction | undefined>(
+    () =>
+      vocabCapability
+        ? {
+            label: vocabCapability.label,
+            saved: vocabState === 'saved',
+            busy: vocabState === 'saving',
+            onAdd: addToVocab,
+          }
+        : undefined,
+    [vocabCapability, vocabState, addToVocab],
+  );
 
   const toggleExpanded = useCallback((id: string) => {
     setCards((prev) => {
@@ -353,6 +424,7 @@ export function useDictionaryResults({
     currentWord,
     canGoBack,
     goBack,
+    vocabAction,
     visibleDefinitionProviders,
     unavailableDefinitionLabels,
     webSearchProviders,
@@ -370,7 +442,24 @@ export function useDictionaryResults({
   };
 }
 
-interface DictionaryResultsHeaderProps {
+/** The header's "add to wordbook" action state (see {@link DictionaryResultsState}). */
+export interface VocabAction {
+  /** Server label, shown in the toast ("已加入生词本（MyDict）"). */
+  label: string;
+  /** The word is saved (the button stays filled). */
+  saved: boolean;
+  /** A save is in flight. */
+  busy: boolean;
+  onAdd: () => void;
+}
+
+/**
+ * The header's "add to wordbook" action (see {@link DictionaryResultsState}).
+ * The wordbook comes from the first enabled provider that has the capability
+ * (MyDict family); providers without it — local MDX, Wikipedia, … — don't
+ * offer the button.
+ */
+export interface DictionaryResultsHeaderProps {
   headerClassName?: string;
   currentWord: string;
   canGoBack: boolean;
@@ -380,6 +469,8 @@ interface DictionaryResultsHeaderProps {
   onSpeak?: () => void;
   /** Whether pronunciation is in progress, for the active button state. */
   speaking?: boolean;
+  /** "加入生词本"; omit to hide the button (no provider with a wordbook). */
+  vocab?: VocabAction;
 }
 
 export const DictionaryResultsHeader: React.FC<DictionaryResultsHeaderProps> = ({
@@ -390,6 +481,7 @@ export const DictionaryResultsHeader: React.FC<DictionaryResultsHeaderProps> = (
   onManage,
   onSpeak,
   speaking,
+  vocab,
 }) => {
   const _ = useTranslation();
   return (
@@ -422,6 +514,25 @@ export const DictionaryResultsHeader: React.FC<DictionaryResultsHeaderProps> = (
             )}
           >
             <MdVolumeUp size={18} />
+          </button>
+        ) : null}
+        {vocab ? (
+          <button
+            type='button'
+            aria-label={vocab.saved ? _('Added to Wordbook') : _('Add to Wordbook')}
+            title={`${vocab.saved ? _('Added to Wordbook') : _('Add to Wordbook')}（${vocab.label}）`}
+            aria-pressed={vocab.saved}
+            disabled={vocab.busy || vocab.saved}
+            onClick={vocab.onAdd}
+            className={clsx(
+              'btn btn-ghost btn-square btn-xs shrink-0',
+              vocab.saved
+                ? 'text-primary'
+                : 'text-base-content/60 hover:text-base-content not-eink:hover:bg-base-200/60',
+              vocab.busy && 'not-eink:animate-pulse',
+            )}
+          >
+            {vocab.saved ? <MdBookmarkAdded size={18} /> : <MdBookmarkAdd size={18} />}
           </button>
         ) : null}
         <span data-testid='dict-title' className='line-clamp-1 min-w-0 font-bold'>

@@ -18,6 +18,7 @@ import { isWebAppPlatform } from '@/services/environment';
 import { stubTranslation as _ } from '@/utils/misc';
 import { BUILTIN_PROVIDER_IDS } from '../types';
 import type { DictionaryLookupOutcome, DictionaryProvider } from '../types';
+import { createServerVocab } from '../mydictVocab';
 import { renderMyBooksResults } from './myBooksDictProvider';
 import type { MyDictResult } from './myDictQuery';
 import { SERVER_DICT_RESOURCE_BASE } from './myDictUrl';
@@ -28,6 +29,8 @@ export const serverDictProvider: DictionaryProvider = {
   id: BUILTIN_PROVIDER_IDS.mydictServer,
   kind: 'builtin',
   label: _('MyDict Service'),
+  // 生词本走服务端中继（token 不出容器）；不可用时 UI 会说明原因
+  vocab: createServerVocab(_('MyDict Service')),
   async lookup(word, ctx): Promise<DictionaryLookupOutcome> {
     if (!isWebAppPlatform()) return { ok: false, reason: 'unsupported' };
     const trimmed = word.trim();
@@ -57,7 +60,12 @@ export const serverDictProvider: DictionaryProvider = {
         lang: ctx.lang,
         isDarkMode: ctx.isDarkMode,
       });
-      return { ok: true, headword: trimmed, sourceLabel: 'MyDict Service' };
+      return {
+        ok: true,
+        headword: trimmed,
+        sourceLabel: 'MyDict Service',
+        dictionaryId: data.results[0]?.dictionary_id,
+      };
     } catch (error) {
       if ((error as { name?: string }).name === 'AbortError') {
         return { ok: false, reason: 'error', message: 'aborted' };

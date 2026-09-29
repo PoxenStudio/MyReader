@@ -630,7 +630,12 @@ export const myBooksDictProvider: DictionaryProvider = {
         isDarkMode: ctx.isDarkMode,
       });
 
-      return { ok: true, headword: trimmed, sourceLabel: 'MyBooks' };
+      return {
+        ok: true,
+        headword: trimmed,
+        sourceLabel: 'MyBooks',
+        dictionaryId: data.results[0]?.dictionary_id,
+      };
     } catch (error) {
       if ((error as { name?: string }).name === 'AbortError') {
         return { ok: false, reason: 'error', message: 'aborted' };

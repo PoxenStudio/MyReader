@@ -69,6 +69,8 @@ describe('MyBooks dictionary provider', () => {
     expect((init.headers as Record<string, string>)['Authorization']).toMatch(/^Bearer sk-/);
 
     expect(outcome.ok).toBe(true);
+    // 首个命中词典 id 透出给生词本用（按 dictionary_id 精确定位词条）
+    if (outcome.ok) expect(outcome.dictionaryId).toBe(1);
     const shadow = shadowOf(container);
     // 词条内容在 shadow 里；词典名在 light DOM 的 summary 上。
     expect(shadow.textContent).toContain('苹果');

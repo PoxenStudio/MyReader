@@ -57,6 +57,7 @@ const DictionaryPopup: React.FC<DictionaryPopupProps> = ({
           onManage={onManage}
           onSpeak={state.speakWord}
           speaking={state.isSpeaking}
+          vocab={state.vocabAction}
         />
         <div className='min-h-0 flex-1'>
           <DictionaryResultsBody {...state} />

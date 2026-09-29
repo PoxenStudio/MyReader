@@ -5,6 +5,7 @@
  * bearer token); see `myDictQuery.ts` for the Tauri / web request paths.
  */
 import type { DictionaryProvider, DictionaryLookupOutcome, MyDictEntry } from '../types';
+import { createMyDictVocab } from '../mydictVocab';
 import { renderMyBooksResults } from './myBooksDictProvider';
 import { queryMyDict } from './myDictQuery';
 
@@ -20,6 +21,8 @@ export const createMyDictProvider = (entry: MyDictEntry): DictionaryProvider => 
   id: entry.id,
   kind: 'builtin',
   label: entry.name,
+  // 该服务器的生词本（服务端会快照音标/释义；归属由 token 决定）
+  vocab: createMyDictVocab(entry, entry.name),
   async lookup(word, ctx): Promise<DictionaryLookupOutcome> {
     const trimmed = word.trim();
     if (!trimmed) return { ok: false, reason: 'empty' };
@@ -36,7 +39,14 @@ export const createMyDictProvider = (entry: MyDictEntry): DictionaryProvider => 
         lang: ctx.lang,
         isDarkMode: ctx.isDarkMode,
       });
-      return { ok: true, headword: trimmed, sourceLabel: entry.name };
+      return {
+        ok: true,
+        headword: trimmed,
+        sourceLabel: entry.name,
+        // 首个命中所属词典：生词本按 (dictionary_id, word) 精确定位，避免语言路由把
+        // 日语词丢到中文词典里查不到。
+        dictionaryId: data.results[0]?.dictionary_id,
+      };
     } catch (error) {
       // plugin-http throws a plain `Error('Request cancelled')` (not an
       // AbortError) when the caller's signal fires, so check the signal too.

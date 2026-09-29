@@ -44,8 +44,42 @@ export interface DictionaryLookupContext {
 }
 
 export type DictionaryLookupOutcome =
-  | { ok: true; headword?: string; sourceLabel?: string }
+  | {
+      ok: true;
+      headword?: string;
+      sourceLabel?: string;
+      /**
+       * Dictionary id of the first hit, for server-side follow-ups (the
+       * wordbook). MyDict resolves a bare word by language routing, which
+       * misses CJK words that live in another language's dictionaries — the
+       * id pins the entry the reader actually showed.
+       */
+      dictionaryId?: number;
+    }
   | { ok: false; reason: 'empty' | 'unsupported' | 'error'; message?: string };
+
+/** Outcome of "add the looked-up word to the MyDict wordbook". */
+export type VocabAddResult =
+  | { status: 'added' }
+  /** 409 — already saved, or the notebook hit its cap; `message` is the server's. */
+  | { status: 'duplicate'; message?: string }
+  | { status: 'unauthorized' }
+  | { status: 'error'; message: string };
+
+/**
+ * Optional provider capability: save a word to the dictionary server's
+ * wordbook (生词本). Only the MyDict-family providers have it — the notebook
+ * lives on the server, which snapshots the phonetic/definition itself.
+ *
+ * Declared as a capability rather than a provider-id check so the wordbook
+ * button appears exactly when a usable target exists, and so a future
+ * server-side wordbook (site dictionaries) can join without touching the UI.
+ */
+export interface VocabCapability {
+  /** Human-readable source name, used in toasts ("已加入生词本（MyDict）"). */
+  label: string;
+  addWord(word: string, options?: { dictionaryId?: number }): Promise<VocabAddResult>;
+}
 
 export interface DictionaryProvider {
   /** Stable id, e.g. `builtin:wiktionary`, `stardict:abc123`, `mdict:xyz`. */
@@ -59,6 +93,11 @@ export interface DictionaryProvider {
   lookup(word: string, ctx: DictionaryLookupContext): Promise<DictionaryLookupOutcome>;
   /** Release object URLs / caches. Called when the provider is removed or replaced. */
   dispose?(): void;
+  /**
+   * Set when the provider's server offers a wordbook (生词本). The dictionary
+   * popup shows "加入生词本" once, for the first enabled provider that has it.
+   */
+  vocab?: VocabCapability;
 }
 
 /**
