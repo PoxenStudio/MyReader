@@ -1,7 +1,6 @@
-import http from 'node:http';
-import https from 'node:https';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildMyDictQueryUrl } from '@/services/dictionaries/providers/myDictUrl';
+import { httpGetText } from '@/app/api/mybooks/_shared/upstream';
 
 /**
  * Query the MyDict server configured **on this deployment**, on behalf of the
@@ -21,20 +20,6 @@ import { buildMyDictQueryUrl } from '@/services/dictionaries/providers/myDictUrl
  * path is never taken from the client.
  */
 const TIMEOUT_MS = 15000;
-
-const httpGet = (url: string, headers: Record<string, string>) =>
-  new Promise<{ status: number; text: string }>((resolve, reject) => {
-    const client = url.startsWith('https:') ? https : http;
-    const req = client.get(url, { headers, rejectUnauthorized: false }, (res) => {
-      let text = '';
-      res.setEncoding('utf8');
-      res.on('data', (chunk: string) => (text += chunk));
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, text }));
-      res.on('error', reject);
-    });
-    req.setTimeout(TIMEOUT_MS, () => req.destroy(new Error('Request timed out')));
-    req.on('error', reject);
-  });
 
 export async function POST(request: NextRequest) {
   const configured = process.env['MYDICT_SERVER_URL']?.trim() ?? '';
@@ -61,7 +46,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const queryUrl = buildMyDictQueryUrl(configured, word.trim());
-    const { status, text } = await httpGet(queryUrl, headers);
+    const { status, text } = await httpGetText(queryUrl, headers, TIMEOUT_MS);
     if (status < 200 || status >= 300) {
       return NextResponse.json(
         { error: `HTTP ${status} ${text.slice(0, 200)}`.trim() },

@@ -136,11 +136,17 @@ const ensureAudioEl = (): HTMLAudioElement => {
 /** spx 解码结果按 URL 缓存：同一个词反复点不重复解码。 */
 const decodedBlobs = new Map<string, string>();
 
-const setDecodedSource = (el: HTMLAudioElement, blob: Blob): void => {
-  const owner = el as HTMLAudioElement & { __dictBlobUrl?: string };
-  if (owner.__dictBlobUrl) URL.revokeObjectURL(owner.__dictBlobUrl);
-  owner.__dictBlobUrl = URL.createObjectURL(blob);
-  el.src = owner.__dictBlobUrl;
+const MAX_DECODED_BLOBS = 20;
+
+const cacheDecodedBlob = (spxUrl: string, blob: Blob): string => {
+  const url = URL.createObjectURL(blob);
+  decodedBlobs.set(spxUrl, url);
+  if (decodedBlobs.size > MAX_DECODED_BLOBS) {
+    const [oldestKey, oldestUrl] = decodedBlobs.entries().next().value as [string, string];
+    decodedBlobs.delete(oldestKey);
+    URL.revokeObjectURL(oldestUrl);
+  }
+  return url;
 };
 
 const playSpeexDecoded = (
@@ -158,9 +164,7 @@ const playSpeexDecoded = (
       const resp = await fetch(spxUrl);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const blob = decodeSpeex(new Uint8Array(await resp.arrayBuffer()));
-      const url = URL.createObjectURL(blob);
-      decodedBlobs.set(spxUrl, url);
-      setDecodedSource(el, blob);
+      el.src = cacheDecodedBlob(spxUrl, blob);
     }
     await el.play();
     succeed?.();

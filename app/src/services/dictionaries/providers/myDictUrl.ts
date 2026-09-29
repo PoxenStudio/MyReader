@@ -15,9 +15,11 @@ export const buildMyDictQueryUrl = (baseUrl: string, word: string): string => {
   const url = new URL(base);
   url.searchParams.set('word', word);
   url.searchParams.set('full_style', 'true');
-  // 中日共用汉字表意文字，服务端按单一优先语言路由时另一侧的词典整组不参与
-  // （读日文书查「政府」看不到中文词典）。all_langs 让全部启用词典一视同仁。
-  // 不支持该参数的老服务端会忽略它，行为不变。
+  // Chinese and Japanese share ideographs: when the server routes by a single
+  // preferred language, the other side's dictionaries drop out entirely
+  // (looking up 「政府」 in a Japanese book shows no Chinese dictionary).
+  // `all_langs` treats every enabled dictionary alike; older servers that
+  // don't know the parameter ignore it and behave as before.
   url.searchParams.set('all_langs', 'true');
   return url.toString();
 };
@@ -58,11 +60,12 @@ const SITE_DICT_RELAY = '/api/mybooks/site-dict/';
  * the stylesheet is served from our origin.
  */
 export const buildMyDictResourceUrl = (baseUrl: string, resourcePath: string): string => {
-  // 幂等保护（两次都真实发生过）：
-  //  - 绝对 http(s) URL 是最终地址，不需要也不允许走中继；
-  //  - 已经带中继前缀的路径不能再包一层——发音点击绑定发生在
-  //    absolutizeResourceRefs 把词条 href 改写成中继 URL 之后，直接 resolve
-  //    会得到 /res/server/api/.../res/server/... 的双前缀（上游 400）。
+  // Idempotence guards (both cases happened in practice):
+  //  - an absolute http(s) URL is already final and must not be relayed;
+  //  - a path that already carries a relay prefix must not be wrapped again —
+  //    pronunciation clicks are bound after absolutizeResourceRefs has
+  //    rewritten entry hrefs to relay URLs, and resolving those again yields
+  //    a doubled /res/server/api/.../res/server/... prefix (upstream 400).
   if (/^https?:\/\//i.test(resourcePath)) return resourcePath;
   if (resourcePath.startsWith(`${MYDICT_RESOURCE_RELAY}/`)) return resourcePath;
   if (resourcePath.startsWith(SITE_DICT_RELAY)) return resourcePath;

@@ -32,6 +32,7 @@ import { isPseStreamFileName, openPseStreamBook, parsePseStreamFileName } from '
 import { DEFAULT_BOOK_SEARCH_CONFIG, DEFAULT_FIXED_LAYOUT_VIEW_SETTINGS } from './constants';
 import { isContentURI, isValidURL, makeSafeFilename } from '@/utils/misc';
 import { deserializeConfig, serializeConfig, serializeRawConfig } from '@/utils/serializer';
+import { migrateCJKFontNames } from './settingsService';
 import { ClosableFile } from '@/utils/file';
 import { TxtToEpubConverter } from '@/utils/txt';
 import { svg2png } from '@/utils/svg';
@@ -756,7 +757,9 @@ export async function loadBookConfig(
     if (await fs.exists(getConfigFilename(book), 'Books')) {
       str = (await fs.readFile(getConfigFilename(book), 'Books', 'text')) as string;
     }
-    return deserializeConfig(str, globalViewSettings, DEFAULT_BOOK_SEARCH_CONFIG);
+    const config = deserializeConfig(str, globalViewSettings, DEFAULT_BOOK_SEARCH_CONFIG);
+    migrateCJKFontNames(config.viewSettings);
+    return config;
   } catch {
     return deserializeConfig('{}', globalViewSettings, DEFAULT_BOOK_SEARCH_CONFIG);
   }

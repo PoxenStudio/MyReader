@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveMyBooksInternalOrigin } from '@/utils/mybooksInternalOrigin';
+import { relayResourceHeaders } from '@/app/api/mybooks/_shared/upstream';
 
 /**
  * Relay for MyBooks' site-dictionary API (see
@@ -19,9 +20,38 @@ import { resolveMyBooksInternalOrigin } from '@/utils/mybooksInternalOrigin';
  * string the generic proxy carries the host in.
  *
  * Only the three shapes above are forwarded — this is not a general proxy.
+ *
+ * Any host is allowed, but the cookie only goes to the internal origin or a
+ * host on this request's own origin — never to a foreign host.
  */
 const TIMEOUT_MS = 20000;
 const SITE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
+
+/** First hop of a possibly comma-separated forwarding header. */
+const firstHop = (value: string | null): string | undefined =>
+  value?.split(',')[0]?.trim() || undefined;
+
+const requestOrigin = (request: NextRequest): string | null => {
+  const host = firstHop(request.headers.get('x-forwarded-host')) ?? request.headers.get('host');
+  if (!host) return null;
+  const proto =
+    firstHop(request.headers.get('x-forwarded-proto')) ?? request.nextUrl.protocol.slice(0, -1);
+  try {
+    return new URL(`${proto}://${host}`).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+/** Whether the browser's cookie may ride along to `host`. */
+const mayForwardCookie = (request: NextRequest, host: string): boolean => {
+  if (process.env['MYBOOKS_INTERNAL_ORIGIN']) return true;
+  try {
+    return new URL(host).origin.toLowerCase() === requestOrigin(request);
+  } catch {
+    return false;
+  }
+};
 
 const upstreamPath = (rest: string[]): string | null => {
   if (rest.length === 1 && rest[0] === 'config') return '/api/reader/dict-config';
@@ -54,7 +84,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
   let upstream: Response;
   try {
     upstream = await fetch(url, {
-      headers: { Cookie: request.headers.get('cookie') ?? '' },
+      headers: mayForwardCookie(request, host)
+        ? { Cookie: request.headers.get('cookie') ?? '' }
+        : {},
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (error) {
@@ -63,7 +95,17 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
     return NextResponse.json({ error: 'MyBooks unreachable' }, { status: 502 });
   }
 
-  const headers = new Headers({ 'X-Content-Type-Options': 'nosniff' });
+  if (rest[1] === 'res') {
+    const headers = relayResourceHeaders(
+      upstream.headers.get('content-type'),
+      upstream.headers.get('cache-control'),
+    );
+    return new Response(upstream.body, { status: upstream.status, headers });
+  }
+  const headers = new Headers({
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "sandbox; default-src 'none'",
+  });
   for (const name of ['content-type', 'cache-control']) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);

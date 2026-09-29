@@ -473,7 +473,7 @@ export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
     unavailableDefinitionLabels.length > 0 && (
       <section className={sectionClassName}>
         <p className='not-eink:opacity-70 text-sm'>
-          {_('Not available on this device:')} {unavailableDefinitionLabels.join('、')}
+          {_('Not available on this device:')} {unavailableDefinitionLabels.join(_(', '))}
         </p>
       </section>
     );

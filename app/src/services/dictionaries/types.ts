@@ -221,13 +221,12 @@ export interface DictionarySettings {
    * `font-size` rules and the MDict shadow `::part(dict-content)` rule alike.
    */
   fontScale?: number;
-  /**
-   * Local bookkeeping for the embedded web build's dictionary-settings sync
-   * (see customDictionaryStore): when THIS device last saved its dictionary
-   * settings. Never synced — the boot pull compares it against the server's
-   * `updatedAt` so a slower server response cannot revert a newer local edit.
-   */
+  /** Local sync bookkeeping (never synced): last local save, device clock. */
   dictModifiedAt?: number;
+  /** Server `updatedAt` of this device's last successful push or pull. */
+  dictSyncedAt?: number;
+  /** A local edit has not reached the server yet. */
+  dictSyncDirty?: boolean;
 }
 
 /** Stable ids for the built-in providers. */
@@ -258,9 +257,7 @@ export const BUILTIN_PROVIDER_IDS = {
    */
   baiduBaike: 'builtin:baidu-baike',
 
-  /**
-   * MyDict Service
-   */
+  /** The deployment's own MyDict server (`MYDICT_SERVER_URL`); web-embed only. */
   mydictServer: 'builtin:mydict-server',
 } as const;
 

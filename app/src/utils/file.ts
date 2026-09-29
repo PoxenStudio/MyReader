@@ -425,15 +425,22 @@ export class RemoteFile extends File implements ClosableFile {
       }
       const buffers: ArrayBuffer[] = new Array(starts.length);
       let next = 0;
+      // Once one chunk fails the whole read is lost; stop handing out more.
+      let failed = false;
       await Promise.all(
         Array.from(
           { length: Math.min(RemoteFile.MAX_PARALLEL_RANGE_FETCHES, starts.length) },
           async () => {
-            while (next < starts.length) {
+            while (!failed && next < starts.length) {
               const index = next++;
               const currentStart = starts[index]!;
               const currentEnd = Math.min(currentStart + MAX_RANGE_LEN - 1, end);
-              buffers[index] = await this.fetchRangePart(currentStart, currentEnd);
+              try {
+                buffers[index] = await this.fetchRangePart(currentStart, currentEnd);
+              } catch (error) {
+                failed = true;
+                throw error;
+              }
             }
           },
         ),

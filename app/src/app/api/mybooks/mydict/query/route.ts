@@ -1,7 +1,6 @@
-import http from 'node:http';
-import https from 'node:https';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildMyDictQueryUrl } from '@/services/dictionaries/providers/myDictUrl';
+import { httpGetText } from '@/app/api/mybooks/_shared/upstream';
 
 /**
  * Server-side relay for user-configured MyDict servers on the web build
@@ -19,20 +18,6 @@ import { buildMyDictQueryUrl } from '@/services/dictionaries/providers/myDictUrl
  * followed, and only a JSON body is passed back.
  */
 const TIMEOUT_MS = 15000;
-
-const httpGet = (url: string, headers: Record<string, string>) =>
-  new Promise<{ status: number; text: string }>((resolve, reject) => {
-    const client = url.startsWith('https:') ? https : http;
-    const req = client.get(url, { headers, rejectUnauthorized: false }, (res) => {
-      let text = '';
-      res.setEncoding('utf8');
-      res.on('data', (chunk: string) => (text += chunk));
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, text }));
-      res.on('error', reject);
-    });
-    req.setTimeout(TIMEOUT_MS, () => req.destroy(new Error('Request timed out')));
-    req.on('error', reject);
-  });
 
 export async function POST(request: NextRequest) {
   let url: unknown, token: unknown, word: unknown;
@@ -56,9 +41,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { status, text } = await httpGet(
+    const { status, text } = await httpGetText(
       queryUrl,
       typeof token === 'string' && token ? { Authorization: `Bearer ${token}` } : {},
+      TIMEOUT_MS,
     );
     if (status < 200 || status >= 300) {
       return NextResponse.json(

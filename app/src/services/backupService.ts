@@ -1,4 +1,4 @@
-import type { Configuration, ZipWriter } from '@zip.js/zip.js';
+import type { ZipWriter, ZipWriterConstructorOptions } from '@zip.js/zip.js';
 import { AppService } from '@/types/system';
 import { EXTS } from '@/libs/document';
 import { isTauriAppPlatform } from '@/services/environment';
@@ -296,10 +296,10 @@ export async function addBackupEntriesToZip(
   }
 }
 
-const ZIP_WRITE_CONFIG: Partial<Configuration> = {
+// Per-writer, not global (see configureZip).
+const ZIP_WRITER_OPTIONS: ZipWriterConstructorOptions = {
   useWebWorkers: true,
   useCompressionStream: true,
-  chunkSize: 1 * 1024 * 1024, // 1MB chunks for streaming
 };
 
 /**
@@ -311,11 +311,11 @@ export async function createBackupZip(
   options: BackupOptions = {},
   onProgress?: ProgressCallback,
 ): Promise<ArrayBuffer> {
-  await configureZip(ZIP_WRITE_CONFIG);
+  await configureZip();
   const { BlobWriter, ZipWriter } = await import('@zip.js/zip.js');
 
   const blobWriter = new BlobWriter('application/zip');
-  const writer = new ZipWriter(blobWriter);
+  const writer = new ZipWriter(blobWriter, ZIP_WRITER_OPTIONS);
   await addBackupEntriesToZip(writer, appService, options, onProgress);
   await writer.close();
   const blob = await blobWriter.getData();
@@ -333,7 +333,7 @@ export async function createBackupZipToFile(
   options: BackupOptions = {},
   onProgress?: ProgressCallback,
 ): Promise<void> {
-  await configureZip(ZIP_WRITE_CONFIG);
+  await configureZip();
   const { ZipWriter } = await import('@zip.js/zip.js');
   const { writeFile } = await import('@tauri-apps/plugin-fs');
 
@@ -342,7 +342,7 @@ export async function createBackupZipToFile(
   // Start streaming readable side to the file (runs concurrently)
   const writePromise = writeFile(filePath, readable);
 
-  const writer = new ZipWriter(writable);
+  const writer = new ZipWriter(writable, ZIP_WRITER_OPTIONS);
   await addBackupEntriesToZip(writer, appService, options, onProgress);
   await writer.close();
   await writePromise;

@@ -2109,5 +2109,7 @@
   "Apply the server's dictionary settings? Server dictionaries follow the server's on/off state, and all other dictionaries will be turned off.": "使用伺服器端的詞典設定？伺服器端詞典將依伺服器端的啟停狀態設定，其他詞典將全部停用。",
   "Dictionary settings synced from the server.": "已從伺服器端同步詞典設定。",
   "Failed to load dictionary settings from the server.": "無法從伺服器端取得詞典設定。",
-  "Server": "伺服器"
+  "Server": "伺服器",
+  "Pronunciation playback failed: {{message}}": "發音播放失敗：{{message}}",
+  ", ": "、"
 }

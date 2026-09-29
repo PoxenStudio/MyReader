@@ -1,9 +1,7 @@
-import http from 'node:http';
-import https from 'node:https';
-import type { IncomingMessage } from 'node:http';
 import { Readable } from 'node:stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { SERVER_DICT_RESOURCE_BASE } from '@/services/dictionaries/providers/myDictUrl';
+import { openUpstream, relayResourceHeaders } from '@/app/api/mybooks/_shared/upstream';
 
 /**
  * Server-side relay for a MyDict server's entry resources
@@ -30,22 +28,13 @@ import { SERVER_DICT_RESOURCE_BASE } from '@/services/dictionaries/providers/myD
  * host comes from the client (it is the server the user configured), but the
  * resolved path must stay under the `/dict-res/` prefix the server itself
  * generates, so this is not a general-purpose proxy. Only GET is issued.
+ *
+ * The host is not restricted, so the response is hardened instead
+ * (`relayResourceHeaders`).
  */
 const TIMEOUT_MS = 20000;
 /** Prefix the MyDict server puts on every entry resource URL. */
 const ALLOWED_PATH_PREFIX = '/dict-res/';
-
-const openUpstream = (target: URL): Promise<IncomingMessage> =>
-  new Promise((resolve, reject) => {
-    const client = target.protocol === 'https:' ? https : http;
-    const request = client.get(
-      target,
-      { headers: { Accept: '*/*' }, rejectUnauthorized: false },
-      resolve,
-    );
-    request.setTimeout(TIMEOUT_MS, () => request.destroy(new Error('Request timed out')));
-    request.on('error', reject);
-  });
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
@@ -85,7 +74,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ pa
   }
 
   try {
-    const upstream = await openUpstream(target);
+    const upstream = await openUpstream(target, TIMEOUT_MS);
     const status = upstream.statusCode ?? 502;
     if (status < 200 || status >= 300) {
       upstream.resume();
@@ -97,13 +86,12 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ pa
         { status: status >= 400 && status < 500 ? status : 502 },
       );
     }
-    const headers = new Headers({
-      'Content-Type': upstream.headers['content-type'] ?? 'application/octet-stream',
-      // The server marks these `public, max-age=86400`; keep that so the
-      // browser doesn't re-fetch every image on every lookup.
-      'Cache-Control': (upstream.headers['cache-control'] as string) ?? 'public, max-age=86400',
-      'X-Content-Type-Options': 'nosniff',
-    });
+    // The server marks these `public, max-age=86400`; keep that so the
+    // browser doesn't re-fetch every image on every lookup.
+    const headers = relayResourceHeaders(
+      upstream.headers['content-type'],
+      upstream.headers['cache-control'],
+    );
     return new NextResponse(Readable.toWeb(upstream) as ReadableStream, { status, headers });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

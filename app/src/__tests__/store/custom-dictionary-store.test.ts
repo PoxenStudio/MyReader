@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
+import { flushDictSettingsPush, useCustomDictionaryStore } from '@/store/customDictionaryStore';
 import { BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
 import { useSettingsStore } from '@/store/settingsStore';
 import type { EnvConfigType } from '@/services/environment';
@@ -547,7 +547,9 @@ describe('customDictionaryStore — site dictionaries (embedded web build)', () 
     expect(after.providerEnabled['builtin:baidu-baike']).toBe(true);
     expect(after.providerEnabled['server:a']).toBe(true);
     expect(after.dictModifiedAt).toBeTypeOf('number');
+    await flushDictSettingsPush();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true);
+    expect(useCustomDictionaryStore.getState().settings.dictSyncDirty).toBe(false);
   });
 
   it('does not treat an unreachable synced copy as a first run', async () => {
@@ -611,5 +613,97 @@ describe('customDictionaryStore — site dictionaries (embedded web build)', () 
       false,
     );
     expect(useCustomDictionaryStore.getState().settings).toBe(before);
+  });
+
+  describe('cross-device sync', () => {
+    let remote: { updatedAt: number; settings: Record<string, unknown> } | null = null;
+    let putOk = true;
+    const puts: Record<string, unknown>[] = [];
+
+    beforeEach(() => {
+      remote = null;
+      putOk = true;
+      puts.length = 0;
+      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith('/api/mybooks/mydict/user-settings')) {
+          if (init?.method === 'PUT') {
+            if (!putOk) return new Response('{}', { status: 502 });
+            puts.push(JSON.parse(String(init.body)).settings);
+            return new Response(JSON.stringify({ updatedAt: 1000 + puts.length }));
+          }
+          return remote
+            ? new Response(JSON.stringify(remote))
+            : new Response('{}', { status: 404 });
+        }
+        return new Response('{}', { status: 502 }); // no site config
+      });
+    });
+
+    const existing = (extra: Record<string, unknown> = {}) => ({
+      providerOrder: ['builtin:mybooks', 'builtin:wiktionary'],
+      providerEnabled: { 'builtin:mybooks': true, 'builtin:wiktionary': false },
+      webSearches: [],
+      dictModifiedAt: 5,
+      ...extra,
+    });
+
+    it('applies a newer remote copy regardless of this device clock', async () => {
+      // Local clock far in the future must not block a genuinely newer remote.
+      seed(existing({ dictModifiedAt: 9e15, dictSyncedAt: 100 }));
+      remote = { updatedAt: 200, settings: { providerEnabled: { 'builtin:wiktionary': true } } };
+      await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+      const after = useCustomDictionaryStore.getState().settings;
+      expect(after.providerEnabled['builtin:wiktionary']).toBe(true);
+      expect(after.dictSyncedAt).toBe(200);
+    });
+
+    it('keeps and pushes an unpushed local edit instead of reverting it', async () => {
+      seed(existing({ dictSyncedAt: 100, dictSyncDirty: true }));
+      remote = { updatedAt: 200, settings: { providerEnabled: { 'builtin:wiktionary': true } } };
+      await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+      expect(
+        useCustomDictionaryStore.getState().settings.providerEnabled['builtin:wiktionary'],
+      ).toBe(false);
+      await flushDictSettingsPush();
+      expect(puts).toHaveLength(1);
+      expect(useCustomDictionaryStore.getState().settings.dictSyncDirty).toBe(false);
+    });
+
+    it('coalesces quick edits into one PUT carrying the latest state', async () => {
+      seed(existing({ dictSyncedAt: 100 }));
+      await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+      const store = useCustomDictionaryStore.getState();
+      for (const on of [true, false, true]) {
+        useCustomDictionaryStore.setState({
+          settings: {
+            ...useCustomDictionaryStore.getState().settings,
+            providerEnabled: {
+              ...useCustomDictionaryStore.getState().settings.providerEnabled,
+              'builtin:wiktionary': on,
+            },
+          },
+        });
+        await store.saveCustomDictionaries(fakeEnv);
+      }
+      await flushDictSettingsPush();
+      expect(puts).toHaveLength(1);
+      expect((puts[0]!['providerEnabled'] as Record<string, boolean>)['builtin:wiktionary']).toBe(
+        true,
+      );
+      expect(puts[0]).not.toHaveProperty('defaultProviderId');
+      expect(puts[0]).not.toHaveProperty('dictSyncDirty');
+    });
+
+    it('stays dirty when the push fails', async () => {
+      seed(existing({ dictSyncedAt: 100 }));
+      await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+      putOk = false;
+      await useCustomDictionaryStore.getState().saveCustomDictionaries(fakeEnv);
+      await flushDictSettingsPush();
+      const after = useCustomDictionaryStore.getState().settings;
+      expect(after.dictSyncDirty).toBe(true);
+      expect(after.dictSyncedAt).toBe(100);
+    });
   });
 });

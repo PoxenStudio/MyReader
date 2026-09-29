@@ -57,7 +57,11 @@ export const serverDictProvider: DictionaryProvider = {
         lang: ctx.lang,
         isDarkMode: ctx.isDarkMode,
       });
-      return { ok: true, headword: trimmed, sourceLabel: 'MyDict Service' };
+      return {
+        ok: true,
+        headword: trimmed,
+        sourceLabel: ctx._ ? ctx._('MyDict Service') : 'MyDict Service',
+      };
     } catch (error) {
       if ((error as { name?: string }).name === 'AbortError') {
         return { ok: false, reason: 'error', message: 'aborted' };

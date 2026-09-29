@@ -19,13 +19,14 @@ import { NextRequest, NextResponse } from 'next/server';
  * Auth mirrors `pages/api/mybooks/whoami.ts`: the browser's MyBooks session
  * cookie is forwarded to Tornado's `/api/user/whoami` over
  * `MYBOOKS_INTERNAL_ORIGIN`, and the file is keyed by that user id — users
- * never see each other's settings, and the request's Host header is never
- * trusted for the upstream target.
+ * never see each other's settings. No Host-header fallback (a forged Host
+ * could claim any user id): without the env var the route returns 503.
  */
 const TIMEOUT_MS = 15000;
+const MAX_BODY_BYTES = 64 * 1024;
 const SETTINGS_DIR = process.env['READER_SETTINGS_DIR'] || '/data/reader/dict-settings';
 
-/** Only these SystemSettings keys are accepted for sync. */
+/** Syncable keys; `defaultProviderId` (last-used tab) stays per-device. */
 const ALLOWED_KEYS = new Set([
   'providerOrder',
   'providerEnabled',
@@ -33,16 +34,18 @@ const ALLOWED_KEYS = new Set([
   'serverDicts',
   'webSearches',
   'fontScale',
-  'defaultProviderId',
 ]);
 
 type WhoamiResponse = { userId?: number };
 
-const resolveUser = async (request: NextRequest): Promise<number | null> => {
+const NOT_CONFIGURED = 'not-configured' as const;
+
+const resolveUser = async (
+  request: NextRequest,
+): Promise<number | null | typeof NOT_CONFIGURED> => {
+  const internalOrigin = process.env['MYBOOKS_INTERNAL_ORIGIN'];
+  if (!internalOrigin) return NOT_CONFIGURED;
   const cookie = request.headers.get('cookie') ?? '';
-  const proto = request.headers.get('x-forwarded-proto') ?? 'http';
-  const host = request.headers.get('host') ?? '';
-  const internalOrigin = process.env['MYBOOKS_INTERNAL_ORIGIN'] || `${proto}://${host}`;
   try {
     const upstream = await fetch(`${internalOrigin}/api/user/whoami`, {
       headers: cookie ? { Cookie: cookie } : {},
@@ -50,11 +53,18 @@ const resolveUser = async (request: NextRequest): Promise<number | null> => {
     });
     if (!upstream.ok) return null;
     const identity = (await upstream.json()) as WhoamiResponse;
-    return typeof identity.userId === 'number' ? identity.userId : null;
+    return typeof identity.userId === 'number' && Number.isSafeInteger(identity.userId)
+      ? identity.userId
+      : null;
   } catch {
     return null;
   }
 };
+
+const authError = (userId: null | typeof NOT_CONFIGURED) =>
+  userId === NOT_CONFIGURED
+    ? NextResponse.json({ error: 'Settings sync is not configured' }, { status: 503 })
+    : NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -75,7 +85,6 @@ const sanitize = (input: unknown): Record<string, unknown> | null => {
     if (key === 'serverDicts' && !Array.isArray(value)) continue;
     if (key === 'webSearches' && !Array.isArray(value)) continue;
     if (key === 'fontScale' && typeof value !== 'number') continue;
-    if (key === 'defaultProviderId' && typeof value !== 'string' && value !== null) continue;
     out[key] = value;
   }
   return Object.keys(out).length ? out : null;
@@ -83,9 +92,7 @@ const sanitize = (input: unknown): Record<string, unknown> | null => {
 
 export async function GET(request: NextRequest) {
   const userId = await resolveUser(request);
-  if (userId === null) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-  }
+  if (userId === null || userId === NOT_CONFIGURED) return authError(userId);
   try {
     const text = await fsp.readFile(path.join(SETTINGS_DIR, `${userId}.json`), 'utf8');
     return NextResponse.json(JSON.parse(text), {
@@ -102,13 +109,19 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   const userId = await resolveUser(request);
-  if (userId === null) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-  }
+  if (userId === null || userId === NOT_CONFIGURED) return authError(userId);
 
+  const declaredLength = Number(request.headers.get('content-length') ?? 0);
+  if (declaredLength > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: 'Body too large' }, { status: 413 });
+  }
   let body: unknown;
   try {
-    body = await request.json();
+    const raw = await request.text();
+    if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'Body too large' }, { status: 413 });
+    }
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
@@ -124,10 +137,13 @@ export async function PUT(request: NextRequest) {
   const file = path.join(SETTINGS_DIR, `${userId}.json`);
   try {
     await fsp.mkdir(SETTINGS_DIR, { recursive: true });
-    await fsp.writeFile(file, JSON.stringify({ updatedAt, settings }, null, 2), {
+    // Write-then-rename: concurrent saves never leave a torn file.
+    const tmp = `${file}.${process.pid}.${updatedAt}.${Math.random().toString(36).slice(2)}.tmp`;
+    await fsp.writeFile(tmp, JSON.stringify({ updatedAt, settings }, null, 2), {
       encoding: 'utf8',
       mode: 0o600,
     });
+    await fsp.rename(tmp, file);
   } catch (error) {
     console.error(`[MyDict Settings] write failed for user ${userId}:`, error);
     return NextResponse.json({ error: 'Write failed' }, { status: 502 });

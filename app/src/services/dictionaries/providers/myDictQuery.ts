@@ -47,7 +47,7 @@ export interface MyDictResult {
    * time can be wrong.
    */
   lang_match?: boolean;
-  /** 命中词典的源语言（zh-Hans/ja/…），供语言标签与分组使用。 */
+  /** Source language of the matching dictionary (zh-Hans/ja/…), used for language tabs and grouping. */
   lang_from?: string | null;
 }
 

@@ -19,7 +19,7 @@ import { AUDIO_BOUND, wireDictAudio } from '../dictAudio';
 
 const MYBOOKS_DICT_URL = 'https://mybooks.top/dict';
 
-// MyBooks词典服务分配的token, 限流控制
+// Token issued by the MyBooks dictionary service (used for rate limiting).
 const MYBOOKS_DICT_TOKEN = 'sk-ut5X97HcuelppOw90x3rcPuyyO5oYZLFCBAxE6LA6_g';
 
 /** What {@link renderMyBooksResults} needs beyond the results themselves. */
@@ -33,8 +33,8 @@ export interface MyBooksRenderOptions {
   /** Follow an in-entry `entry://word` cross-reference. */
   onNavigate?: (word: string) => void;
   /** Real translation function; absent in unit tests. */
-  _?: (key: string) => string;
-  /** 书的内容语言（如 'ja'）——语言标签默认落在这一组。 */
+  _?: (key: string, options?: Record<string, number | string>) => string;
+  /** The book's content language (e.g. 'ja'); the language tabs default to it. */
   lang?: string;
   isDarkMode?: boolean;
 }
@@ -47,7 +47,8 @@ const ENTRY_LINK_PREFIX = 'entry://';
 /**
  * Coarse language bucket for a language code (zh-Hans/zh-Hant both land on
  * `zh` — the dictionaries render their own variants). Handles both ISO 639-1
- * (`ja`) and 639-2/B (`jpn`) — Calibre 记录的是三字码，书页弹窗透传的就是它。
+ * (`ja`) and 639-2/B (`jpn`) — Calibre stores the three-letter code, and the
+ * reader popup passes it through as-is.
  */
 const langBucket = (lang?: string | null): string => {
   const code = (lang ?? '').toLowerCase();
@@ -106,8 +107,9 @@ const BASELINE_CSS = `
   }
   .mydict-entry-word { font-weight: 600; }
   .mydict-entry-phonetic { margin-left: 0.35em; }
-  /* 发音播放失败提示：播放链路（取回/解码/自动播放策略）任一步失败都不该
-     悄无声息——用户只看到"没声音"，无从上报原因。 */
+  /* Pronunciation failure note: a failure anywhere in the playback chain
+     (fetch / decode / autoplay policy) must not be silent — otherwise the user
+     only sees "no sound" with nothing to report. */
   .mydict-audio-note {
     margin-top: 0.4em;
     font-size: 0.78em;
@@ -120,11 +122,13 @@ const BASELINE_CSS = `
  * tabs, the per-dictionary `<details>`/`<summary>` collapse chrome — plus the
  * styling they need, injected once into the light DOM.
  *
- * 为什么 `<details>` 在 light DOM：词典 CSS 会用裸元素选择器（牛津高阶第10版的
- * oald10.css 有 `details { display: inline-block }`、
- * `details[open] > summary > span { display: none }`——它自己的页面用 details
- * 做折叠框），folded 结构留在 shadow 里就会被打进来的词典 CSS 重新排版，表现为
- * 该词典整块错乱。放 light DOM 后词典样式（在 shadow 内）永远够不着它。
+ * Why `<details>` lives in the light DOM: dictionary CSS uses bare element
+ * selectors (OALD10's oald10.css has `details { display: inline-block }` and
+ * `details[open] > summary > span { display: none }` — its own pages use
+ * details as fold boxes). Left inside the shadow root, the folding structure
+ * would be re-laid-out by the injected dictionary CSS and the whole group
+ * would break. In the light DOM, dictionary styles (inside the shadow) can
+ * never reach it.
  */
 const DICT_CHROME_CSS = `
   details.mydict-group[hidden] { display: none !important; }
@@ -273,20 +277,21 @@ const extractEntryStyles = (html: string): (HTMLLinkElement | HTMLStyleElement)[
 /** Wire in-entry links: `entry://word` navigates, http(s) leaves the popup. */
 const wireLinks = (root: HTMLElement, onNavigate?: (word: string) => void): void => {
   root.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((anchor) => {
-    if (anchor.dataset[AUDIO_BOUND]) return; // 发音点击已由 dictAudio 接管
+    if (anchor.dataset[AUDIO_BOUND]) return; // pronunciation click already owned by dictAudio
     const href = anchor.getAttribute('href') ?? '';
     if (href.startsWith(ENTRY_LINK_PREFIX)) {
       if (!onNavigate) return;
-      // 目标是百分号编码的（Weblio 系词典：`entry://%E5%BA%83%E3%81%8F`），
-      // 不解码就会拿 `%E5%BA%83…` 去查词；牛津系还会带锚点
-      // （`entry://dirty_1#down_idmg_5`），整串查也命中不到——两者都表现为
-      // "跳转错误"。先解码再去锚点，拿真正的词头去查。
+      // Targets may be percent-encoded (Weblio-family dictionaries:
+      // `entry://%E5%BA%83%E3%81%8F`) — undecoded, we'd look up `%E5%BA%83…`;
+      // Oxford-family ones carry an anchor (`entry://dirty_1#down_idmg_5`)
+      // that no headword matches. Both showed up as "broken jumps". Decode,
+      // then strip the anchor, and look up the real headword.
       const rawWord = href.slice(ENTRY_LINK_PREFIX.length);
       let word = rawWord;
       try {
         word = decodeURIComponent(rawWord);
       } catch {
-        // 非法百分号序列（词典名里裸带 % 的），按原样用。
+        // Malformed percent sequence (a bare % in the name): use it as-is.
       }
       word = word.split('#')[0]!.trim();
       if (!word) return;
@@ -393,7 +398,10 @@ export const renderMyBooksResults = (
   container: HTMLElement,
   options: MyBooksRenderOptions,
 ): void => {
-  const translate = options._ ?? ((key: string) => key);
+  const translate =
+    options._ ??
+    ((key: string, vars?: Record<string, number | string>) =>
+      key.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => String(vars?.[name] ?? '')));
 
   // The server orders hits by dictionary, so folding runs of the same name
   // preserves that order without a lookup table.
@@ -410,12 +418,13 @@ export const renderMyBooksResults = (
   for (const group of groups) {
     if (!langOrder.includes(group.lang)) langOrder.push(group.lang);
   }
-  // 默认聚焦与书内容语言一致的组：读日文书时查汉字词，日文词典才是第一顺位。
-  // 书语言没有命中时回退「全部」。
+  // Default to the group matching the book's language: looking up a kanji
+  // word in a Japanese book, the Japanese dictionaries come first. Fall back
+  // to "All" when the book's language has no hits.
   const bookLang = langBucket(options.lang);
   const activeLang = langOrder.includes(bookLang) ? bookLang : '';
 
-  /** 非「全部」标签时，其它语言的分组整块隐藏。 */
+  /** On any tab other than "All", groups in other languages are hidden. */
   const scopes: { det: HTMLDetailsElement; lang: string }[] = [];
   let openedVisibleGroup = false;
   const applyLangFilter = (lang: string): void => {
@@ -424,13 +433,14 @@ export const renderMyBooksResults = (
     }
   };
 
-  // 折叠 chrome + 语言标签都住 light DOM，样式在这里一次性注入（BASELINE_CSS
-  // 在各 shadow 内够不着它们；词条 CSS 在 shadow 内也不该够着我们的骨架）。
+  // The folding chrome and language tabs live in the light DOM, so their
+  // styles are injected once here (BASELINE_CSS inside each shadow can't reach
+  // them, and entry CSS inside the shadow must not reach our skeleton).
   const chromeCss = document.createElement('style');
   chromeCss.textContent = DICT_CHROME_CSS;
   container.appendChild(chromeCss);
 
-  // 语言标签条（≥2 种语言才渲染）。
+  // Language tab strip (rendered only with two or more languages).
   if (langOrder.length > 1) {
     const tabs = document.createElement('div');
     tabs.className = 'mydict-lang-tabs flex flex-wrap items-center gap-1.5';
@@ -454,8 +464,9 @@ export const renderMyBooksResults = (
   }
 
   for (const group of groups) {
-    // 该词典一个原生 `<details>`：一组可能命中几十个同形词（搜韵），
-    // 全部展开会把读者要查的那个词埋掉。第一组默认展开。
+    // One native `<details>` per dictionary: a group can hold dozens of
+    // homographs (搜韵), and expanding them all would bury the word the reader
+    // is after. Only the first group starts open.
     const details = document.createElement('details');
     details.className = 'mydict-group';
     details.dataset['lang'] = group.lang;
@@ -505,8 +516,10 @@ export const renderMyBooksResults = (
     style.textContent = BASELINE_CSS;
     shadow.appendChild(style);
 
-    // 该词典自己的样式表（DOMPurify 无条件丢弃 <link>/<style>，这里逐条挂回）；
-    // 挂在自己的 scope 里就不会漂进别的词典，也够不着 light DOM 的折叠骨架。
+    // The dictionary's own stylesheets (DOMPurify drops <link>/<style>
+    // unconditionally, so they are re-attached here one by one). Mounted in
+    // this group's own scope, they can't leak into other dictionaries or reach
+    // the light-DOM folding skeleton.
     const dictStyles: (HTMLLinkElement | HTMLStyleElement)[] = [];
     const seenStyles = new Set<string>();
     for (const item of group.items) {
@@ -575,7 +588,8 @@ export const renderMyBooksResults = (
     }
 
     // Re-anchor the server's root-relative `/dict-res/<id>/res/…` references to
-    // the server they came from (web 构建里经中继取回)，然后接上词条内的链接行为。
+    // the server they came from (via the relay on the web build), then wire
+    // up the in-entry link behaviour.
     const audioNote = document.createElement('div');
     audioNote.className = 'mydict-audio-note';
     audioNote.hidden = true;
@@ -585,7 +599,9 @@ export const renderMyBooksResults = (
       body,
       (resourcePath) => buildMyDictResourceUrl(options.baseUrl, resourcePath),
       (message) => {
-        audioNote.textContent = `发音播放失败：${message}`;
+        audioNote.textContent = translate('Pronunciation playback failed: {{message}}', {
+          message,
+        });
         audioNote.hidden = false;
       },
       () => {
@@ -595,7 +611,8 @@ export const renderMyBooksResults = (
     wireLinks(body, options.onNavigate);
     if (options.isDarkMode) adaptToDarkTheme(body);
 
-    // 初始可见性跟随默认标签；默认标签下可见的第一组才展开。
+    // Initial visibility follows the default tab; only the first group visible
+    // under it starts expanded.
     const visible = activeLang === '' || group.lang === activeLang;
     details.style.display = visible ? '' : 'none';
     details.open = visible && !openedVisibleGroup;

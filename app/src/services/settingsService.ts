@@ -54,6 +54,24 @@ export function getDefaultViewSettings(ctx: Context): ViewSettings {
   };
 }
 
+/** Renamed CJK fonts; `null` = removed, fall back to the field's default. */
+const RENAMED_CJK_FONTS: Record<string, string | null> = {
+  'Source Han Serif CN': 'Source Han Serif CN VF',
+  'Huiwen-MinchoGBK': 'Huiwen-mincho',
+  KingHwa_OldSong: null,
+};
+
+const MIGRATED_FONT_FIELDS = ['serifFont', 'sansSerifFont', 'defaultCJKFont'] as const;
+
+export function migrateCJKFontNames(view: Partial<ViewSettings> | undefined): void {
+  if (!view) return;
+  for (const field of MIGRATED_FONT_FIELDS) {
+    const font = view[field];
+    if (!font || !(font in RENAMED_CJK_FONTS)) continue;
+    view[field] = RENAMED_CJK_FONTS[font] ?? DEFAULT_BOOK_FONT[field];
+  }
+}
+
 /**
  * Normalize highlight color prefs into the current shape:
  * - `userHighlightColors` becomes `UserHighlightColor[]`. Legacy `string[]` entries
@@ -143,6 +161,7 @@ export async function loadSettings(ctx: Context): Promise<SystemSettings> {
     ...getDefaultViewSettings(ctx),
     ...settings.globalViewSettings,
   };
+  migrateCJKFontNames(settings.globalViewSettings);
   settings.aiSettings = {
     ...DEFAULT_AI_SETTINGS,
     ...settings.aiSettings,

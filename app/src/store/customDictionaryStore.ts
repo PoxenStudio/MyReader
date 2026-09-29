@@ -30,10 +30,11 @@ import { useSettingsStore } from './settingsStore';
 // seed a brand-new reader's settings, are reconciled on every load, and can
 // be re-applied on demand via `syncSiteDictionaries`.
 
-let serverDictSyncedAt = 0;
-
 /** The user has never saved dictionary settings on any device. */
 const NO_SYNCED_SETTINGS = 'missing' as const;
+
+const USER_SETTINGS_URL = '/api/mybooks/mydict/user-settings';
+const PUSH_DEBOUNCE_MS = 500;
 
 const fetchServerDictSettings = async (): Promise<
   | {
@@ -44,7 +45,7 @@ const fetchServerDictSettings = async (): Promise<
   | null
 > => {
   try {
-    const res = await fetch('/api/mybooks/mydict/user-settings', {
+    const res = await fetch(USER_SETTINGS_URL, {
       signal: AbortSignal.timeout(8000),
     });
     // Only an explicit 404 means "nothing synced yet" — a network failure must
@@ -63,21 +64,42 @@ const fetchServerDictSettings = async (): Promise<
   }
 };
 
-const pushServerDictSettings = async (fields: Partial<DictionarySettings>): Promise<void> => {
+const syncableFields = (settings: DictionarySettings): Partial<DictionarySettings> => ({
+  providerOrder: settings.providerOrder,
+  providerEnabled: settings.providerEnabled,
+  myDicts: settings.myDicts,
+  serverDicts: settings.serverDicts,
+  webSearches: settings.webSearches,
+  fontScale: settings.fontScale,
+});
+
+const putServerDictSettings = async (
+  fields: Partial<DictionarySettings>,
+  keepalive = false,
+): Promise<number | null> => {
   try {
-    const res = await fetch('/api/mybooks/mydict/user-settings', {
+    const res = await fetch(USER_SETTINGS_URL, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ settings: fields }),
-      signal: AbortSignal.timeout(8000),
+      keepalive,
+      ...(keepalive ? {} : { signal: AbortSignal.timeout(8000) }),
     });
-    if (!res.ok) return;
+    if (!res.ok) return null;
     const data = (await res.json()) as { updatedAt?: number };
-    if (typeof data.updatedAt === 'number') serverDictSyncedAt = data.updatedAt;
+    return typeof data.updatedAt === 'number' ? data.updatedAt : null;
   } catch {
-    // Best-effort: the local save already happened; the next toggle re-pushes.
+    return null;
   }
 };
+
+// Push queue: one PUT in flight at a time; a PUT clears the dirty flag only
+// if no newer edit arrived meanwhile.
+let localRevision = 0;
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+let pushInFlight: Promise<void> | null = null;
+let pushEnvConfig: EnvConfigType | null = null;
+let pageHideHooked = false;
 
 /**
  * Overlay the remote dictionary fields onto `base`, then re-run the same
@@ -239,6 +261,85 @@ interface DictionaryStoreState {
    */
   syncSiteDictionaries(envConfig: EnvConfigType): Promise<boolean>;
 }
+
+/** Persist locally without stamping or pushing (not a user edit). */
+const persistLocally = (envConfig: EnvConfigType) => {
+  const { settings, setSettings, saveSettings } = useSettingsStore.getState();
+  const { dictionaries, settings: dictSettings } = useCustomDictionaryStore.getState();
+  const next = {
+    ...settings,
+    customDictionaries: dictionaries.map(toSettingsDict),
+    dictionarySettings: dictSettings,
+  };
+  setSettings(next);
+  saveSettings(envConfig, next);
+};
+
+const runPush = async (): Promise<void> => {
+  const envConfig = pushEnvConfig;
+  const store = useCustomDictionaryStore;
+  if (!envConfig || !store.getState().settings.dictSyncDirty) return;
+  const revision = localRevision;
+  const updatedAt = await putServerDictSettings(syncableFields(store.getState().settings));
+  if (updatedAt === null) return; // stays dirty; retried later
+  const current = store.getState().settings;
+  store.setState({
+    settings: {
+      ...current,
+      dictSyncedAt: updatedAt,
+      dictSyncDirty: revision !== localRevision,
+    },
+  });
+  persistLocally(envConfig);
+};
+
+const drainPushQueue = (): Promise<void> => {
+  if (pushInFlight) return pushInFlight;
+  pushInFlight = (async () => {
+    try {
+      let revision: number;
+      do {
+        revision = localRevision;
+        await runPush();
+      } while (
+        revision !== localRevision &&
+        useCustomDictionaryStore.getState().settings.dictSyncDirty
+      );
+    } finally {
+      pushInFlight = null;
+    }
+  })();
+  return pushInFlight;
+};
+
+const schedulePush = (envConfig: EnvConfigType) => {
+  pushEnvConfig = envConfig;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => {
+    pushTimer = null;
+    void drainPushQueue();
+  }, PUSH_DEBOUNCE_MS);
+  // Flush on tab close; `keepalive` lets the PUT outlive the page.
+  if (!pageHideHooked && typeof window !== 'undefined') {
+    pageHideHooked = true;
+    window.addEventListener('pagehide', () => {
+      if (!pushTimer) return;
+      clearTimeout(pushTimer);
+      pushTimer = null;
+      const { settings } = useCustomDictionaryStore.getState();
+      if (settings.dictSyncDirty) void putServerDictSettings(syncableFields(settings), true);
+    });
+  }
+};
+
+/** Push any pending edit now. */
+export const flushDictSettingsPush = async (): Promise<void> => {
+  if (pushTimer) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+  }
+  await drainPushQueue();
+};
 
 /** Site dictionaries are named by the admin; drop cached providers so a rename shows up. */
 const evictSiteProviders = (...lists: (DictionarySettings['serverDicts'] | undefined)[]) => {
@@ -587,36 +688,32 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
         myDicts: persistedSettings.myDicts ?? [],
         serverDicts: persistedSettings.serverDicts ?? [],
         fontScale: persistedSettings.fontScale ?? DEFAULT_DICTIONARY_SETTINGS.fontScale,
-        // Local bookkeeping — must survive the merge or the boot pull's
-        // staleness guard reads 0 and reverts newer local edits.
+        // Local sync bookkeeping must survive the merge.
         dictModifiedAt: persistedSettings.dictModifiedAt,
+        dictSyncedAt: persistedSettings.dictSyncedAt,
+        dictSyncDirty: persistedSettings.dictSyncDirty,
       };
       set({ dictionaries, settings: settingsMerged });
 
-      // Pull the cross-device copy (embedded web build). The server copy wins
-      // only when it is newer than this device's last local save — otherwise a
-      // slow boot-time pull would revert edits the user just made here (drag
-      // order, toggles) before the pull landed.
+      // Pull the cross-device copy. Compares server timestamps only; an
+      // unpushed local edit wins and is pushed instead.
       if (isWebAppPlatform()) {
         const [remote, siteConfig] = await Promise.all([
           fetchServerDictSettings(),
           fetchSiteDictConfig(),
         ]);
-        const localModifiedAt = get().settings.dictModifiedAt ?? 0;
+        const local = get().settings;
         if (
           remote &&
           remote !== NO_SYNCED_SETTINGS &&
-          remote.updatedAt > localModifiedAt &&
-          remote.updatedAt > serverDictSyncedAt
+          remote.updatedAt > (local.dictSyncedAt ?? 0) &&
+          !local.dictSyncDirty
         ) {
-          serverDictSyncedAt = remote.updatedAt;
-          const reconciled = applyRemoteDictSettings(settingsMerged, remote.settings);
-          set({ settings: reconciled });
-          // Keep the SystemSettings copy in step: loadCustomDictionaries reads
-          // its dictionarySettings back on the next run, and a stale copy here
-          // would resurrect pre-sync values over the freshly pulled ones.
-          const { settings: sysSettings, setSettings } = useSettingsStore.getState();
-          setSettings({ ...sysSettings, dictionarySettings: reconciled });
+          const reconciled = applyRemoteDictSettings(local, remote.settings);
+          set({ settings: { ...reconciled, dictSyncedAt: remote.updatedAt } });
+          persistLocally(envConfig);
+        } else if (local.dictSyncDirty) {
+          schedulePush(envConfig);
         }
 
         // Site dictionaries (MyBooks admin config). A reader with no settings
@@ -655,32 +752,18 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
 
   saveCustomDictionaries: async (envConfig) => {
     try {
-      const { settings, setSettings, saveSettings } = useSettingsStore.getState();
-      // Stamp the local modification time BEFORE persisting: the boot pull
-      // compares the server's updatedAt against it and must never revert a
-      // newer local edit.
-      const dictModifiedAt = Date.now();
-      set({ settings: { ...get().settings, dictModifiedAt } });
-      const { dictionaries, settings: dictSettings } = get();
-      const next = {
-        ...settings,
-        customDictionaries: dictionaries.map(toSettingsDict),
-        dictionarySettings: dictSettings,
-      };
-      setSettings(next);
-      saveSettings(envConfig, next);
-      // Push the cross-device copy (embedded web build). Awaited so the server
-      // always carries this device's state before anything else can pull.
-      if (isWebAppPlatform()) {
-        await pushServerDictSettings({
-          providerOrder: dictSettings.providerOrder,
-          providerEnabled: dictSettings.providerEnabled,
-          myDicts: dictSettings.myDicts,
-          serverDicts: dictSettings.serverDicts,
-          webSearches: dictSettings.webSearches,
-          fontScale: dictSettings.fontScale,
-        });
-      }
+      // Persist locally; the push runs in the background.
+      const web = isWebAppPlatform();
+      if (web) localRevision += 1;
+      set({
+        settings: {
+          ...get().settings,
+          dictModifiedAt: Date.now(),
+          ...(web ? { dictSyncDirty: true } : {}),
+        },
+      });
+      persistLocally(envConfig);
+      if (web) schedulePush(envConfig);
     } catch (error) {
       console.error('Failed to save custom dictionaries settings:', error);
       throw error;
