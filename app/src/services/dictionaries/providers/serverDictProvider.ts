@@ -28,6 +28,21 @@ const SERVER_QUERY_URL = '/api/mybooks/mydict/server-query';
 /** 生词本走服务端中继（token 不出容器）；由渲染层在每个词典分组头画星标。 */
 const SERVER_VOCAB = createServerVocab(_('MyDict Service'));
 
+let configuredProbe: Promise<boolean> | null = null;
+
+/** Whether this deployment set `MYDICT_SERVER_URL`; always false off web. */
+export const isServerDictConfigured = (): Promise<boolean> => {
+  if (!isWebAppPlatform()) return Promise.resolve(false);
+  configuredProbe ??= fetch(SERVER_QUERY_URL)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data: { configured?: boolean } | null) => data?.configured === true)
+    .catch(() => {
+      configuredProbe = null;
+      return false;
+    });
+  return configuredProbe;
+};
+
 export const serverDictProvider: DictionaryProvider = {
   id: BUILTIN_PROVIDER_IDS.mydictServer,
   kind: 'builtin',
