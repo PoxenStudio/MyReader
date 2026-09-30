@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildMyDictVocabUrl } from '@/services/dictionaries/providers/myDictUrl';
-import { httpGetText, httpJsonRequest } from '@/app/api/mybooks/_shared/upstream';
+import {
+  httpGetText,
+  httpJsonRequest,
+  isPositiveId,
+  relayJsonReply,
+} from '@/app/api/mybooks/_shared/upstream';
 
 /**
  * Server-side relay for the wordbook (生词本) of a **user-configured** MyDict
@@ -13,8 +18,11 @@ import { httpGetText, httpJsonRequest } from '@/app/api/mybooks/_shared/upstream
  * Same trust model as the sibling `/api/mybooks/mydict/query` relay: the host
  * and token come from the client (they are the server the user configured),
  * but every path is built from `/api/v1/vocab` here — the client can't turn
- * this into a general-purpose proxy. Upstream 4xx (409 already saved, 401 bad
- * token) is forwarded as-is so the popup can phrase it correctly.
+ * this into a general-purpose proxy. Unlike `query` it also issues POST and
+ * DELETE; that stays narrow because the only body sent is
+ * `{word, dictionary_id}` and the only DELETE target is `/api/v1/vocab/<id>`
+ * with a positive integer id. Upstream 4xx (409 already saved, 401 bad token)
+ * is forwarded as-is so the popup can phrase it correctly.
  */
 const TIMEOUT_MS = 15000;
 
@@ -62,7 +70,7 @@ export async function POST(request: NextRequest) {
       search.searchParams.set('page_size', '50');
       result = await httpGetText(search.toString(), headers, TIMEOUT_MS);
     } else if (action === 'add') {
-      if (typeof word !== 'string' || !word.trim() || typeof dictionaryId !== 'number') {
+      if (typeof word !== 'string' || !word.trim() || !isPositiveId(dictionaryId)) {
         return NextResponse.json({ error: 'Missing word or dictionary_id' }, { status: 400 });
       }
       result = await httpJsonRequest(
@@ -73,7 +81,7 @@ export async function POST(request: NextRequest) {
         TIMEOUT_MS,
       );
     } else if (action === 'remove') {
-      if (typeof itemId !== 'number') {
+      if (!isPositiveId(itemId)) {
         return NextResponse.json({ error: 'Missing item_id' }, { status: 400 });
       }
       result = await httpJsonRequest(
@@ -87,9 +95,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
 
-    return NextResponse.json(result.text ? JSON.parse(result.text) : {}, {
-      status: result.status >= 200 && result.status < 300 ? 200 : result.status,
-    });
+    return relayJsonReply(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[MyDict Vocab Proxy] ${vocabUrl}: ${message}`);

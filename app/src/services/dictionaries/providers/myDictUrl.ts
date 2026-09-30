@@ -30,9 +30,13 @@ export const buildMyDictQueryUrl = (baseUrl: string, word: string): string => {
  * client only sends the word (plus the dictionary id it came from).
  */
 export const buildMyDictVocabUrl = (baseUrl: string): string => {
-  let base = baseUrl.trim().replace(/\/+$/, '');
-  if (!/\/api\/v1\/vocab$/.test(base)) base += '/api/v1/vocab';
-  return base;
+  // The configured URL may already point at `/api/v1/query` (accepted by
+  // buildMyDictQueryUrl), so strip either endpoint before appending.
+  const base = baseUrl
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api\/v1\/(?:query|vocab)$/, '');
+  return `${base}/api/v1/vocab`;
 };
 
 /** Same-origin relay that streams a MyDict server's entry resources. */

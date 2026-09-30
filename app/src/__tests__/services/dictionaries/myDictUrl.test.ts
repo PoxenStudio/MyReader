@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   buildMyDictResourceUrl,
+  buildMyDictVocabUrl,
   SERVER_DICT_RESOURCE_BASE,
 } from '@/services/dictionaries/providers/myDictUrl';
 
@@ -49,5 +50,16 @@ describe('buildMyDictResourceUrl', () => {
   it('passes absolute http(s) URLs through untouched', () => {
     const url = 'https://a.qianp.com/audio/abc.mp3';
     expect(buildMyDictResourceUrl(SERVER, url)).toBe(url);
+  });
+});
+
+describe('buildMyDictVocabUrl', () => {
+  it.each([
+    'http://10.0.0.2:8080',
+    'http://10.0.0.2:8080/',
+    'http://10.0.0.2:8080/api/v1/query',
+    'http://10.0.0.2:8080/api/v1/vocab',
+  ])('maps %s onto the vocab endpoint', (base) => {
+    expect(buildMyDictVocabUrl(base)).toBe(`${SERVER}/api/v1/vocab`);
   });
 });

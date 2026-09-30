@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMyDictProvider } from '@/services/dictionaries/providers/myDictProvider';
 import type { VocabCapability } from '@/services/dictionaries/types';
+import { eventDispatcher } from '@/utils/event';
 
 /** 生词本能力由 provider 自己创建（每台服务器一份），测试里换成假的。 */
 const { vocabMock } = vi.hoisted(() => {
@@ -86,6 +87,47 @@ describe('MyDict provider wordbook stars', () => {
     await vi.waitFor(() => expect(star.textContent).toBe('★'));
     star.click();
     await vi.waitFor(() => expect(vocabMock.removeItem).toHaveBeenCalledWith(42));
+  });
+
+  it('asks the server once per headword, however many groups share it', async () => {
+    queryMock.mockResolvedValue({ results: [hit(4, 'ran'), hit(7, 'ran'), hit(9, 'ranch')] });
+    const container = document.createElement('div');
+    await createMyDictProvider({
+      id: 'mydict:1',
+      name: 'MyDict',
+      url: 'https://d',
+      token: 't',
+    }).lookup('ran', { signal: new AbortController().signal, container });
+    await vi.waitFor(() =>
+      expect(container.querySelectorAll('.mydict-vocab-star')).toHaveLength(3),
+    );
+    expect(vocabMock.listSaved.mock.calls).toEqual([['ran'], ['ranch']]);
+  });
+
+  it('names the wordbook source through interpolation, not concatenation', async () => {
+    const dispatch = vi.spyOn(eventDispatcher, 'dispatch').mockResolvedValue(undefined);
+    queryMock.mockResolvedValue({ results: [hit(4, 'ranch')] });
+    const container = document.createElement('div');
+    await createMyDictProvider({
+      id: 'mydict:1',
+      name: 'MyDict',
+      url: 'https://d',
+      token: 't',
+    }).lookup('ran', { signal: new AbortController().signal, container });
+    const star = container.querySelector<HTMLButtonElement>('.mydict-vocab-star')!;
+    await vi.waitFor(() => expect(star.disabled).toBe(false));
+    expect(star.title).toBe('Add to Wordbook (MyDict)');
+
+    vocabMock.listSaved.mockResolvedValue(new Map([[4, 42]]));
+    star.click();
+    await vi.waitFor(() => expect(star.textContent).toBe('★'));
+    star.click();
+    await vi.waitFor(() => expect(vocabMock.removeItem).toHaveBeenCalled());
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
+    const messages = dispatch.mock.calls.map(
+      ([, detail]) => (detail as { message: string }).message,
+    );
+    expect(messages).toEqual(['Added to Wordbook (MyDict)', 'Removed from Wordbook (MyDict)']);
   });
 
   it('does not render stars when the provider has no wordbook capability', async () => {

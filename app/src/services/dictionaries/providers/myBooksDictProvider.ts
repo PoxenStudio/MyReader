@@ -23,6 +23,19 @@ import { queryMyDict, type MyDictResult } from './myDictQuery';
 import { buildMyDictResourceUrl } from './myDictUrl';
 import { AUDIO_BOUND, wireDictAudio } from '../dictAudio';
 
+// Rendered through `translate` (the popup's `_`), which i18next-scanner can't
+// see; declared here so extraction keeps these keys.
+_('Other language');
+_('Pronunciation playback failed: {{message}}');
+_('Add to Wordbook');
+_('Remove from Wordbook');
+_('Add to Wordbook ({{source}})');
+_('Remove from Wordbook ({{source}})');
+_('Added to Wordbook ({{source}})');
+_('Removed from Wordbook ({{source}})');
+_('Already in Wordbook');
+_('Wordbook unavailable, check the MyDict token');
+
 const MYBOOKS_DICT_URL = 'https://mybooks.top/dict';
 
 // Token issued by the MyBooks dictionary service (used for rate limiting).
@@ -267,7 +280,8 @@ const absolutizeResourceRefs = (root: ParentNode, baseUrl: string): void => {
  * 改动也能自愈。点击不冒泡——分组头在结果卡片里，冒泡会把卡片折叠掉。
  */
 const attachVocabStar = (summary: HTMLElement, options: VocabOptions): void => {
-  const { capability, dictionaryId, word, translate } = options;
+  const { capability, dictionaryId, word, savedFor, translate } = options;
+  const source = { source: capability.label };
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'mydict-vocab-star';
@@ -279,9 +293,13 @@ const attachVocabStar = (summary: HTMLElement, options: VocabOptions): void => {
     button.textContent = saved ? '★' : '☆';
     button.classList.toggle('saved', saved);
     button.disabled = busy;
-    const label = saved ? translate('Remove from Wordbook') : translate('Add to Wordbook');
-    button.setAttribute('aria-label', label);
-    button.title = `${label}（${capability.label}）`;
+    button.setAttribute(
+      'aria-label',
+      saved ? translate('Remove from Wordbook') : translate('Add to Wordbook'),
+    );
+    button.title = saved
+      ? translate('Remove from Wordbook ({{source}})', source)
+      : translate('Add to Wordbook ({{source}})', source);
   };
 
   const notify = (type: 'success' | 'warning' | 'error', message: string): void => {
@@ -299,9 +317,9 @@ const attachVocabStar = (summary: HTMLElement, options: VocabOptions): void => {
   };
 
   /** 与服务端对账，拿到该词在这部词典里的条目 id（增删后也靠它收敛）。 */
-  const sync = async (): Promise<void> => {
+  const sync = async (saved: Promise<Map<number, number>>): Promise<void> => {
     try {
-      itemId = (await capability.listSaved(word)).get(dictionaryId) ?? null;
+      itemId = (await saved).get(dictionaryId) ?? null;
     } catch {
       itemId = null;
     }
@@ -319,19 +337,19 @@ const attachVocabStar = (summary: HTMLElement, options: VocabOptions): void => {
         if (itemId === null) {
           const result = await capability.addEntry({ dictionaryId, word });
           if (result.status === 'ok') {
-            notify('success', `${translate('Added to Wordbook')}（${capability.label}）`);
+            notify('success', translate('Added to Wordbook ({{source}})', source));
           } else {
             reportFailure(result);
           }
         } else {
           const result = await capability.removeItem(itemId);
           if (result.status === 'ok') {
-            notify('success', `${translate('Remove from Wordbook')}（${capability.label}）`);
+            notify('success', translate('Removed from Wordbook ({{source}})', source));
           } else {
             reportFailure(result);
           }
         }
-        await sync();
+        await sync(capability.listSaved(word));
       } finally {
         busy = false;
         render();
@@ -340,7 +358,7 @@ const attachVocabStar = (summary: HTMLElement, options: VocabOptions): void => {
   });
 
   render();
-  void sync();
+  void sync(savedFor(word));
   summary.appendChild(button);
 };
 
@@ -349,7 +367,9 @@ interface VocabOptions {
   capability: VocabCapability;
   dictionaryId: number;
   word: string;
-  translate: (key: string) => string;
+  /** Saved set shared by the groups of one render, so a headword is fetched once. */
+  savedFor: (word: string) => Promise<Map<number, number>>;
+  translate: (key: string, vars?: Record<string, number | string>) => string;
 }
 
 /* ------------------------------------------------------------- entry CSS */
@@ -553,6 +573,16 @@ export const renderMyBooksResults = (
   const bookLang = langBucket(options.lang);
   const activeLang = langOrder.includes(bookLang) ? bookLang : '';
 
+  const savedByWord = new Map<string, Promise<Map<number, number>>>();
+  const savedFor = (word: string): Promise<Map<number, number>> => {
+    let saved = savedByWord.get(word);
+    if (!saved) {
+      saved = options.vocab?.listSaved(word) ?? Promise.resolve(new Map<number, number>());
+      savedByWord.set(word, saved);
+    }
+    return saved;
+  };
+
   /** On any tab other than "All", groups in other languages are hidden. */
   const scopes: { det: HTMLDetailsElement; lang: string }[] = [];
   let openedVisibleGroup = false;
@@ -642,6 +672,7 @@ export const renderMyBooksResults = (
         capability: options.vocab,
         dictionaryId: firstHit.dictionary_id,
         word: firstHit.word,
+        savedFor,
         translate,
       });
     }

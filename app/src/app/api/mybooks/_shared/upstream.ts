@@ -1,6 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import type { IncomingMessage } from 'node:http';
+import { NextResponse } from 'next/server';
 
 // Shared by the dictionary relays. Cert validation is off: self-hosted
 // MyDict servers commonly use self-signed certs.
@@ -106,3 +107,23 @@ export const httpJsonRequest = (
     if (payload) req.write(payload);
     req.end();
   });
+
+/** Positive integer id (dictionary / wordbook item) taken from a JSON body. */
+export const isPositiveId = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+
+/**
+ * Pass an upstream JSON reply through (2xx → 200, 4xx/5xx kept). A non-JSON
+ * body — e.g. a reverse proxy's HTML error page — becomes a plain 502.
+ */
+export const relayJsonReply = ({ status, text }: { status: number; text: string }) => {
+  let data: unknown = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return NextResponse.json({ error: `Invalid response (HTTP ${status})` }, { status: 502 });
+    }
+  }
+  return NextResponse.json(data, { status: status >= 200 && status < 300 ? 200 : status });
+};

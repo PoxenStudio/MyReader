@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildMyDictVocabUrl } from '@/services/dictionaries/providers/myDictUrl';
-import { httpGetText, httpJsonRequest } from '@/app/api/mybooks/_shared/upstream';
+import {
+  httpGetText,
+  httpJsonRequest,
+  isPositiveId,
+  relayJsonReply,
+} from '@/app/api/mybooks/_shared/upstream';
 
 /**
  * Wordbook (生词本) of the MyDict server configured **on this deployment**
@@ -54,7 +59,7 @@ export async function POST(request: NextRequest) {
       search.searchParams.set('page_size', '50');
       result = await httpGetText(search.toString(), headers, TIMEOUT_MS);
     } else if (action === 'add') {
-      if (typeof word !== 'string' || !word.trim() || typeof dictionaryId !== 'number') {
+      if (typeof word !== 'string' || !word.trim() || !isPositiveId(dictionaryId)) {
         return NextResponse.json({ error: 'Missing word or dictionary_id' }, { status: 400 });
       }
       result = await httpJsonRequest(
@@ -65,7 +70,7 @@ export async function POST(request: NextRequest) {
         TIMEOUT_MS,
       );
     } else if (action === 'remove') {
-      if (typeof itemId !== 'number') {
+      if (!isPositiveId(itemId)) {
         return NextResponse.json({ error: 'Missing item_id' }, { status: 400 });
       }
       result = await httpJsonRequest(
@@ -79,9 +84,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
 
-    return NextResponse.json(result.text ? JSON.parse(result.text) : {}, {
-      status: result.status >= 200 && result.status < 300 ? 200 : result.status,
-    });
+    return relayJsonReply(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[MyDict Server Vocab] ${vocabUrl}: ${message}`);
