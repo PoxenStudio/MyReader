@@ -19,6 +19,8 @@ const Alert: React.FC<{
   confirmLabel?: string;
   confirmButtonClassName?: string;
   variant?: AlertVariant;
+  // Replaces the variant glyph (e.g. a small sync icon).
+  icon?: React.ReactNode;
   // Hides the Cancel button for alerts that only ever acknowledge (e.g. an
   // error message) rather than offer a real choice.
   hideCancel?: boolean;
@@ -31,6 +33,7 @@ const Alert: React.FC<{
   confirmLabel,
   confirmButtonClassName = 'btn-warning',
   variant = 'info',
+  icon,
   hideCancel = false,
 }) => {
   const _ = useTranslation();
@@ -56,7 +59,11 @@ const Alert: React.FC<{
         )}
       >
         <div className='labels flex items-start gap-3'>
-          {variant === 'error' ? (
+          {icon ? (
+            <span className='text-info mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center'>
+              {icon}
+            </span>
+          ) : variant === 'error' ? (
             <svg
               xmlns='http://www.w3.org/2000/svg'
               fill='none'
