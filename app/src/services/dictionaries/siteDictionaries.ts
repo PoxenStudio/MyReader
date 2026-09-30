@@ -73,13 +73,26 @@ const getSiteDictConfigUrl = (): string | null => {
 };
 
 /** Tauri: plugin-http with the MyBooks session; web: the same-origin relay. */
-export const fetchSiteDict = async (url: string, signal?: AbortSignal): Promise<Response> => {
-  if (!isTauriAppPlatform()) return fetch(url, { credentials: 'include', signal });
+export const fetchSiteDict = async (
+  url: string,
+  init: { method?: 'GET' | 'POST' | 'DELETE'; json?: unknown; signal?: AbortSignal } = {},
+): Promise<Response> => {
+  const { method = 'GET', json, signal } = init;
+  const body = json === undefined ? undefined : JSON.stringify(json);
+  const headers: Record<string, string> = body ? { 'Content-Type': 'application/json' } : {};
+  if (!isTauriAppPlatform()) {
+    return fetch(url, { method, headers, body, credentials: 'include', signal });
+  }
   const [{ fetch: tauriFetch }, { buildMyBooksCookieHeaders }] = await Promise.all([
     import('@tauri-apps/plugin-http'),
     import('@/services/mybooks/cookieHeaders'),
   ]);
-  return tauriFetch(url, { headers: buildMyBooksCookieHeaders(url), signal });
+  return tauriFetch(url, {
+    method,
+    headers: { ...headers, ...buildMyBooksCookieHeaders(url) },
+    body,
+    signal,
+  });
 };
 
 export const siteDictProviderId = (siteId: string): string => `${SITE_DICT_PREFIX}${siteId}`;
@@ -106,7 +119,7 @@ export const fetchSiteDictConfig = async (): Promise<SiteDictConfig | null> => {
   const url = getSiteDictConfigUrl();
   if (!url) return null;
   try {
-    const res = await fetchSiteDict(url, AbortSignal.timeout(8000));
+    const res = await fetchSiteDict(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     const data: unknown = await res.json();
     return isSiteDictConfig(data) ? data : null;

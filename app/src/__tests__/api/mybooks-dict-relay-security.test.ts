@@ -9,7 +9,11 @@ vi.mock('@/app/api/mybooks/_shared/upstream', async (importOriginal) => {
 
 import { openUpstream, sanitizeResourceContentType } from '@/app/api/mybooks/_shared/upstream';
 import { GET as getMyDictResource } from '@/app/api/mybooks/mydict/res/[...path]/route';
-import { GET as getSiteDict } from '@/app/api/mybooks/site-dict/[...path]/route';
+import {
+  DELETE as deleteSiteDict,
+  GET as getSiteDict,
+  POST as postSiteDict,
+} from '@/app/api/mybooks/site-dict/[...path]/route';
 import {
   GET as getUserSettings,
   PUT as putUserSettings,
@@ -140,6 +144,71 @@ describe('/api/mybooks/site-dict — cookie forwarding', () => {
     );
     expect(response.headers.get('Content-Type')).toBe('application/octet-stream');
     expect(response.headers.get('Content-Security-Policy')).toContain('sandbox');
+  });
+});
+
+describe('/api/mybooks/site-dict — wordbook relay', () => {
+  const HOST = 'https://books.example.com';
+  const req = (method: string, body?: unknown) =>
+    new NextRequest('http://reader.test/api/mybooks/site-dict/x?search=ran', {
+      method,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const upstream = () => {
+    const spy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    return () => {
+      const [url, init] = spy.mock.calls[0]!;
+      return { url: String(url), init: init as RequestInit };
+    };
+  };
+
+  beforeEach(() => {
+    vi.stubEnv('MYBOOKS_INTERNAL_ORIGIN', '');
+  });
+
+  it('lists with the search term', async () => {
+    const call = upstream();
+    await getSiteDict(req('GET'), params([HOST, 'abc', 'vocab']));
+    expect(call().url).toBe(`${HOST}/api/reader/dict/abc/vocab?search=ran`);
+  });
+
+  it('forwards an add as a JSON POST', async () => {
+    const call = upstream();
+    await postSiteDict(
+      req('POST', { word: 'ran', dictionary_id: 4 }),
+      params([HOST, 'abc', 'vocab']),
+    );
+    const { url, init } = call();
+    expect(url).toBe(`${HOST}/api/reader/dict/abc/vocab`);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ word: 'ran', dictionary_id: 4 });
+  });
+
+  it('forwards a remove as a DELETE of that item', async () => {
+    const call = upstream();
+    await deleteSiteDict(req('DELETE'), params([HOST, 'abc', 'vocab', '42']));
+    const { url, init } = call();
+    expect(url).toBe(`${HOST}/api/reader/dict/abc/vocab/42`);
+    expect(init.method).toBe('DELETE');
+  });
+
+  it.each([
+    ['POST', ['abc', 'query']],
+    ['POST', ['config']],
+    ['DELETE', ['abc', 'vocab']],
+    ['DELETE', ['abc', 'vocab', 'x']],
+    ['GET', ['abc', 'vocab', '42']],
+  ] as const)('refuses %s %j', async (method, rest) => {
+    const spy = vi.spyOn(global, 'fetch');
+    const handler = { GET: getSiteDict, POST: postSiteDict, DELETE: deleteSiteDict }[method];
+    const response = await handler(
+      req(method, method === 'POST' ? {} : undefined),
+      params([HOST, ...rest]),
+    );
+    expect(response.status).toBe(404);
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

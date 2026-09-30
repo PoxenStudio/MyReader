@@ -10,6 +10,8 @@ import { relayResourceHeaders } from '@/app/api/mybooks/_shared/upstream';
  *   /api/mybooks/site-dict/<host>/config                 → <host>/api/reader/dict-config
  *   /api/mybooks/site-dict/<host>/<siteId>/query?word=   → <host>/api/reader/dict/<siteId>/query
  *   /api/mybooks/site-dict/<host>/<siteId>/res/<path…>   → <host>/api/reader/dict/<siteId>/res/<path…>
+ *   GET|POST /api/mybooks/site-dict/<host>/<siteId>/vocab → <host>/api/reader/dict/<siteId>/vocab
+ *   DELETE /api/mybooks/site-dict/<host>/<siteId>/vocab/<n> → <host>/api/reader/dict/<siteId>/vocab/<n>
  *
  * MyBooks does the actual dictionary requests (it holds the MyDict addresses
  * and tokens); this route only forwards the browser's MyBooks cookie, so it
@@ -19,12 +21,15 @@ import { relayResourceHeaders } from '@/app/api/mybooks/_shared/upstream';
  * their fonts and images relatively, and a relative URL drops the query
  * string the generic proxy carries the host in.
  *
- * Only the three shapes above are forwarded — this is not a general proxy.
+ * Only the shapes above are forwarded — this is not a general proxy. Writes
+ * (the wordbook's POST / DELETE) reach MyBooks only on the `vocab` paths.
  *
  * Any host is allowed, but the cookie only goes to the internal origin or a
  * host on this request's own origin — never to a foreign host.
  */
 const TIMEOUT_MS = 20000;
+/** A wordbook add is `{word, dictionary_id}`; anything bigger isn't one. */
+const MAX_BODY_BYTES = 4096;
 const SITE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 
 /** First hop of a possibly comma-separated forwarding header. */
@@ -53,9 +58,21 @@ const mayForwardCookie = (request: NextRequest, host: string): boolean => {
   }
 };
 
-const upstreamPath = (rest: string[]): string | null => {
-  if (rest.length === 1 && rest[0] === 'config') return '/api/reader/dict-config';
+type Method = 'GET' | 'POST' | 'DELETE';
+
+const upstreamPath = (rest: string[], method: Method): string | null => {
   const [siteId, action, ...resPath] = rest;
+  if (action === 'vocab' && siteId && SITE_ID_RE.test(siteId)) {
+    if (method === 'DELETE') {
+      const [itemId, ...extra] = resPath;
+      return itemId && /^[1-9]\d{0,17}$/.test(itemId) && extra.length === 0
+        ? `/api/reader/dict/${siteId}/vocab/${itemId}`
+        : null;
+    }
+    return resPath.length === 0 ? `/api/reader/dict/${siteId}/vocab` : null;
+  }
+  if (method !== 'GET') return null;
+  if (rest.length === 1 && rest[0] === 'config') return '/api/reader/dict-config';
   if (!siteId || !SITE_ID_RE.test(siteId)) return null;
   if (action === 'query' && resPath.length === 0) return `/api/reader/dict/${siteId}/query`;
   if (action === 'res' && resPath.length > 0) {
@@ -65,28 +82,45 @@ const upstreamPath = (rest: string[]): string | null => {
   return null;
 };
 
-export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+type Context = { params: Promise<{ path: string[] }> };
+
+export const GET = (request: NextRequest, context: Context) => relay(request, context, 'GET');
+export const POST = (request: NextRequest, context: Context) => relay(request, context, 'POST');
+export const DELETE = (request: NextRequest, context: Context) => relay(request, context, 'DELETE');
+
+async function relay(request: NextRequest, context: Context, method: Method) {
   const { path } = await context.params;
   const [host, ...rest] = path ?? [];
   if (!host || !/^https?:\/\//i.test(host)) {
     return NextResponse.json({ error: 'Invalid MyBooks host' }, { status: 400 });
   }
-  const target = upstreamPath(rest);
+  const target = upstreamPath(rest, method);
   if (!target) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const origin = resolveMyBooksInternalOrigin(host).replace(/\/+$/, '');
   const url = new URL(`${origin}${target}`);
-  if (rest[1] === 'query') {
-    const word = request.nextUrl.searchParams.get('word');
-    if (word) url.searchParams.set('word', word);
+  const param = rest[1] === 'query' ? 'word' : rest[1] === 'vocab' ? 'search' : null;
+  const value = param && method === 'GET' ? request.nextUrl.searchParams.get(param) : null;
+  if (param && value) url.searchParams.set(param, value);
+
+  const requestHeaders: Record<string, string> = mayForwardCookie(request, host)
+    ? { Cookie: request.headers.get('cookie') ?? '' }
+    : {};
+  let body: string | undefined;
+  if (method === 'POST') {
+    body = await request.text();
+    if (body.length > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'Body too large' }, { status: 413 });
+    }
+    requestHeaders['Content-Type'] = 'application/json';
   }
 
   let upstream: Response;
   try {
     upstream = await fetch(url, {
-      headers: mayForwardCookie(request, host)
-        ? { Cookie: request.headers.get('cookie') ?? '' }
-        : {},
+      method,
+      headers: requestHeaders,
+      body,
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (error) {

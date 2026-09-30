@@ -22,8 +22,15 @@
  */
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
-import type { MyDictEntry, VocabCapability, VocabEntryRef, VocabResult } from './types';
+import type {
+  MyDictEntry,
+  SiteDictEntry,
+  VocabCapability,
+  VocabEntryRef,
+  VocabResult,
+} from './types';
 import { buildMyDictVocabUrl } from './providers/myDictUrl';
+import { fetchSiteDict, getSiteDictBase } from './siteDictionaries';
 
 /** Our own relays; web build only (see the module comment). */
 const RELAY_URL = '/api/mybooks/mydict/vocab';
@@ -208,6 +215,57 @@ export const createServerVocab = (label: string): VocabCapability => {
     async removeItem(itemId) {
       try {
         return await resultFromResponse(await relay({ action: 'remove', item_id: itemId }));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  };
+};
+
+/**
+ * Wordbook of a MyDict server the MyBooks admin configured (`server:*`). MyBooks
+ * holds its address and token and relays every call
+ * (`/api/reader/dict/<siteId>/vocab`), so this never talks to MyDict itself —
+ * unlike {@link createMyDictVocab}, which serves the user's own servers.
+ */
+export const createSiteVocab = (entry: SiteDictEntry): VocabCapability => {
+  const vocabUrl = (): string => {
+    const base = getSiteDictBase(entry.siteId);
+    if (!base) throw new Error('Not connected to MyBooks');
+    return `${base}/vocab`;
+  };
+
+  return {
+    label: entry.name,
+    async listSaved(word) {
+      try {
+        const response = await fetchSiteDict(
+          `${vocabUrl()}?search=${encodeURIComponent(word.trim())}`,
+        );
+        if (!response.ok) return new Map();
+        const body = (await response.json()) as { items?: VocabListItem[] };
+        return savedMap(body.items ?? [], word);
+      } catch {
+        return new Map();
+      }
+    },
+    async addEntry(ref) {
+      try {
+        return await resultFromResponse(
+          await fetchSiteDict(vocabUrl(), {
+            method: 'POST',
+            json: { word: ref.word, dictionary_id: ref.dictionaryId },
+          }),
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+    async removeItem(itemId) {
+      try {
+        return await resultFromResponse(
+          await fetchSiteDict(`${vocabUrl()}/${itemId}`, { method: 'DELETE' }),
+        );
       } catch (error) {
         return failure(error);
       }

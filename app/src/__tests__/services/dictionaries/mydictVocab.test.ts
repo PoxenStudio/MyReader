@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createMyDictVocab, createServerVocab } from '@/services/dictionaries/mydictVocab';
+import {
+  createMyDictVocab,
+  createServerVocab,
+  createSiteVocab,
+} from '@/services/dictionaries/mydictVocab';
 
 const { tauriFetchMock } = vi.hoisted(() => ({ tauriFetchMock: vi.fn() }));
 vi.mock('@tauri-apps/plugin-http', () => ({ fetch: tauriFetchMock }));
@@ -164,5 +168,63 @@ describe('mydictVocab', () => {
         dictionary_id: 8,
       });
     });
+  });
+});
+
+describe('createSiteVocab (MyBooks-configured MyDict, always via MyBooks)', () => {
+  const originalPlatform = process.env['NEXT_PUBLIC_APP_PLATFORM'];
+  const entry = { id: 'server:abc', siteId: 'abc', name: 'Han' };
+
+  beforeEach(() => {
+    tauriFetchMock.mockReset();
+    localStorage.setItem('mybooks_host', 'https://books.example.com/');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.removeItem('mybooks_host');
+    if (originalPlatform === undefined) delete process.env['NEXT_PUBLIC_APP_PLATFORM'];
+    else process.env['NEXT_PUBLIC_APP_PLATFORM'] = originalPlatform;
+  });
+
+  it('web: lists, adds and removes through the site-dict relay', async () => {
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'web';
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [{ id: 42, word: 'ran', dictionary_id: 4 }] })),
+      )
+      .mockResolvedValueOnce(new Response('{}'))
+      .mockResolvedValueOnce(new Response('{}'));
+    const vocab = createSiteVocab(entry);
+    const relay = '/api/mybooks/site-dict/https%3A%2F%2Fbooks.example.com/abc/vocab';
+
+    expect([...(await vocab.listSaved('ran'))]).toEqual([[4, 42]]);
+    expect(await vocab.addEntry({ dictionaryId: 4, word: 'ran' })).toEqual({ status: 'ok' });
+    expect(await vocab.removeItem(42)).toEqual({ status: 'ok' });
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => [String(url), init?.method ?? 'GET']);
+    expect(calls).toEqual([
+      [`${relay}?search=ran`, 'GET'],
+      [relay, 'POST'],
+      [`${relay}/42`, 'DELETE'],
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]!.body))).toEqual({
+      word: 'ran',
+      dictionary_id: 4,
+    });
+    expect(tauriFetchMock).not.toHaveBeenCalled();
+  });
+
+  it('tauri: goes to MyBooks, never to the MyDict server', async () => {
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'tauri';
+    tauriFetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'dup' }), { status: 409 }),
+    );
+    const result = await createSiteVocab(entry).addEntry({ dictionaryId: 4, word: 'ran' });
+    expect(result).toEqual({ status: 'duplicate', message: 'dup' });
+    const [url, init] = tauriFetchMock.mock.calls[0]!;
+    expect(url).toBe('https://books.example.com/api/reader/dict/abc/vocab');
+    expect(init.method).toBe('POST');
   });
 });

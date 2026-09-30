@@ -72,6 +72,25 @@ describe('Site dictionary provider', () => {
     expect(imgSrc(container)).toBe(`${base}/res/dict-res/9/res/imgs/qphy.png`);
   });
 
+  it('offers a wordbook star on each dictionary group', async () => {
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'tauri';
+    tauriFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(RESULT)))
+      .mockResolvedValue(new Response(JSON.stringify({ items: [] })));
+    const container = document.createElement('div');
+
+    await lookup(container);
+
+    expect(
+      createSiteDictProvider({ id: 'server:a', siteId: 'a', name: 'Han' }).vocab,
+    ).toBeDefined();
+    await vi.waitFor(() => expect(tauriFetchMock).toHaveBeenCalledTimes(2));
+    expect(String(tauriFetchMock.mock.calls[1]![0])).toBe(
+      `https://books.example.com/api/reader/dict/a/vocab?search=${encodeURIComponent('天性')}`,
+    );
+    expect(container.querySelector('.mydict-vocab-star')).toBeTruthy();
+  });
+
   it('reports unsupported without a MyBooks connection', async () => {
     process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'tauri';
     localStorage.removeItem('mybooks_host');
