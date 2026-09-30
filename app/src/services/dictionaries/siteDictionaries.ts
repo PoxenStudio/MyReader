@@ -15,8 +15,9 @@
  *     dropped (their lookups would only 404), and the rest keep the user's
  *     own toggle.
  *
- * Web-embed only; the Tauri apps never fetch the config.
+ * The web build goes through our relay; the Tauri apps call MyBooks directly.
  */
+import { isTauriAppPlatform } from '@/services/environment';
 import type { DictionarySettings, SiteDictEntry } from './types';
 import { BUILTIN_PROVIDER_IDS, SITE_DICT_PREFIX } from './types';
 
@@ -38,15 +39,47 @@ const MYBOOKS_HOST_KEY = 'mybooks_host';
  * connection.
  */
 export const getSiteDictApiBase = (): string | null => {
+  const host = getMyBooksHost();
+  return host ? `/api/mybooks/site-dict/${encodeURIComponent(host)}` : null;
+};
+
+const getMyBooksHost = (): string | null => {
   if (typeof window === 'undefined') return null;
-  let host: string | null = null;
   try {
-    host = localStorage.getItem(MYBOOKS_HOST_KEY);
+    return localStorage.getItem(MYBOOKS_HOST_KEY)?.replace(/\/+$/, '') || null;
   } catch {
     return null;
   }
-  if (!host) return null;
-  return `/api/mybooks/site-dict/${encodeURIComponent(host.replace(/\/+$/, ''))}`;
+};
+
+/** Base of one site dictionary; `<base>/query` and `<base>/res` hang off it. */
+export const getSiteDictBase = (siteId: string): string | null => {
+  const id = encodeURIComponent(siteId);
+  if (isTauriAppPlatform()) {
+    const host = getMyBooksHost();
+    return host ? `${host}/api/reader/dict/${id}` : null;
+  }
+  const base = getSiteDictApiBase();
+  return base ? `${base}/${id}` : null;
+};
+
+const getSiteDictConfigUrl = (): string | null => {
+  if (isTauriAppPlatform()) {
+    const host = getMyBooksHost();
+    return host ? `${host}/api/reader/dict-config` : null;
+  }
+  const base = getSiteDictApiBase();
+  return base ? `${base}/config` : null;
+};
+
+/** Tauri: plugin-http with the MyBooks session; web: the same-origin relay. */
+export const fetchSiteDict = async (url: string, signal?: AbortSignal): Promise<Response> => {
+  if (!isTauriAppPlatform()) return fetch(url, { credentials: 'include', signal });
+  const [{ fetch: tauriFetch }, { buildMyBooksCookieHeaders }] = await Promise.all([
+    import('@tauri-apps/plugin-http'),
+    import('@/services/mybooks/cookieHeaders'),
+  ]);
+  return tauriFetch(url, { headers: buildMyBooksCookieHeaders(url), signal });
 };
 
 export const siteDictProviderId = (siteId: string): string => `${SITE_DICT_PREFIX}${siteId}`;
@@ -70,13 +103,10 @@ const isSiteDictConfig = (value: unknown): value is SiteDictConfig => {
 
 /** Fetch the admin's dictionary config; `null` when unreachable or malformed. */
 export const fetchSiteDictConfig = async (): Promise<SiteDictConfig | null> => {
-  const base = getSiteDictApiBase();
-  if (!base) return null;
+  const url = getSiteDictConfigUrl();
+  if (!url) return null;
   try {
-    const res = await fetch(`${base}/config`, {
-      credentials: 'include',
-      signal: AbortSignal.timeout(8000),
-    });
+    const res = await fetchSiteDict(url, AbortSignal.timeout(8000));
     if (!res.ok) return null;
     const data: unknown = await res.json();
     return isSiteDictConfig(data) ? data : null;

@@ -17,9 +17,12 @@ import { getLemmaCandidates } from './lemmatize';
  * loop exhausts the exact forms with empty results. Returns `[]` for a blank
  * input.
  */
+/** Longer selections aren't words; skip the lookup (no requests). */
+const MAX_LOOKUP_LENGTH = 50;
+
 export const buildLookupCandidates = (word: string, lang?: string | null): string[] => {
   const trimmed = word.trim();
-  if (!trimmed) return [];
+  if (!trimmed || trimmed.length > MAX_LOOKUP_LENGTH) return [];
   const lower = trimmed.toLowerCase();
   const title = trimmed.charAt(0).toUpperCase() + lower.slice(1);
   const upper = trimmed.toUpperCase();

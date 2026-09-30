@@ -38,6 +38,7 @@ import {
   type RememberedLookupApp,
 } from '@/services/dictionaries/systemDictionary';
 import { testMyDictConnection } from '@/services/dictionaries/providers/myDictProvider';
+import { isServerDictConfigured } from '@/services/dictionaries/providers/serverDictProvider';
 import type {
   ImportedDictionary,
   MyDictEntry,
@@ -335,6 +336,11 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
   // off when the drop target is the first or last row — there's nothing
   // beyond either end, so scrolling further is just visual noise.
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  // Hide the MyDict Service row unless the deployment set MYDICT_SERVER_URL.
+  const [serverDictConfigured, setServerDictConfigured] = useState(false);
+  useEffect(() => {
+    void isServerDictConfigured().then(setServerDictConfigured);
+  }, []);
   const toggleDeleteMode = () =>
     setIsDeleteMode((v) => {
       const next = !v;
@@ -503,6 +509,7 @@ const CustomDictionaries: React.FC<CustomDictionariesProps> = ({ onBack }) => {
         });
         continue;
       }
+      if (id === BUILTIN_PROVIDER_IDS.mydictServer && !serverDictConfigured) continue;
       if (id.startsWith('builtin:')) {
         rows.push({
           id,

@@ -21,6 +21,11 @@ import { httpGetText } from '@/app/api/mybooks/_shared/upstream';
  */
 const TIMEOUT_MS = 15000;
 
+/** Lets the settings list hide the row when no server is configured. */
+export async function GET() {
+  return NextResponse.json({ configured: !!process.env['MYDICT_SERVER_URL']?.trim() });
+}
+
 export async function POST(request: NextRequest) {
   const configured = process.env['MYDICT_SERVER_URL']?.trim() ?? '';
   if (!configured) {

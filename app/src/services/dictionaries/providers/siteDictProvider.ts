@@ -2,16 +2,14 @@
  * Site dictionary provider: a MyDict server configured by the MyBooks admin
  * (see `siteDictionaries.ts`).
  *
- * MyBooks runs the lookup itself (`/api/reader/dict/<siteId>/query`, relayed
- * through `/api/mybooks/site-dict/<host>/…`), so the browser sends only the
- * word — the server address and its token stay in MyBooks. Entry resources
- * are relayed the same way, via `<base>/<siteId>/res/dict-res/…`.
- *
- * Web-embed only: the Tauri apps report it unsupported.
+ * MyBooks runs the lookup itself (`/api/reader/dict/<siteId>/query`), so the
+ * client sends only the word — the server address and its token stay in
+ * MyBooks. Entry resources come the same way, via `<base>/res/dict-res/…`.
+ * The web build goes through `/api/mybooks/site-dict/<host>/…`; Tauri calls
+ * MyBooks directly.
  */
-import { isWebAppPlatform } from '@/services/environment';
 import type { DictionaryLookupOutcome, DictionaryProvider, SiteDictEntry } from '../types';
-import { getSiteDictApiBase } from '../siteDictionaries';
+import { fetchSiteDict, getSiteDictBase } from '../siteDictionaries';
 import { renderMyBooksResults } from './myBooksDictProvider';
 import type { MyDictQueryResponse } from './myDictQuery';
 
@@ -20,16 +18,15 @@ export const createSiteDictProvider = (entry: SiteDictEntry): DictionaryProvider
   kind: 'builtin',
   label: entry.name,
   async lookup(word, ctx): Promise<DictionaryLookupOutcome> {
-    const base = isWebAppPlatform() ? getSiteDictApiBase() : null;
-    if (!base) return { ok: false, reason: 'unsupported' };
+    const dictBase = getSiteDictBase(entry.siteId);
+    if (!dictBase) return { ok: false, reason: 'unsupported' };
     const trimmed = word.trim();
     if (!trimmed) return { ok: false, reason: 'empty' };
-    const dictBase = `${base}/${encodeURIComponent(entry.siteId)}`;
     try {
-      const response = await fetch(`${dictBase}/query?word=${encodeURIComponent(trimmed)}`, {
-        credentials: 'include',
-        signal: ctx.signal,
-      });
+      const response = await fetchSiteDict(
+        `${dictBase}/query?word=${encodeURIComponent(trimmed)}`,
+        ctx.signal,
+      );
       if (ctx.signal.aborted) return { ok: false, reason: 'error', message: 'aborted' };
       // 404 = the admin deleted this dictionary since the settings were last
       // reconciled; nothing to show rather than an error card.

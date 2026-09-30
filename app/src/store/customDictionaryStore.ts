@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { EnvConfigType, isWebAppPlatform } from '@/services/environment';
+import { EnvConfigType, isTauriAppPlatform, isWebAppPlatform } from '@/services/environment';
 import type {
   DictionarySettings,
   ImportedDictionary,
@@ -697,9 +697,10 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
 
       // Pull the cross-device copy. Compares server timestamps only; an
       // unpushed local edit wins and is pushed instead.
-      if (isWebAppPlatform()) {
+      const web = isWebAppPlatform();
+      if (web || isTauriAppPlatform()) {
         const [remote, siteConfig] = await Promise.all([
-          fetchServerDictSettings(),
+          web ? fetchServerDictSettings() : null,
           fetchSiteDictConfig(),
         ]);
         const local = get().settings;
@@ -712,7 +713,7 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
           const reconciled = applyRemoteDictSettings(local, remote.settings);
           set({ settings: { ...reconciled, dictSyncedAt: remote.updatedAt } });
           persistLocally(envConfig);
-        } else if (local.dictSyncDirty) {
+        } else if (web && local.dictSyncDirty) {
           schedulePush(envConfig);
         }
 
@@ -739,7 +740,6 @@ export const useCustomDictionaryStore = create<DictionaryStoreState>((set, get) 
   },
 
   syncSiteDictionaries: async (envConfig) => {
-    if (!isWebAppPlatform()) return false;
     const siteConfig = await fetchSiteDictConfig();
     if (!siteConfig) return false;
     const current = get().settings;

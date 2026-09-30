@@ -8,11 +8,17 @@
  * `/api/mybooks/mydict/query` (the API sends no CORS headers).
  */
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { eventDispatcher } from '@/utils/event';
 import { isTauriAppPlatform } from '@/services/environment';
 import { stubTranslation as _ } from '@/utils/misc';
 import { sanitizeDictionaryHtml } from '@/utils/sanitize';
 import { BUILTIN_PROVIDER_IDS } from '../types';
-import type { DictionaryLookupOutcome, DictionaryProvider } from '../types';
+import type {
+  DictionaryLookupOutcome,
+  DictionaryProvider,
+  VocabCapability,
+  VocabResult,
+} from '../types';
 import { queryMyDict, type MyDictResult } from './myDictQuery';
 import { buildMyDictResourceUrl } from './myDictUrl';
 import { AUDIO_BOUND, wireDictAudio } from '../dictAudio';
@@ -37,6 +43,8 @@ export interface MyBooksRenderOptions {
   /** The book's content language (e.g. 'ja'); the language tabs default to it. */
   lang?: string;
   isDarkMode?: boolean;
+  /** 该 provider 服务器的生词本；给了就在每个词典分组头渲染星标。 */
+  vocab?: VocabCapability;
 }
 
 /** Root-relative prefix the server puts on entry resources. */
@@ -176,6 +184,21 @@ const DICT_CHROME_CSS = `
   summary.mydict-group-head:hover { color: color-mix(in srgb, currentColor 75%, transparent); }
   summary.mydict-group-head:hover .mydict-group-chevron { opacity: 0.8; }
   .mydict-group-name { font-weight: 600; }
+  /* 生词本星标：每个词典分组一个，状态以服务端为准（★ 已收藏 / ☆ 未收藏） */
+  .mydict-vocab-star {
+    flex: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1em;
+    line-height: 1;
+    padding: 0 0.15em;
+    opacity: 0.55;
+  }
+  .mydict-vocab-star:hover { opacity: 1; }
+  .mydict-vocab-star.saved { color: #d9a400; opacity: 1; }
+  .mydict-vocab-star[disabled] { cursor: progress; opacity: 0.4; }
   .mydict-group-count,
   .mydict-lang-badge {
     font-size: 0.75em;
@@ -234,6 +257,100 @@ const absolutizeResourceRefs = (root: ParentNode, baseUrl: string): void => {
     if (raw) el.setAttribute(attr, resolveResourceRef(raw, baseUrl));
   });
 };
+
+/**
+ * 分组头里的生词本星标——每个词典分组一个。生词本是**词条级**的
+ * （`(词典, 词头)` 一条），所以「存哪部词典的释义」由用户点哪个星标决定，而不是系统
+ * 替他挑一条（中文词典的『人気』与 NHK 的『人気』可以并存）。
+ *
+ * 状态以服务端为准：挂载时查一次（`listSaved`），每次增删后再对账，所以别的设备上的
+ * 改动也能自愈。点击不冒泡——分组头在结果卡片里，冒泡会把卡片折叠掉。
+ */
+const attachVocabStar = (summary: HTMLElement, options: VocabOptions): void => {
+  const { capability, dictionaryId, word, translate } = options;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'mydict-vocab-star';
+  let itemId: number | null = null;
+  let busy = false;
+
+  const render = (): void => {
+    const saved = itemId !== null;
+    button.textContent = saved ? '★' : '☆';
+    button.classList.toggle('saved', saved);
+    button.disabled = busy;
+    const label = saved ? translate('Remove from Wordbook') : translate('Add to Wordbook');
+    button.setAttribute('aria-label', label);
+    button.title = `${label}（${capability.label}）`;
+  };
+
+  const notify = (type: 'success' | 'warning' | 'error', message: string): void => {
+    eventDispatcher.dispatch('toast', { type, timeout: 4000, message });
+  };
+
+  const reportFailure = (result: VocabResult): void => {
+    if (result.status === 'duplicate') {
+      notify('warning', result.message ?? translate('Already in Wordbook'));
+    } else if (result.status === 'unauthorized') {
+      notify('error', translate('Wordbook unavailable, check the MyDict token'));
+    } else if (result.status === 'error') {
+      notify('error', result.message);
+    }
+  };
+
+  /** 与服务端对账，拿到该词在这部词典里的条目 id（增删后也靠它收敛）。 */
+  const sync = async (): Promise<void> => {
+    try {
+      itemId = (await capability.listSaved(word)).get(dictionaryId) ?? null;
+    } catch {
+      itemId = null;
+    }
+    render();
+  };
+
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) return;
+    busy = true;
+    render();
+    void (async () => {
+      try {
+        if (itemId === null) {
+          const result = await capability.addEntry({ dictionaryId, word });
+          if (result.status === 'ok') {
+            notify('success', `${translate('Added to Wordbook')}（${capability.label}）`);
+          } else {
+            reportFailure(result);
+          }
+        } else {
+          const result = await capability.removeItem(itemId);
+          if (result.status === 'ok') {
+            notify('success', `${translate('Remove from Wordbook')}（${capability.label}）`);
+          } else {
+            reportFailure(result);
+          }
+        }
+        await sync();
+      } finally {
+        busy = false;
+        render();
+      }
+    })();
+  });
+
+  render();
+  void sync();
+  summary.appendChild(button);
+};
+
+/** {@link attachVocabStar} needs. */
+interface VocabOptions {
+  capability: VocabCapability;
+  dictionaryId: number;
+  word: string;
+  translate: (key: string) => string;
+}
 
 /* ------------------------------------------------------------- entry CSS */
 
@@ -515,6 +632,18 @@ export const renderMyBooksResults = (
       badge.className = 'mydict-lang-badge';
       badge.textContent = translate('Other language');
       summary.appendChild(badge);
+    }
+
+    // 生词本星标：词条级生词本按 (词典, 词头) 定位，所以发该组首条命中的 word，
+    // 而不是读者的选区原文（MyDict 是前缀匹配，选区可能不是词头）。
+    const firstHit = group.items[0];
+    if (options.vocab && firstHit && typeof firstHit.dictionary_id === 'number' && firstHit.word) {
+      attachVocabStar(summary, {
+        capability: options.vocab,
+        dictionaryId: firstHit.dictionary_id,
+        word: firstHit.word,
+        translate,
+      });
     }
 
     details.appendChild(summary);

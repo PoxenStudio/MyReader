@@ -24,6 +24,17 @@ export const buildMyDictQueryUrl = (baseUrl: string, word: string): string => {
   return url.toString();
 };
 
+/**
+ * Builds `<base>/api/v1/vocab` — the wordbook (生词本) endpoint. The server
+ * looks the entry up itself and snapshots its phonetic/definition, so the
+ * client only sends the word (plus the dictionary id it came from).
+ */
+export const buildMyDictVocabUrl = (baseUrl: string): string => {
+  let base = baseUrl.trim().replace(/\/+$/, '');
+  if (!/\/api\/v1\/vocab$/.test(base)) base += '/api/v1/vocab';
+  return base;
+};
+
 /** Same-origin relay that streams a MyDict server's entry resources. */
 const MYDICT_RESOURCE_RELAY = '/api/mybooks/mydict/res';
 

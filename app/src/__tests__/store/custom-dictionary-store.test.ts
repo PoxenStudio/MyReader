@@ -5,6 +5,9 @@ import { BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
 import { useSettingsStore } from '@/store/settingsStore';
 import type { EnvConfigType } from '@/services/environment';
 
+const tauriFetchMock = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/plugin-http', () => ({ fetch: tauriFetchMock }));
+
 const ZERO = (s: string) => s.startsWith('web:builtin:');
 
 describe('customDictionaryStore — web search CRUD', () => {
@@ -705,5 +708,76 @@ describe('customDictionaryStore — site dictionaries (embedded web build)', () 
       expect(after.dictSyncDirty).toBe(true);
       expect(after.dictSyncedAt).toBe(100);
     });
+  });
+});
+
+describe('customDictionaryStore — site dictionaries (Tauri, direct to MyBooks)', () => {
+  type SettingsState = ReturnType<typeof useSettingsStore.getState>;
+  const SITE_CONFIG = {
+    mybooks: false,
+    baike: true,
+    mydicts: [{ id: 'a', name: 'Han', enabled: true }],
+  };
+  const fakeEnv = {
+    getAppService: () => Promise.resolve({ exists: vi.fn().mockResolvedValue(true) }),
+  } as unknown as EnvConfigType;
+  const originalPlatform = process.env['NEXT_PUBLIC_APP_PLATFORM'];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env['NEXT_PUBLIC_APP_PLATFORM'] = 'tauri';
+    localStorage.setItem('mybooks_host', 'https://books.example.com/');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        throw new Error(`unexpected webview fetch ${String(input)}`);
+      }),
+    );
+    tauriFetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://books.example.com/api/reader/dict-config') {
+        return new Response(JSON.stringify(SITE_CONFIG));
+      }
+      throw new Error(`unexpected tauri fetch ${url}`);
+    });
+    useSettingsStore.setState({
+      settings: {
+        customDictionaries: [],
+        dictionarySettings: {
+          providerOrder: ['builtin:wiktionary', 'builtin:mybooks'],
+          providerEnabled: { 'builtin:wiktionary': true, 'builtin:mybooks': true },
+          webSearches: [],
+          dictModifiedAt: 5,
+        },
+      } as unknown as SettingsState['settings'],
+      setSettings: (s: SettingsState['settings']) => useSettingsStore.setState({ settings: s }),
+      saveSettings: vi.fn().mockResolvedValue(undefined),
+    } as unknown as SettingsState);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.removeItem('mybooks_host');
+    if (originalPlatform === undefined) delete process.env['NEXT_PUBLIC_APP_PLATFORM'];
+    else process.env['NEXT_PUBLIC_APP_PLATFORM'] = originalPlatform;
+  });
+
+  it('picks up site dictionaries on load without touching existing toggles', async () => {
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    const after = useCustomDictionaryStore.getState().settings;
+    expect(after.providerEnabled['server:a']).toBe(true);
+    expect(after.providerEnabled['builtin:wiktionary']).toBe(true);
+    expect(after.providerEnabled['builtin:mybooks']).toBe(true);
+  });
+
+  it('syncSiteDictionaries applies the server state', async () => {
+    await useCustomDictionaryStore.getState().loadCustomDictionaries(fakeEnv);
+    await expect(useCustomDictionaryStore.getState().syncSiteDictionaries(fakeEnv)).resolves.toBe(
+      true,
+    );
+    const after = useCustomDictionaryStore.getState().settings;
+    expect(after.providerEnabled['builtin:wiktionary']).toBe(false);
+    expect(after.providerEnabled['server:a']).toBe(true);
+    expect(after.dictSyncDirty).toBeUndefined();
   });
 });

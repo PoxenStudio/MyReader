@@ -3,6 +3,12 @@ import { describe, it, expect } from 'vitest';
 import { buildLookupCandidates } from '@/services/dictionaries/lookupCandidates';
 
 describe('buildLookupCandidates', () => {
+  it('returns no candidates for a selection over 50 characters', () => {
+    expect(buildLookupCandidates('a'.repeat(51))).toEqual([]);
+    expect(buildLookupCandidates('字'.repeat(51))).toEqual([]);
+    expect(buildLookupCandidates(`  ${'a'.repeat(50)}  `)).toHaveLength(3);
+  });
+
   it('returns the lowercase word for an already-lowercase selection', () => {
     expect(buildLookupCandidates('hello')).toEqual(['hello', 'Hello', 'HELLO']);
   });
