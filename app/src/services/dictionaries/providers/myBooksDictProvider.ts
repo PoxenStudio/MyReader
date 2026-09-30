@@ -292,7 +292,7 @@ const attachVocabStar = (summary: HTMLElement, options: VocabOptions): void => {
     if (result.status === 'duplicate') {
       notify('warning', result.message ?? translate('Already in Wordbook'));
     } else if (result.status === 'unauthorized') {
-      notify('error', translate('Wordbook unavailable — check the MyDict token'));
+      notify('error', translate('Wordbook unavailable, check the MyDict token'));
     } else if (result.status === 'error') {
       notify('error', result.message);
     }
