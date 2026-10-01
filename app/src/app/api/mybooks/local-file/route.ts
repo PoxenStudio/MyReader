@@ -26,9 +26,10 @@ import { resolveMyBooksInternalOrigin } from '@/utils/mybooksInternalOrigin';
 const MIME_BY_EXT: Record<string, string> = {
   '.epub': 'application/epub+zip',
   '.pdf': 'application/pdf',
+  '.fb2': 'application/x-fictionbook+xml',
 };
 
-const ALLOWED_FORMATS = new Set(['epub', 'pdf']);
+const ALLOWED_FORMATS = new Set(['epub', 'pdf', 'fb2']);
 
 interface FilepathLookupResponse {
   err?: string;
