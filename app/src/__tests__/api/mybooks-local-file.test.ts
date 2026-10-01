@@ -41,7 +41,7 @@ describe('/api/mybooks/local-file', () => {
     expect((await GET(makeRequest('bookId=42'))).status).toBe(400);
   });
 
-  it('400s on a format other than epub/pdf, without ever calling MyBooks', async () => {
+  it('400s on a format other than epub/pdf/fb2, without ever calling MyBooks', async () => {
     const fetchSpy = mockFilepathLookup({ err: 'ok', data: { path: filePath } });
     const { GET } = await import('@/app/api/mybooks/local-file/route');
 
@@ -102,7 +102,7 @@ describe('/api/mybooks/local-file', () => {
     expect(response.status).toBe(403);
   });
 
-  it('403s when the MyBooks-returned path has an extension other than .epub/.pdf', async () => {
+  it('403s when the MyBooks-returned path has an extension other than .epub/.pdf/.fb2', async () => {
     const txtPath = path.join(dir, 'notes.txt');
     writeFileSync(txtPath, fileContent);
     mockFilepathLookup({ err: 'ok', data: { path: txtPath } });
@@ -140,6 +140,18 @@ describe('/api/mybooks/local-file', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Accept-Ranges')).toBe('bytes');
     expect(response.headers.get('Content-Length')).toBe(String(fileContent.length));
+    expect(await response.text()).toBe(fileContent);
+  });
+
+  it('serves an .fb2 file with the FictionBook MIME type', async () => {
+    const fb2Path = path.join(dir, 'a book (2024).fb2');
+    writeFileSync(fb2Path, fileContent);
+    mockFilepathLookup({ err: 'ok', data: { path: fb2Path } });
+    const { GET } = await import('@/app/api/mybooks/local-file/route');
+
+    const response = await GET(makeRequest('bookId=42&format=fb2'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('application/x-fictionbook+xml');
     expect(await response.text()).toBe(fileContent);
   });
 

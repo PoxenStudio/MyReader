@@ -248,6 +248,26 @@ describe('ensureMyBooksBookLocal', () => {
       expect(useLibraryStore.getState().getBookByHash(result.hash)).toBe(result);
     });
 
+    test('fb2 streams like epub/pdf: EMBED_FORMATS resolves it and the local-file url carries format=fb2', async () => {
+      const fetchSpy = vi
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(new Response(null, { status: 200 }));
+      getBookDetail.mockResolvedValue(makeCloudBook());
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(false) });
+
+      const result = await ensureMyBooksBookLocal({ bookId: 42, format: 'fb2', appService });
+
+      expect(result.format).toBe('FB2');
+      expect(result.sourceFormat).toBe('FB2');
+      expect(result.hash).toBe(buildCloudBookHash(42, 'FB2'));
+      expect(result.url).toBe('http://localhost:3000/api/mybooks/local-file?bookId=42&format=fb2');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://localhost:3000/api/mybooks/local-file?bookId=42&format=fb2',
+        expect.objectContaining({ method: 'HEAD', credentials: 'include' }),
+      );
+      expect(appService.downloadBook).not.toHaveBeenCalled();
+    });
+
     test('probe succeeds, entry exists without bytes: switches it to streaming instead of downloading, persists the updated url, and fills in metadata it never had', async () => {
       vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
       getBookDetail.mockResolvedValue(makeCloudBook({ publisher: 'Pub Co', rating: 6 }));

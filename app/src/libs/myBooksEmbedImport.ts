@@ -12,6 +12,7 @@ import { ProgressHandler } from '@/utils/transfer';
 const EMBED_FORMATS: Record<string, BookFormat> = {
   epub: 'EPUB',
   pdf: 'PDF',
+  fb2: 'FB2',
 };
 
 export const resolveEmbedFormat = (format?: string | null): BookFormat | undefined =>
