@@ -22,6 +22,7 @@ import type {
 import { queryMyDict, type MyDictResult } from './myDictQuery';
 import { buildMyDictResourceUrl } from './myDictUrl';
 import { AUDIO_BOUND, wireDictAudio } from '../dictAudio';
+import { wireEntryImageInteractions } from './dictEntryImages';
 
 // Rendered through `translate` (the popup's `_`), which i18next-scanner can't
 // see; declared here so extraction keeps these keys.
@@ -784,6 +785,8 @@ export const renderMyBooksResults = (
       },
     );
     wireLinks(body, options.onNavigate);
+    // 词条图片交互（牛津拓展图原地展开、扫描版大图幻灯片）：从扩展移植回来。
+    wireEntryImageInteractions(body);
     if (options.isDarkMode) adaptToDarkTheme(body);
 
     // Initial visibility follows the default tab; only the first group visible
