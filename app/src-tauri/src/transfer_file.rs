@@ -297,12 +297,14 @@ pub async fn download_file(
 
     let file = Arc::new(tokio::sync::Mutex::new(file));
     let progress = Arc::new(tokio::sync::Mutex::new(TransferStats::default()));
+    let failure: Arc<tokio::sync::Mutex<Option<String>>> = Arc::new(tokio::sync::Mutex::new(None));
 
     stream::iter(0..part_count)
         .for_each_concurrent(8, |i| {
             let client = client.clone();
             let file = Arc::clone(&file);
             let progress = Arc::clone(&progress);
+            let failure = Arc::clone(&failure);
             let headers = headers.clone();
             let url = url.to_string();
             let on_progress = on_progress.clone();
@@ -312,25 +314,38 @@ pub async fn download_file(
                 let end = min(start + PART_SIZE - 1, total - 1);
                 let range_header = format!("bytes={start}-{end}");
 
-                let mut req = client.get(&url).header("Range", range_header);
-                for (key, value) in headers {
-                    req = req.header(key, value);
+                // A silently-dropped part would leave a zero-filled hole in the
+                // pre-allocated file (a corrupt book that still "downloads"), so
+                // retry and surface the failure instead.
+                let expected_len = end - start + 1;
+                let mut last_err = String::new();
+                let mut fetched = None;
+                for _ in 0..3 {
+                    let mut req = client.get(&url).header("Range", range_header.as_str());
+                    for (key, value) in headers.iter() {
+                        req = req.header(key, value);
+                    }
+                    match req.send().await {
+                        Ok(resp) if resp.status() == reqwest::StatusCode::PARTIAL_CONTENT => {
+                            match resp.bytes().await {
+                                Ok(b) if b.len() as u64 == expected_len => {
+                                    fetched = Some(b);
+                                    break;
+                                }
+                                Ok(b) => last_err = format!("short part: {} bytes", b.len()),
+                                Err(e) => last_err = e.to_string(),
+                            }
+                        }
+                        Ok(resp) => last_err = format!("status {}", resp.status()),
+                        Err(e) => last_err = e.to_string(),
+                    }
                 }
-
-                let resp = match req.send().await {
-                    Ok(r) => r,
-                    Err(_) => return,
-                };
-
-                if !resp.status().is_success()
-                    && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT
-                {
+                let Some(bytes) = fetched else {
+                    failure
+                        .lock()
+                        .await
+                        .get_or_insert(format!("part {i} failed: {last_err}"));
                     return;
-                }
-
-                let bytes = match resp.bytes().await {
-                    Ok(b) => b,
-                    Err(_) => return,
                 };
 
                 {
@@ -351,6 +366,12 @@ pub async fn download_file(
             }
         })
         .await;
+
+    if let Some(msg) = failure.lock().await.take() {
+        drop(file);
+        let _ = tokio::fs::remove_file(file_path).await;
+        return Err(Error::UnexpectedResponse(msg));
+    }
 
     Ok(resp_headers)
 }
