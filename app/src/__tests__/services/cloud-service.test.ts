@@ -540,6 +540,27 @@ describe('cloudService', () => {
       expect(webDownloadMock).not.toHaveBeenCalled();
     });
 
+    test('retries a failed cover download and still marks the cover downloaded', async () => {
+      const book = createMockBook({
+        hash: 'cloud-123-pdf',
+        format: 'PDF' as BookFormat,
+        originCoverUrl: 'https://mybooks.example.com/get/cover/123.jpg',
+        coverDownloadedAt: undefined,
+        files: [{ format: 'PDF' as BookFormat, size: 2, href: '/api/book/123.pdf' }],
+      });
+      // book file ok, cover fails twice with a network error, then succeeds
+      downloadFileMock
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('error sending request'))
+        .mockRejectedValueOnce(new Error('error sending request'))
+        .mockResolvedValueOnce(undefined);
+
+      await downloadMyBooksBook(mockAppService, mockFs, 'Books', book);
+
+      expect(downloadFileMock).toHaveBeenCalledTimes(4);
+      expect(book.coverDownloadedAt).toBeTruthy();
+    });
+
     test('on Tauri, passes the stored MyBooks session cookie as an explicit header', async () => {
       // The native Rust downloader's reqwest client doesn't share the
       // webview's cookie jar, so the session cookie captured at login

@@ -178,6 +178,24 @@ export async function downloadMyBooksUrl(
   }
 }
 
+const COVER_DOWNLOAD_MAX_RETRIES = 3;
+const COVER_DOWNLOAD_RETRY_DELAY_MS = 300;
+
+async function downloadMyBooksUrlWithRetry(
+  appService: AppService,
+  url: string,
+  dst: string,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await downloadMyBooksUrl(appService, url, dst);
+    } catch (error) {
+      if (attempt > COVER_DOWNLOAD_MAX_RETRIES) throw error;
+      await new Promise((r) => setTimeout(r, COVER_DOWNLOAD_RETRY_DELAY_MS * attempt));
+    }
+  }
+}
+
 export async function downloadMyBooksBook(
   appService: AppService,
   fs: FileSystem,
@@ -301,7 +319,7 @@ export async function downloadMyBooksBook(
         : `/api/mybooks/download?url=${encodeURIComponent(coverUrl)}`;
       const coverLfp = getCoverFilename(book);
       const coverDst = `${localBooksDir}/${coverLfp}`;
-      await downloadMyBooksUrl(appService, coverDownloadUrl, coverDst);
+      await downloadMyBooksUrlWithRetry(appService, coverDownloadUrl, coverDst);
 
       const coverDownloaded = await fs.exists(coverLfp, 'Books');
       if (coverDownloaded) {
