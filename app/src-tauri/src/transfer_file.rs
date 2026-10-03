@@ -326,7 +326,12 @@ pub async fn download_file(
                         req = req.header(key, value);
                     }
                     match req.send().await {
-                        Ok(resp) if resp.status() == reqwest::StatusCode::PARTIAL_CONTENT => {
+                        // A range covering the whole file may get a plain 200.
+                        Ok(resp)
+                            if resp.status() == reqwest::StatusCode::PARTIAL_CONTENT
+                                || (resp.status() == reqwest::StatusCode::OK
+                                    && expected_len == total) =>
+                        {
                             match resp.bytes().await {
                                 Ok(b) if b.len() as u64 == expected_len => {
                                     fetched = Some(b);
