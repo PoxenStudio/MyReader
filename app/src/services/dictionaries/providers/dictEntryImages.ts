@@ -46,10 +46,12 @@ const LIGHTBOX_CSS = `
     inset: 0;
     z-index: 2147483647;
     overflow: hidden;
-    background: rgba(10, 14, 12, 0.86);
+    /* 默认浅色：扫描版词典整页图多为白底，深色遮罩会淹没内容；右下角按钮可切深色 */
+    background: #f2f2f2;
     touch-action: none;
     cursor: grab;
   }
+  .overlay.dark { background: #0a0a0a; }
   .overlay.dragging { cursor: grabbing; }
   .overlay img {
     position: absolute;
@@ -70,13 +72,14 @@ const LIGHTBOX_CSS = `
     height: 72px;
     border: none;
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.16);
-    color: #fff;
+    /* 半透明深色胶囊：浅色/深色两种背景下都清晰（白色半透明在浅色态会隐形） */
+    background: rgba(0, 0, 0, 0.45);
+    color: #f2f5f4;
     font-size: 30px;
     line-height: 1;
     cursor: pointer;
   }
-  .nav:hover { background: rgba(255, 255, 255, 0.28); }
+  .nav:hover { background: rgba(0, 0, 0, 0.65); }
   .nav.prev { left: 16px; }
   .nav.next { right: 16px; }
   .nav[hidden] { display: none; }
@@ -88,13 +91,28 @@ const LIGHTBOX_CSS = `
     margin: 0;
     padding: 4px 12px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.16);
-    color: #fff;
+    background: rgba(0, 0, 0, 0.5);
+    color: #f2f5f4;
     font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
     pointer-events: none;
     white-space: nowrap;
   }
   .hint[hidden] { display: none; }
+  /* 右下角背景切换：hint 靠左居中，本按钮靠右，同高不冲突 */
+  .bg-toggle {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    z-index: 2;
+    padding: 4px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.45);
+    color: #f2f5f4;
+    font: 12px/1.6 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    cursor: pointer;
+  }
+  .bg-toggle:hover { background: rgba(0, 0, 0, 0.65); }
 `;
 
 /* ------------------------------ 展开与收起 ------------------------------ */
@@ -210,6 +228,12 @@ const createLightbox = (): LightboxInstance & { onClose?: () => void } => {
   nextBtn.textContent = '›';
   const hint = document.createElement('p');
   hint.className = 'hint';
+  // 背景手动切换（与桌面端 mydict-desktop/ui-viewer.ts 同款）：默认浅色
+  // #f2f2f2——扫描版词典整页图多为白底，默认深色遮罩会淹没内容。
+  const bgBtn = document.createElement('button');
+  bgBtn.type = 'button';
+  bgBtn.className = 'bg-toggle';
+  overlay.appendChild(bgBtn);
   overlay.append(prevBtn, nextBtn, hint);
   shadow.append(style, overlay);
 
@@ -226,6 +250,14 @@ const createLightbox = (): LightboxInstance & { onClose?: () => void } => {
   let pointerStartY = 0;
   let offsetStartX = 0;
   let offsetStartY = 0;
+  let bgDark = false; // 默认浅色（与桌面端一致）；不持久化，行为与桌面端对齐
+
+  /** 应用当前背景态并同步按钮文案：文案提示的是「点下去会切到什么」。 */
+  const applyBg = () => {
+    overlay.classList.toggle('dark', bgDark);
+    bgBtn.textContent = bgDark ? '☀ 浅色背景' : '🌙 深色背景';
+  };
+  applyBg();
 
   /** 让整张图完整可见并居中；缩放上下限都相对这个基准。 */
   const fitToViewport = () => {
@@ -358,6 +390,13 @@ const createLightbox = (): LightboxInstance & { onClose?: () => void } => {
   overlay.addEventListener('pointerup', onPointerUp);
   overlay.addEventListener('pointercancel', onPointerUp);
   overlay.addEventListener('click', onOverlayClick);
+  // 按钮上的按下/点击都不能冒泡到遮罩：否则会被当成「点空白」或开启拖动
+  bgBtn.addEventListener('pointerdown', (event) => event.stopPropagation());
+  bgBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    bgDark = !bgDark;
+    applyBg();
+  });
   prevBtn.addEventListener('pointerdown', (event) => event.stopPropagation());
   nextBtn.addEventListener('pointerdown', (event) => event.stopPropagation());
   prevBtn.addEventListener('click', (event) => {
