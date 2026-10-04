@@ -251,6 +251,10 @@ const MYBOOKS_REQUEST_TIMEOUT_MS = 5000;
 const MYBOOKS_REQUEST_MAX_RETRIES = 3;
 const MYBOOKS_RETRY_DELAY_MS = 300;
 
+// Debug switch: flip to true by hand when building a test package; off by default.
+// Logs one `[status][cost][method][path]` line per request.
+const DEBUG_REQUEST_TIMING = false;
+
 export async function fetchMyBooks<T>(
   endpoint: string,
   params?: Record<string, string | number>,
@@ -329,9 +333,12 @@ export async function fetchMyBooks<T>(
     const controller = new AbortController();
     fetchOptions.signal = controller.signal;
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = performance.now();
+    let status: number | string = 'ERR';
 
     try {
       const response = await fetchFn(url.toString(), fetchOptions);
+      status = response.status;
       // Opportunistically keep `mybooks_tauri_cookie` (the store the native
       // downloader and WS sync channel read explicitly — see
       // tauriCookieStore.ts) in sync with whatever session is actually live,
@@ -373,6 +380,10 @@ export async function fetchMyBooks<T>(
       throw error;
     } finally {
       clearTimeout(timeoutId);
+      if (DEBUG_REQUEST_TIMING) {
+        const cost = (performance.now() - startedAt).toFixed(2);
+        console.log(`[${status}][${cost}ms][${method}][${url.pathname}${url.search}]`);
+      }
     }
   }
   if (host) useMyBooksStatusStore.getState().setOffline(false);
