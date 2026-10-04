@@ -5,6 +5,7 @@
 
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
+import { logTime } from '@/utils/misc';
 import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useNasDeviceStore } from '@/store/nasDeviceStore';
@@ -382,7 +383,9 @@ export async function fetchMyBooks<T>(
       clearTimeout(timeoutId);
       if (DEBUG_REQUEST_TIMING) {
         const cost = (performance.now() - startedAt).toFixed(2);
-        console.log(`[${status}][${cost}ms][${method}][${url.pathname}${url.search}]`);
+        console.log(
+          `[MyBooks][${logTime()}][${status}][${cost}ms][${method}][${url.pathname}${url.search}]`,
+        );
       }
     }
   }

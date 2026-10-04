@@ -1,5 +1,6 @@
 'use client';
 
+import { logTime } from '@/utils/misc';
 import clsx from 'clsx';
 import * as React from 'react';
 import { MdChevronRight } from 'react-icons/md';
@@ -1225,7 +1226,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
           });
           if (DEBUG_DOWNLOAD_TIMING) {
             const cost = (performance.now() - downloadStartedAt).toFixed(2);
-            console.log(`[handleBookDownload][${book.hash}][${cost}ms]`);
+            console.log(`[${logTime()}][handleBookDownload][${book.hash}][${cost}ms]`);
           }
           console.log(
             '[handleBookDownload] downloadBook finished. book state after download:',
