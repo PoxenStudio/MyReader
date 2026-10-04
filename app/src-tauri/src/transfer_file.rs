@@ -21,6 +21,8 @@ use read_progress_stream::ReadProgressStream;
 use std::time::Instant;
 use std::{collections::HashMap, sync::Arc};
 
+const DEBUG_DOWNLOAD_TIMING: bool = true;
+
 type Result<T> = std::result::Result<T, Error>;
 
 // The TransferStats struct tracks both transfer speed and cumulative transfer progress.
@@ -188,6 +190,7 @@ pub async fn download_file(
     use tokio::io::AsyncSeekExt;
 
     ensure_path_allowed(&app, file_path)?;
+    let download_started = Instant::now();
 
     const PART_SIZE: u64 = 1024 * 1024;
 
@@ -198,6 +201,7 @@ pub async fn download_file(
     let force_single = single_threaded.unwrap_or(false);
 
     async fn single_threaded_download(
+        download_started: Instant,
         client: &reqwest::Client,
         url: &str,
         file_path: &str,
@@ -246,12 +250,19 @@ pub async fn download_file(
             });
         }
         file.flush().await?;
+        if DEBUG_DOWNLOAD_TIMING {
+            log::info!(
+                "[download][single][{}B][{:.2}ms]",
+                stats.total_transferred,
+                download_started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
 
         Ok(resp_headers)
     }
 
     if force_single {
-        return single_threaded_download(&client, url, file_path, &headers, &body, on_progress)
+        return single_threaded_download(download_started, &client, url, file_path, &headers, &body, on_progress)
             .await;
     }
 
@@ -286,7 +297,7 @@ pub async fn download_file(
     }
 
     if !accept_ranges || total == 0 {
-        return single_threaded_download(&client, url, file_path, &headers, &body, on_progress)
+        return single_threaded_download(download_started, &client, url, file_path, &headers, &body, on_progress)
             .await;
     }
 
@@ -310,6 +321,7 @@ pub async fn download_file(
             let on_progress = on_progress.clone();
 
             async move {
+                let part_started = Instant::now();
                 let start = i * PART_SIZE;
                 let end = min(start + PART_SIZE - 1, total - 1);
                 let range_header = format!("bytes={start}-{end}");
@@ -359,6 +371,16 @@ pub async fn download_file(
                     f.write_all(&bytes).await.unwrap();
                 }
 
+                if DEBUG_DOWNLOAD_TIMING {
+                    log::info!(
+                        "[part][{}/{}][{}][{:.2}ms]",
+                        i + 1,
+                        part_count,
+                        range_header,
+                        part_started.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+
                 {
                     let mut stat = progress.lock().await;
                     stat.record_chunk_transfer(bytes.len());
@@ -376,6 +398,13 @@ pub async fn download_file(
         drop(file);
         let _ = tokio::fs::remove_file(file_path).await;
         return Err(Error::UnexpectedResponse(msg));
+    }
+
+    if DEBUG_DOWNLOAD_TIMING {
+        log::info!(
+            "[download][{part_count} parts][{total}B][{:.2}ms]",
+            download_started.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     Ok(resp_headers)

@@ -164,6 +164,7 @@ const LAST_IMPORT_FOLDER_READ_IN_PLACE_KEY = 'readest:lastImportFolderReadInPlac
  * click).
  */
 const CLOUD_BOOKS_PAGE_SIZE = 20;
+const DEBUG_DOWNLOAD_TIMING = true;
 
 const LibraryPageWithSearchParams = () => {
   const searchParams = useSearchParams();
@@ -1218,9 +1219,14 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
             'hash:',
             book.hash,
           );
+          const downloadStartedAt = performance.now();
           await appService?.downloadBook(book, false, redownload, (progress) => {
             updateBookTransferProgress(book.hash, progress);
           });
+          if (DEBUG_DOWNLOAD_TIMING) {
+            const cost = (performance.now() - downloadStartedAt).toFixed(2);
+            console.log(`[handleBookDownload][${book.hash}][${cost}ms]`);
+          }
           console.log(
             '[handleBookDownload] downloadBook finished. book state after download:',
             book,

@@ -253,7 +253,7 @@ const MYBOOKS_RETRY_DELAY_MS = 300;
 
 // Debug switch: flip to true by hand when building a test package; off by default.
 // Logs one `[status][cost][method][path]` line per request.
-const DEBUG_REQUEST_TIMING = false;
+const DEBUG_REQUEST_TIMING = true;
 
 export async function fetchMyBooks<T>(
   endpoint: string,
