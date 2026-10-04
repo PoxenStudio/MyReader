@@ -121,3 +121,9 @@ export const isValidURL = (url: string, allowedSchemes: string[] = ['http', 'htt
 export const stubTranslation = (stubKey: string) => {
   return stubKey;
 };
+
+/** Local `HH:MM:SS.mmm`, for debug log lines that need a time prefix. */
+export const logTime = (): string => {
+  const d = new Date();
+  return `${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+};
