@@ -692,6 +692,20 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showingPopup]);
 
+  // Paginated: a page turn leaves the popup pointing at a selection that is gone.
+  const popupLocationRef = useRef<string | null>(null);
+  const location = progress?.location;
+  useEffect(() => {
+    if (!showingPopup) {
+      popupLocationRef.current = null;
+    } else if (popupLocationRef.current === null) {
+      popupLocationRef.current = location ?? null;
+    } else if (location !== popupLocationRef.current && !viewSettings.scrolled) {
+      handleDismissPopupAndSelection();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location, showingPopup]);
+
   // When popups are visible, update their positions on scroll events
   useEffect(() => {
     const view = getView(bookKey);
