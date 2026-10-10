@@ -207,20 +207,16 @@ const UserSettingsDialog: React.FC<UserSettingsDialogProps> = ({ isOpen, onClose
     await saveSettings(envConfig, next);
   };
 
-  const handleSignOut = async () => {
-    try {
-      await signOut();
-    } catch {
-      // ignore errors — clear local state regardless
-    } finally {
-      logout();
-      onClose();
-      // The cloud shelf (and any of its sub-views — categories/author/tag/
-      // .../reading etc., all `?source=cloud`) has nothing to show once
-      // signed out, so send the shelf back to the local library rather than
-      // leaving it stuck on a now-inaccessible cloud view.
-      router.push('/library?source=local');
-    }
+  const handleSignOut = () => {
+    // Fire the server sign-out without waiting, then reset local state at once.
+    void signOut();
+    logout();
+    onClose();
+    // The cloud shelf (and any of its sub-views — categories/author/tag/
+    // .../reading etc., all `?source=cloud`) has nothing to show once
+    // signed out, so send the shelf back to the local library rather than
+    // leaving it stuck on a now-inaccessible cloud view.
+    router.push('/library?source=local');
   };
 
   const avatarDisplayUrl = userInfo?.avatar ? getMyBooksAvatarUrl(userInfo.avatar) : null;

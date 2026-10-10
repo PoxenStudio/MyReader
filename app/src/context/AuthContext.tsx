@@ -174,28 +174,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = useCallback(async () => {
     console.log('Logging out');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('mybooks_user_info');
+    localStorage.removeItem('mybooks_is_guest');
+    // Combined session + `invited` cookie (Tauri custom store — see
+    // tauriCookieStore.ts) and the NAS relay cookie jar (per-host store —
+    // see nasCookieStore.ts) both need clearing; neither is reachable by
+    // the server's own sign-out Set-Cookie (which only expires user_id/
+    // admin_id), and plugin-http's own internal jar isn't exposed to JS to
+    // clear at all.
+    clearTauriMyBooksCookie();
+    clearAllNasCookies();
+    setToken(null);
+    setUser(null);
+    setIsGuest(false);
+    setIsAdmin(false);
+    setHost(null);
+    // Local state is already reset; the remote auth sign-out must not block it.
     try {
       await supabase.auth.refreshSession();
     } catch {
     } finally {
-      await supabase.auth.signOut();
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      localStorage.removeItem('mybooks_user_info');
-      localStorage.removeItem('mybooks_is_guest');
-      // Combined session + `invited` cookie (Tauri custom store — see
-      // tauriCookieStore.ts) and the NAS relay cookie jar (per-host store —
-      // see nasCookieStore.ts) both need clearing; neither is reachable by
-      // the server's own sign-out Set-Cookie (which only expires user_id/
-      // admin_id), and plugin-http's own internal jar isn't exposed to JS to
-      // clear at all.
-      clearTauriMyBooksCookie();
-      clearAllNasCookies();
-      setToken(null);
-      setUser(null);
-      setIsGuest(false);
-      setIsAdmin(false);
-      setHost(null);
+      await supabase.auth.signOut().catch(() => {});
     }
   }, []);
 

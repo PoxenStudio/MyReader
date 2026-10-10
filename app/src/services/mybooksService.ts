@@ -684,7 +684,6 @@ export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
 }
 
 export async function signOut(): Promise<void> {
-  await fetchMyBooks('/user/sign_out', undefined, 'GET');
   if (typeof window !== 'undefined') {
     const remember = localStorage.getItem('mybooks_remember') === 'true';
     if (!remember) {
@@ -692,6 +691,8 @@ export async function signOut(): Promise<void> {
       localStorage.removeItem('mybooks_password');
     }
   }
+  // Best effort and not awaited: an unreachable server must not delay signing out locally.
+  fetchMyBooks('/user/sign_out', undefined, 'GET').catch(() => {});
 }
 
 /**
