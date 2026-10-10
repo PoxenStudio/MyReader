@@ -165,6 +165,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     isPrimary = true,
     reload = false,
   ) => {
+    if (DEBUG_OPEN_TIMING) performance.mark(`open-start:${key}`);
     const booksData = useBookDataStore.getState().booksData;
     const bookData = booksData[id];
     set((state) => ({
@@ -256,6 +257,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
           bookDoc = doc.book;
         }
       }
+      const stageAt = performance.now();
       const config = await configPromise;
       // Import annotations from third-party readers on first open. The
       // module import was already kicked off above; providers still run
@@ -279,11 +281,15 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       // Filter out invalid booknotes
       config.booknotes = config.booknotes?.filter((booknote) => booknote.cfi) ?? [];
       // Load cached book navigation (TOC + section fragments) or compute and persist.
+      const navStartedAt = performance.now();
+      let navSource = 'skip';
       if (book.format === 'EPUB' && bookDoc.rendition?.layout !== 'pre-paginated') {
         const cachedNav = await appService.loadBookNav(book);
         if (cachedNav?.version === BOOK_NAV_VERSION && process.env.NODE_ENV === 'production') {
           hydrateBookNav(bookDoc, cachedNav);
+          navSource = 'cache';
         } else {
+          navSource = 'compute';
           const freshNav = await computeBookNav(bookDoc);
           hydrateBookNav(bookDoc, freshNav);
           try {
@@ -293,11 +299,18 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
           }
         }
       }
+      const tocStartedAt = performance.now();
       await updateToc(
         bookDoc,
         config.viewSettings?.sortedTOC ?? false,
         config.viewSettings?.convertChineseVariant ?? 'none',
       );
+      if (DEBUG_OPEN_TIMING) {
+        const now = performance.now();
+        console.log(
+          `[open-perf][stages] config+annot=${(navStartedAt - stageAt).toFixed(0)}ms nav(${navSource})=${(tocStartedAt - navStartedAt).toFixed(0)}ms toc=${(now - tocStartedAt).toFixed(0)}ms`,
+        );
+      }
       if (!bookDoc.metadata.title && file) {
         bookDoc.metadata.title = getBaseFilename(file.name);
       }

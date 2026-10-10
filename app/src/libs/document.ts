@@ -415,7 +415,9 @@ export class DocumentLoader {
         // it first and let the two overlap. On Android a multi-MB central
         // directory means N chunked scheme round trips, all of which used
         // to sit in front of EPUB.init().
+        const endEntries = perfMark('zipEntries');
         const entriesPromise = isEPUBLike ? openZipEntries(this.file) : null;
+        entriesPromise?.then((e) => endEntries(`[entries=${e.length}]`)).catch(() => undefined);
         // Avoid an unhandled rejection while the Rust prefetch below is still
         // awaited; the rejection still surfaces via the await in makeZipLoader
         // and the catch in open().
@@ -423,12 +425,16 @@ export class DocumentLoader {
         let prefetch: { textCache: Map<string, string>; sizes: Map<string, number> } | undefined;
         if (isEPUBLike && this.nativeFilePath) {
           const { tryNativePrefetchEpub } = await import('@/utils/tauriEpubBridge');
+          const endPrefetch = perfMark('nativePrefetch');
           const native = await tryNativePrefetchEpub(this.nativeFilePath);
+          endPrefetch(`[hit=${!!native}]`);
           if (native) {
             prefetch = { textCache: native.textCache, sizes: native.sizes };
           }
         }
+        const endLoader = perfMark('makeZipLoader');
         const loader = await this.makeZipLoader(entriesPromise, prefetch);
+        endLoader();
         const { entries } = loader;
 
         if (this.isCBZ()) {
@@ -443,7 +449,9 @@ export class DocumentLoader {
           format = 'FBZ';
         } else {
           const { EPUB } = await import('foliate-js/epub.js');
+          const endInit = perfMark('EPUB.init');
           book = await new EPUB(loader).init();
+          endInit(`[sections=${book.sections?.length}]`);
           format = 'EPUB';
         }
       } else if (await this.isPDF()) {
@@ -496,6 +504,16 @@ export class DocumentLoader {
     return { book, format } as { book: BookDoc; format: BookFormat };
   }
 }
+
+// Debug switch: logs one `[epub-perf]` line per open stage.
+const DEBUG_EPUB_TIMING = true;
+const perfMark = (label: string) => {
+  const t0 = performance.now();
+  return (extra = '') => {
+    if (DEBUG_EPUB_TIMING)
+      console.log(`[epub-perf][${label}][${(performance.now() - t0).toFixed(0)}ms]${extra}`);
+  };
+};
 
 export const getDirection = (doc: Document) => {
   const { defaultView } = doc;

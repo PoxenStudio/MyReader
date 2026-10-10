@@ -665,6 +665,7 @@ const FoliateViewer: React.FC<{
 
     const openBook = async () => {
       console.log('Opening book', bookKey);
+      const viewOpenAt = performance.now();
       await import('foliate-js/view.js');
       const view = wrappedFoliateView(document.createElement('foliate-view') as FoliateView);
       view.id = `foliate-view-${bookKey}`;
@@ -689,6 +690,7 @@ const FoliateViewer: React.FC<{
       }
 
       await view.open(bookDoc);
+      const viewOpenedAt = performance.now();
       // make sure we can listen renderer events after opening book
       viewRef.current = view;
       setFoliateView(bookKey, view);
@@ -792,6 +794,13 @@ const FoliateViewer: React.FC<{
         await view.goToFraction(0);
       }
       setViewInited(bookKey, true);
+      const startMark = performance.getEntriesByName(`open-start:${bookKey}`).pop();
+      if (startMark) {
+        const now = performance.now();
+        console.log(
+          `[open-perf][first-page][${bookDoc.rendition?.layout ?? 'reflow'}] view.open=${(viewOpenedAt - viewOpenAt).toFixed(0)}ms goTo=${(now - viewOpenedAt).toFixed(0)}ms total=${(now - startMark.startTime).toFixed(0)}ms`,
+        );
+      }
 
       // The reader is showing a deep-link target, not the user's actual reading
       // position. Mark the view as a preview so progress writers (auto-save,
