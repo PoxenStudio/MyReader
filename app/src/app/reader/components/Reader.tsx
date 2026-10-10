@@ -92,7 +92,6 @@ const Reader: React.FC<{ ids?: string }> = ({ ids }) => {
       } else if (getIsNotebookVisible() && !isNotebookPinned) {
         setNotebookVisible(false);
       } else {
-        console.log('[back] no overlay consumed Back, closing reader');
         eventDispatcher.dispatch('close-reader');
         router.back();
       }
