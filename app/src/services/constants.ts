@@ -104,6 +104,7 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   keepLogin: true,
   autoUpload: false,
   autoSetReadState: true,
+  autoRetryTransfers: false,
   allowDelCloudBook: true,
   autoSyncReadingBooks: false,
   alwaysOnTop: false,

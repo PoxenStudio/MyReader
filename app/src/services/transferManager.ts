@@ -502,6 +502,7 @@ class TransferManager {
       const isQuotaError = errorMessage.includes('Insufficient storage quota');
 
       if (
+        useSettingsStore.getState().settings.autoRetryTransfers === true &&
         !isQuotaError &&
         currentTransfer &&
         currentTransfer.retryCount < currentTransfer.maxRetries
@@ -645,7 +646,8 @@ class TransferManager {
 
       // Restore all transfers using the store's restore method
       // This preserves the original IDs and handles in_progress -> pending conversion
-      store.restoreTransfers(data.transfers, data.isQueuePaused);
+      const resume = useSettingsStore.getState().settings.autoRetryTransfers === true;
+      store.restoreTransfers(data.transfers, data.isQueuePaused, resume);
     } catch (error) {
       console.error('Failed to load transfer queue:', error);
     }

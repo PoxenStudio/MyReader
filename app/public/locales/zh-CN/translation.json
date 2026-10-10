@@ -627,7 +627,6 @@
   "Book not found in library": "在书库中找不到书籍",
   "Unknown error": "未知错误",
   "Please log in to continue": "请登录以继续",
-  "Cloud File Transfers": "云文件传输",
   "Show Search Results": "显示搜索结果",
   "Search results for '{{term}}'": "包含\"{{term}}\"的结果",
   "Close Search": "关闭搜索",
@@ -2122,5 +2121,9 @@
   "Folders": "目录浏览",
   "This folder is empty": "此目录为空",
   "Add as annotation": "添加为批注",
-  "Added to annotation": "已添加到批注"
+  "Added to annotation": "已添加到批注",
+  "Transfer Settings": "传输设置",
+  "Auto retry and resume transfers": "自动重试并恢复传输",
+  "Interrupted": "已中断",
+  "File Transfers": "文件传输"
 }

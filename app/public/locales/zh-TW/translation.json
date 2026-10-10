@@ -626,7 +626,6 @@
   "Book not found in library": "在書庫中找不到書籍",
   "Unknown error": "未知錯誤",
   "Please log in to continue": "請登入以繼續",
-  "Cloud File Transfers": "雲端檔案傳輸",
   "Show Search Results": "顯示搜尋結果",
   "Search results for '{{term}}'": "包含「{{term}}」的結果",
   "Close Search": "關閉搜尋",
@@ -2122,5 +2121,9 @@
   "Folders": "目錄瀏覽",
   "This folder is empty": "此目錄為空",
   "Add as annotation": "新增為批註",
-  "Added to annotation": "已新增到批註"
+  "Added to annotation": "已新增到批註",
+  "Transfer Settings": "傳輸設定",
+  "Auto retry and resume transfers": "自動重試並恢復傳輸",
+  "Interrupted": "已中斷",
+  "File Transfers": "檔案傳輸"
 }

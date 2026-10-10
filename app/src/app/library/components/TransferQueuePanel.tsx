@@ -12,11 +12,18 @@ import {
   MdCancel,
   MdDeleteSweep,
 } from 'react-icons/md';
+import { PiDotsThreeVerticalBold } from 'react-icons/pi';
 import { useTransferQueue } from '@/hooks/useTransferQueue';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
+import { useEnv } from '@/context/EnvContext';
+import Dropdown from '@/components/Dropdown';
+import Menu from '@/components/Menu';
+import MenuItem from '@/components/MenuItem';
+import { saveSysSettings } from '@/helpers/settings';
 import { useLibraryStore } from '@/store/libraryStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import {
   TransferItem,
   TransferStatus,
@@ -157,6 +164,26 @@ const TransferItemRow: React.FC<{
   );
 };
 
+const TransferSettingsMenu: React.FC<{ setIsDropdownOpen?: (open: boolean) => void }> = ({
+  setIsDropdownOpen,
+}) => {
+  const _ = useTranslation();
+  const { envConfig } = useEnv();
+  const autoRetry = useSettingsStore((state) => state.settings.autoRetryTransfers === true);
+  return (
+    <Menu
+      className='dropdown-content bg-base-100 rounded-box z-[1] mt-3 p-2 shadow'
+      onCancel={() => setIsDropdownOpen?.(false)}
+    >
+      <MenuItem
+        label={_('Auto retry and resume transfers')}
+        toggled={autoRetry}
+        onClick={() => void saveSysSettings(envConfig, 'autoRetryTransfers', !autoRetry)}
+      />
+    </Menu>
+  );
+};
+
 type FilterType = 'all' | 'active' | 'completed' | 'failed';
 
 const TransferQueuePanel: React.FC = () => {
@@ -277,6 +304,14 @@ const TransferQueuePanel: React.FC = () => {
             >
               {isQueuePaused ? <MdPlayArrow size={iconSize} /> : <MdPause size={iconSize} />}
             </button>
+            <Dropdown
+              label={_('Transfer Settings')}
+              className='dropdown-bottom dropdown-end'
+              buttonClassName='btn btn-ghost btn-sm btn-circle flex items-center justify-center'
+              toggleButton={<PiDotsThreeVerticalBold role='none' size={iconSize} />}
+            >
+              <TransferSettingsMenu />
+            </Dropdown>
             <button
               onClick={onClose}
               className='btn btn-ghost btn-sm btn-circle'
