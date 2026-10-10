@@ -34,11 +34,14 @@ class EventDispatcher {
     }
   }
 
-  onSync(event: string, callback: (event: CustomEvent) => boolean): void {
+  // `lowestPriority` keeps the listener last in the LIFO walk, however often it re-registers.
+  onSync(event: string, callback: (event: CustomEvent) => boolean, lowestPriority = false): void {
     if (!this.syncListeners.has(event)) {
       this.syncListeners.set(event, []);
     }
-    this.syncListeners.get(event)!.push(callback);
+    const listeners = this.syncListeners.get(event)!;
+    if (lowestPriority) listeners.unshift(callback);
+    else listeners.push(callback);
   }
 
   offSync(event: string, callback: (event: CustomEvent) => boolean): void {
