@@ -37,6 +37,9 @@ import { useLibraryStore } from './libraryStore';
 import { clearBookProgress, getBookProgress, setBookProgress } from './readerProgressStore';
 import { uniqueId } from '@/utils/misc';
 
+// Debug switch: logs load/parse cost when opening a book.
+const DEBUG_OPEN_TIMING = true;
+
 interface ViewState {
   /* Unique key for each book view */
   key: string;
@@ -231,6 +234,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
           // EPUB prefetch), so it can race the content load instead of
           // queueing behind it — one fewer serial IPC round trip on the
           // critical path.
+          const loadStartedAt = performance.now();
           const [content, nativeFilePath] = await Promise.all([
             appService.loadBookContent(book) as Promise<BookContent>,
             appService.resolveNativeBookFilePath(book).catch((err: unknown) => {
@@ -239,9 +243,16 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
             }),
           ]);
           file = content.file;
+          const openStartedAt = performance.now();
           const doc = await new DocumentLoader(file, {
             nativeFilePath: nativeFilePath ?? undefined,
           }).open();
+          if (DEBUG_OPEN_TIMING) {
+            const now = performance.now();
+            console.log(
+              `[open-perf][${book.format}][${(file.size / 1048576).toFixed(1)}MB] load=${(openStartedAt - loadStartedAt).toFixed(0)}ms parse=${(now - openStartedAt).toFixed(0)}ms`,
+            );
+          }
           bookDoc = doc.book;
         }
       }
