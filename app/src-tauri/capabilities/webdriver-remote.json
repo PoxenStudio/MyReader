@@ -11,6 +11,7 @@
     "allow-start-server",
     "allow-download-file",
     "allow-upload-file",
+    "allow-upload-multipart",
     "allow-get-environment-variable",
     "allow-get-executable-dir",
     "allow-set-webview-info",
