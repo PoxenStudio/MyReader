@@ -70,6 +70,7 @@ const Dialog: React.FC<DialogProps> = ({
   const handleKeyDown = (event: KeyboardEvent | CustomEvent) => {
     if (event instanceof CustomEvent) {
       if (event.detail.keyName === 'Back') {
+        console.log('[back] Dialog consumed', title);
         onClose();
         return true;
       }
