@@ -12,6 +12,8 @@ const collectCardText = (node: Node, out: string[]): void => {
   if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
   const el = node as Element;
   if (el.tagName && SKIP_TEXT_TAGS.has(el.tagName)) return;
+  // Card chrome (e.g. "Read on …" links) marks itself with data-note-skip.
+  if (el.hasAttribute?.('data-note-skip')) return;
   if (el.shadowRoot) collectCardText(el.shadowRoot, out);
   node.childNodes.forEach((child) => collectCardText(child, out));
   if (el.tagName && BLOCK_TAGS.has(el.tagName)) out.push('\n');

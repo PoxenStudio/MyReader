@@ -100,6 +100,7 @@ export const baiduBaikeProvider: DictionaryProvider = {
 
       const linkWrapper = document.createElement('p');
       linkWrapper.className = 'mt-3 px-2 text-sm';
+      linkWrapper.dataset['noteSkip'] = '';
       const link = document.createElement('a');
       link.href = itemUrl;
       link.target = '_blank';
