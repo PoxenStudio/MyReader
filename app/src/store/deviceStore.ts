@@ -15,7 +15,14 @@ const handleNativeKeyDown = (keyName: string, keyCode?: number) => {
   // bubbles; every other key (volume, media, learn-mode captures) is
   // dispatched asynchronously through the same channel.
   if (keyName === 'Back') {
-    return eventDispatcher.dispatchSync('native-key-down', { keyName, keyCode });
+    const consumed = eventDispatcher.dispatchSync('native-key-down', { keyName, keyCode });
+    console.log(
+      '[back] listeners',
+      eventDispatcher.listenerCount('native-key-down'),
+      'consumed',
+      consumed,
+    );
+    return consumed;
   }
   return eventDispatcher.dispatch('native-key-down', { keyName, keyCode });
 };
