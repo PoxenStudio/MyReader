@@ -13,6 +13,11 @@ import { getEnabledProviders } from '@/services/dictionaries/registry';
 import { buildLookupCandidates } from '@/services/dictionaries/lookupCandidates';
 import { isTauriAppPlatform } from '@/services/environment';
 import { extractCardText } from '@/services/dictionaries/cardText';
+import {
+  lookupCache,
+  makeLookupCacheKey,
+  type LookupHandlers,
+} from '@/services/dictionaries/lookupCache';
 import { cancelWordPronounce, pronounceWord, warmWordAudio } from '@/services/tts/wordPronouncer';
 import {
   getBuiltinWebSearch,
@@ -271,29 +276,58 @@ export function useDictionaryResults({
           if (!container) {
             outcome = { ok: false, reason: 'error', message: 'no container' };
           } else {
-            // Try normalized query variants (trimmed, case-folded) then
-            // language-aware lemma candidates in priority order, keeping the
-            // first hit. Case-sensitive formats (mdict) otherwise miss
-            // `Hello` / `world ` style selections whose headword is stored
-            // lowercased, and dictionaries that store only base headwords
-            // (e.g. Oxford Dictionary of English) miss inflected selections
-            // like `ran` / `mice` / `analyses`.
-            outcome = { ok: false, reason: 'empty' };
-            for (const candidate of buildLookupCandidates(currentWord, langCode)) {
-              container.replaceChildren();
-              outcome = await provider.lookup(candidate, {
-                lang: langCode,
-                signal: controller.signal,
-                container,
+            const cacheKey = makeLookupCacheKey([
+              provider.id,
+              currentWord,
+              langCode,
+              isDarkMode,
+              themeCode.bg,
+              themeCode.fg,
+              canAddNote,
+            ]);
+            const hit = lookupCache.get(cacheKey);
+            if (hit && hit.provider === provider) {
+              hit.handlers.onNavigate = pushWord;
+              hit.handlers.onAddNote = canAddNote ? addNote : undefined;
+              container.replaceChildren(...hit.nodes);
+              outcome = hit.outcome;
+            } else {
+              const handlers: LookupHandlers = {
                 onNavigate: pushWord,
                 onAddNote: canAddNote ? addNote : undefined,
-                isDarkMode,
-                bg: themeCode.bg,
-                fg: themeCode.fg,
-                _,
-              });
-              if (controller.signal.aborted) return;
-              if (outcome.ok || outcome.reason !== 'empty') break;
+              };
+              // Try normalized query variants (trimmed, case-folded) then
+              // language-aware lemma candidates in priority order, keeping the
+              // first hit. Case-sensitive formats (mdict) otherwise miss
+              // `Hello` / `world ` style selections whose headword is stored
+              // lowercased, and dictionaries that store only base headwords
+              // (e.g. Oxford Dictionary of English) miss inflected selections
+              // like `ran` / `mice` / `analyses`.
+              outcome = { ok: false, reason: 'empty' };
+              for (const candidate of buildLookupCandidates(currentWord, langCode)) {
+                container.replaceChildren();
+                outcome = await provider.lookup(candidate, {
+                  lang: langCode,
+                  signal: controller.signal,
+                  container,
+                  onNavigate: (w) => handlers.onNavigate?.(w),
+                  onAddNote: canAddNote ? (t) => handlers.onAddNote?.(t) : undefined,
+                  isDarkMode,
+                  bg: themeCode.bg,
+                  fg: themeCode.fg,
+                  _,
+                });
+                if (controller.signal.aborted) return;
+                if (outcome.ok || outcome.reason !== 'empty') break;
+              }
+              if (outcome.ok) {
+                lookupCache.set(cacheKey, {
+                  provider,
+                  outcome,
+                  nodes: Array.from(container.childNodes),
+                  handlers,
+                });
+              }
             }
           }
         } catch (err) {
