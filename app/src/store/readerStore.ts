@@ -40,6 +40,30 @@ import { uniqueId } from '@/utils/misc';
 // Debug switch: logs load/parse cost when opening a book.
 const DEBUG_OPEN_TIMING = true;
 
+// An 'unread' book only becomes 'reading' after it has stayed open this long.
+const READING_STATUS_DELAY_MS = 30_000;
+const readingStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const scheduleReadingStatus = (hash: string) => {
+  if (readingStatusTimers.has(hash)) return;
+  readingStatusTimers.set(
+    hash,
+    setTimeout(() => {
+      readingStatusTimers.delete(hash);
+      const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
+      const book = getBookByHash(hash);
+      if (book?.readingStatus === 'unread' && book.progress) {
+        updateBookProgress(hash, book.progress, undefined);
+      }
+    }, READING_STATUS_DELAY_MS),
+  );
+};
+
+const cancelReadingStatus = (hash: string) => {
+  clearTimeout(readingStatusTimers.get(hash));
+  readingStatusTimers.delete(hash);
+};
+
 interface ViewState {
   /* Unique key for each book view */
   key: string;
@@ -154,6 +178,10 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     set((state) => {
       const viewStates = { ...state.viewStates };
       delete viewStates[key];
+      const hash = getBookHash(key);
+      if (!Object.keys(viewStates).some((k) => getBookHash(k) === hash)) {
+        cancelReadingStatus(hash);
+      }
       return { viewStates };
     });
   },
@@ -480,7 +508,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     if (existingBook) {
       let newReadingStatus = existingBook.readingStatus;
       if (existingBook.readingStatus === 'unread') {
-        newReadingStatus = undefined;
+        scheduleReadingStatus(id);
       }
       if (progressPercentage >= 100 && existingBook.readingStatus !== 'finished') {
         newReadingStatus = 'finished';
