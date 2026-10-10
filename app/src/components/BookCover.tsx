@@ -149,6 +149,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     // Loaded/failed are tracked per URL, so a remount or URL change never shows a stale state.
     const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
     const [erroredUrl, setErroredUrl] = useState<string | null>(null);
+    const [fetchFailed, setFetchFailed] = useState(false);
     // Lazily resolved so a book whose cover is already known synchronously
     // (a local asset URL, or a remote cover already decoded by an earlier
     // mount) paints with its real cover on the very first render instead of
@@ -212,6 +213,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
         return;
       }
 
+      setFetchFailed(false);
       let cancelled = false;
       const { title, hash } = book;
       const t0 = performance.now();
@@ -227,6 +229,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
         .catch((error: unknown) => {
           console.log('[cover] fetch fail', hash, 'cancelled', cancelled, String(error));
           if (cancelled) return;
+          setFetchFailed(true);
           const errorMsg = `[BookCover] Failed to fetch remote cover for book: ${title} (${hash}): ${error}`;
           console.error(errorMsg);
           tauriError(errorMsg).catch(() => {});
@@ -238,6 +241,9 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     }, [book.metadata?.coverImageUrl, book.coverImageUrl, book.hash, book.title]);
 
     const hasDisplayUrl = !!displayImageUrl;
+    // Title text is only for covers that don't exist or failed; while one is still
+    // loading we leave the cell blank, so a loading cover doesn't flash title -> image.
+    const showFallback = !resolveCoverUrl(book) || fetchFailed || imageError;
 
     return (
       <div
@@ -256,8 +262,9 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
                 ref={imageRef}
                 draggable={false}
                 className={clsx(
-                  'cover-image crop-cover-img object-cover',
-                  (!imageLoaded || imageError) && 'invisible',
+                  'cover-image crop-cover-img object-cover transition-opacity duration-150',
+                  !imageLoaded && 'opacity-0',
+                  imageError && 'invisible',
                   imageClassName,
                 )}
                 onLoad={(e) => markLoaded(e.currentTarget)}
@@ -288,8 +295,9 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
                   ref={imageRef}
                   draggable={false}
                   className={clsx(
-                    'cover-image fit-cover-img h-auto max-h-full w-auto max-w-full shadow-md',
-                    (!imageLoaded || imageError) && 'invisible',
+                    'cover-image fit-cover-img h-auto max-h-full w-auto max-w-full shadow-md transition-opacity duration-150',
+                    !imageLoaded && 'opacity-0',
+                    imageError && 'invisible',
                     imageClassName,
                   )}
                   onLoad={(e) => markLoaded(e.currentTarget)}
@@ -309,7 +317,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
             'text-neutral-content text-center font-serif font-medium',
             isPreview ? 'bg-base-200/50' : 'bg-base-100',
             imageClassName,
-            imageLoaded && !imageError && 'invisible',
+            !showFallback && 'invisible',
           )}
         >
           <div className='flex h-1/2 items-center justify-center'>
