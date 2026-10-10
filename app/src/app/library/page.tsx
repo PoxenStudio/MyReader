@@ -2114,7 +2114,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
               </div>
             </div>
           )}
-          {!!user && !isSelectMode && <UploadFab />}
+          {!!user && isAdmin && !isSelectMode && <UploadFab />}
           <NowPlayingBar isSelectMode={isSelectMode} />
           <AudiobookMiniBar isSelectMode={isSelectMode} />
           <AudiobookPlayerSheet />
