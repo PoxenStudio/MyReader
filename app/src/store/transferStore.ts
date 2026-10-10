@@ -142,7 +142,11 @@ interface TransferState {
   setActiveCount: (count: number) => void;
 
   // Persistence
-  restoreTransfers: (transfers: Record<string, TransferItem>, isQueuePaused: boolean) => void;
+  restoreTransfers: (
+    transfers: Record<string, TransferItem>,
+    isQueuePaused: boolean,
+    resumeInterrupted?: boolean,
+  ) => void;
 }
 
 const generateTransferId = (): string => {
@@ -463,7 +467,7 @@ export const useTransferStore = create<TransferState>((set, get) => ({
 
   setActiveCount: (count) => set({ activeCount: count }),
 
-  restoreTransfers: (transfers, isQueuePaused) => {
+  restoreTransfers: (transfers, isQueuePaused, resumeInterrupted = true) => {
     // Legacy rows persisted before the kind discriminator default to 'book'.
     const restoredTransfers: Record<string, TransferItem> = {};
     Object.entries(transfers).forEach(([id, transfer]) => {
@@ -473,7 +477,20 @@ export const useTransferStore = create<TransferState>((set, get) => ({
       // restore.
       if (transfer.status === 'cancelled' && transfer.cancelReason === 'policy') return;
       const withKind: TransferItem = { ...transfer, kind: transfer.kind ?? 'book' };
-      if (withKind.status === 'in_progress') {
+      const interrupted =
+        withKind.status === 'in_progress' ||
+        (withKind.status === 'pending' && withKind.retryCount > 0);
+      if (interrupted && !resumeInterrupted) {
+        // Left for the user to retry by hand.
+        restoredTransfers[id] = {
+          ...withKind,
+          status: 'failed',
+          error: 'Interrupted',
+          progress: 0,
+          transferredBytes: 0,
+          transferSpeed: 0,
+        };
+      } else if (withKind.status === 'in_progress') {
         restoredTransfers[id] = {
           ...withKind,
           status: 'pending',

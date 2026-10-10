@@ -243,12 +243,12 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({
             )
           }
         >
-          <ul className='ms-0 flex flex-col ps-0 before:hidden'>
+          <ul className='ms-0 flex flex-col ps-4 before:hidden'>
             {isGuest && (
               <MenuItem label={_('Sign In')} Icon={PiUserCircle} onClick={handleUserLogin} />
             )}
             <MenuItem
-              label={_('Cloud File Transfers')}
+              label={_('File Transfers')}
               Icon={MdCloudSync}
               description={
                 hasActiveTransfers

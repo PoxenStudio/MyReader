@@ -346,6 +346,8 @@ export interface SystemSettings {
   keepLogin: boolean;
   autoUpload: boolean;
   autoSetReadState: boolean;
+  /** Auto-retry failed transfers and resume interrupted ones on app start; off = user retries manually. */
+  autoRetryTransfers: boolean;
   /** Whether books can be deleted from the cloud (MyBooks) shelf. Admin-only action, gated separately by `isAdmin`. */
   allowDelCloudBook: boolean;
   /** Whether to auto-download reading books from MyBooks that aren't in the local library on app open. */
