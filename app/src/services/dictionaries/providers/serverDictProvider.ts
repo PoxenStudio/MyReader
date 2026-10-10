@@ -74,6 +74,7 @@ export const serverDictProvider: DictionaryProvider = {
         baseUrl: SERVER_DICT_RESOURCE_BASE,
         vocab: SERVER_VOCAB,
         onNavigate: ctx.onNavigate,
+        onAddNote: ctx.onAddNote,
         _: ctx._,
         lang: ctx.lang,
         isDarkMode: ctx.isDarkMode,

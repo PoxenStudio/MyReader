@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MdArrowBack, MdChevronRight, MdSettings, MdVolumeUp } from 'react-icons/md';
+import { MdArrowBack, MdChevronRight, MdNoteAdd, MdSettings, MdVolumeUp } from 'react-icons/md';
 import clsx from 'clsx';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
@@ -12,6 +12,7 @@ import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
 import { getEnabledProviders } from '@/services/dictionaries/registry';
 import { buildLookupCandidates } from '@/services/dictionaries/lookupCandidates';
 import { isTauriAppPlatform } from '@/services/environment';
+import { extractCardText } from '@/services/dictionaries/cardText';
 import { cancelWordPronounce, pronounceWord, warmWordAudio } from '@/services/tts/wordPronouncer';
 import {
   getBuiltinWebSearch,
@@ -30,11 +31,15 @@ interface CardState {
   loadKey: string;
   outcome?: DictionaryLookupOutcome;
   expanded: boolean;
+  /** Provider rendered per-group headers (they carry their own add-note button). */
+  grouped?: boolean;
 }
 
 export interface UseDictionaryResultsArgs {
   word: string;
   lang?: string;
+  /** Adds text as a note on the current selection (enables the add-note icons). */
+  onAddNote?: (text: string) => void;
 }
 
 export interface DictionaryResultsState {
@@ -60,6 +65,8 @@ export interface DictionaryResultsState {
   isSpeaking: boolean;
   /** Pronounce the current word via Edge TTS (falling back to platform speech). */
   speakWord: () => void;
+  /** Visible text of a provider's rendered card ('' when not rendered). */
+  getCardText: (id: string) => string;
 }
 
 /**
@@ -78,6 +85,7 @@ export interface DictionaryResultsState {
 export function useDictionaryResults({
   word,
   lang,
+  onAddNote,
 }: UseDictionaryResultsArgs): DictionaryResultsState {
   const { appService } = useEnv();
   const { dictionaries, settings } = useCustomDictionaryStore();
@@ -125,6 +133,17 @@ export function useDictionaryResults({
     },
     [],
   );
+
+  const getCardText = useCallback((id: string) => {
+    const el = containerRefs.current.get(id);
+    return el ? extractCardText(el) : '';
+  }, []);
+
+  // Latest callback via ref so a new function identity never re-runs lookups.
+  const onAddNoteRef = useRef(onAddNote);
+  onAddNoteRef.current = onAddNote;
+  const canAddNote = !!onAddNote;
+  const addNote = useCallback((text: string) => onAddNoteRef.current?.(text), []);
 
   const pushWord = useCallback((next: string) => {
     const trimmed = next.trim();
@@ -267,6 +286,7 @@ export function useDictionaryResults({
                 signal: controller.signal,
                 container,
                 onNavigate: pushWord,
+                onAddNote: canAddNote ? addNote : undefined,
                 isDarkMode,
                 bg: themeCode.bg,
                 fg: themeCode.fg,
@@ -294,14 +314,26 @@ export function useDictionaryResults({
         setCards((prev) => {
           const old = prev[provider.id];
           if (!old || old.loadKey !== loadKey) return prev;
-          return { ...prev, [provider.id]: { ...old, state, outcome } };
+          const grouped = !!containerRefs.current.get(provider.id)?.querySelector('.mydict-group');
+          return { ...prev, [provider.id]: { ...old, state, outcome, grouped } };
         });
       };
       void run();
     });
 
     return () => controllers.forEach((c) => c.abort());
-  }, [currentWord, definitionProviders, lang, pushWord, isDarkMode, themeCode.bg, themeCode.fg, _]);
+  }, [
+    currentWord,
+    definitionProviders,
+    lang,
+    pushWord,
+    canAddNote,
+    addNote,
+    isDarkMode,
+    themeCode.bg,
+    themeCode.fg,
+    _,
+  ]);
 
   // Visible cards = providers that are still loading or finished with a
   // result. Empty/unsupported/error cards are removed entirely.
@@ -363,6 +395,7 @@ export function useDictionaryResults({
     fontScale: settings.fontScale ?? 1,
     isSpeaking,
     speakWord,
+    getCardText,
   };
 }
 
@@ -441,7 +474,10 @@ export const DictionaryResultsHeader: React.FC<DictionaryResultsHeaderProps> = (
   );
 };
 
-interface DictionaryResultsBodyProps extends DictionaryResultsState {}
+interface DictionaryResultsBodyProps extends DictionaryResultsState {
+  /** Adds a card's text as a note on the current selection; hides the icon when absent. */
+  onAddNote?: (text: string) => void;
+}
 
 export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
   visibleDefinitionProviders,
@@ -456,6 +492,8 @@ export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
   onWebSearchClickTauri,
   noProvidersAtAll,
   fontScale,
+  getCardText,
+  onAddNote,
 }) => {
   const _ = useTranslation();
 
@@ -539,8 +577,23 @@ export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
                   )}
                 />
                 {!isLoading && (
-                  <div className='border-base-content/10 -me-4 mt-2 border-b pb-2'>
+                  <div className='border-base-content/10 -me-4 mt-2 flex items-center justify-between border-b pb-2'>
                     <span className='not-eink:opacity-60 text-xs'>{sourceLabel}</span>
+                    {onAddNote && !card?.grouped && (
+                      <button
+                        type='button'
+                        className='not-eink:opacity-60 hover:opacity-100 me-4 p-1'
+                        title={_('Add as annotation')}
+                        aria-label={_('Add as annotation')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const text = getCardText(p.id);
+                          if (text) onAddNote(text);
+                        }}
+                      >
+                        <MdNoteAdd size={18} />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

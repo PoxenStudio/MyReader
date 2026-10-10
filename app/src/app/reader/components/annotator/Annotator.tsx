@@ -58,6 +58,7 @@ import { transformContent } from '@/services/transformService';
 import {
   buildTTSSentenceHighlight,
   decideAnnotationDraw,
+  findAnnotationAtCfi,
   getHighlightColorHex,
   mergeRestyledAnnotation,
   removeBookNoteOverlays,
@@ -1188,6 +1189,56 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
     return created;
   };
 
+  // Dictionary card → note on the current selection (appended if it already has one).
+  const handleAddDictNote = (text: string) => {
+    if (!selection || !selection.text) return;
+    const cfi = view?.getCFI(selection.index, selection.range);
+    if (!cfi) return;
+    const { booknotes: annotations = [] } = config;
+    const views = getViewsById(getBookHash(bookKey));
+    const existingIndex = findAnnotationAtCfi(annotations, cfi);
+    let saved: BookNote;
+    if (existingIndex !== -1) {
+      const existing = annotations[existingIndex]!;
+      saved = {
+        ...existing,
+        note: existing.note ? `${existing.note}\n\n${text}` : text,
+        updatedAt: Date.now(),
+      };
+      annotations[existingIndex] = saved;
+      views.forEach((v) => v?.addAnnotation({ ...saved, value: `${NOTE_PREFIX}${saved.cfi}` }));
+    } else {
+      const style = settings.globalReadSettings.highlightStyle;
+      saved = {
+        id: uniqueId(),
+        type: 'annotation',
+        cfi,
+        style,
+        color: settings.globalReadSettings.highlightStyles[style],
+        note: text,
+        page: progress.page,
+        text: selection.text,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      annotations.push(saved);
+      views.forEach((v) => {
+        v?.addAnnotation(saved);
+        v?.addAnnotation({ ...saved, value: `${NOTE_PREFIX}${saved.cfi}` });
+      });
+      setSelection({ ...selection, cfi, annotated: true });
+    }
+    const updatedConfig = updateBooknotes(bookKey, annotations);
+    if (updatedConfig) {
+      saveConfig(envConfig, bookKey, updatedConfig, settings);
+    }
+    eventDispatcher.dispatch('toast', {
+      type: 'success',
+      message: _('Added to annotation'),
+      timeout: 2000,
+    });
+  };
+
   const handleCreateTTSHighlight = (event: CustomEvent) => {
     const detail = event.detail as { bookKey: string; cfi: string; text: string } | undefined;
     if (!detail || detail.bookKey !== bookKey) return;
@@ -1722,6 +1773,7 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
                 lang={bookData.bookDoc?.metadata.language as string}
                 onDismiss={handleDismissPopupAndSelection}
                 onManage={onManage}
+                onAddNote={handleAddDictNote}
               />
             );
           }
@@ -1736,6 +1788,7 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
               popupHeight={dictPopupHeight}
               onDismiss={handleDismissPopupAndSelection}
               onManage={onManage}
+              onAddNote={handleAddDictNote}
             />
           );
         })()}

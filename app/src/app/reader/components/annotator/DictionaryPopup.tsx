@@ -24,6 +24,7 @@ interface DictionaryPopupProps {
    * deep-linking to the dictionaries sub-page.
    */
   onManage?: () => void;
+  onAddNote?: (text: string) => void;
 }
 
 const DictionaryPopup: React.FC<DictionaryPopupProps> = ({
@@ -35,8 +36,9 @@ const DictionaryPopup: React.FC<DictionaryPopupProps> = ({
   popupHeight,
   onDismiss,
   onManage,
+  onAddNote,
 }) => {
-  const state = useDictionaryResults({ word, lang });
+  const state = useDictionaryResults({ word, lang, onAddNote });
   return (
     <Popup
       width={popupWidth}
@@ -59,7 +61,7 @@ const DictionaryPopup: React.FC<DictionaryPopupProps> = ({
           speaking={state.isSpeaking}
         />
         <div className='min-h-0 flex-1'>
-          <DictionaryResultsBody {...state} />
+          <DictionaryResultsBody {...state} onAddNote={onAddNote} />
         </div>
       </div>
     </Popup>
