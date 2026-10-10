@@ -46,18 +46,18 @@ const makeBook = (overrides?: Partial<Book>): Book =>
   }) as Book;
 
 describe('BookCover', () => {
-  it('passes loading="lazy" to crop-mode Image', () => {
+  it('renders eager loading Image in crop-mode Image', () => {
     const { container } = render(<BookCover book={makeBook()} coverFit='crop' />);
     const img = container.querySelector('img.cover-image');
     expect(img).toBeTruthy();
-    expect(img?.getAttribute('loading')).toBe('lazy');
+    expect(img?.getAttribute('loading')).toBe('eager');
   });
 
-  it('passes loading="lazy" to fit-mode Image', () => {
+  it('renders eager loading Image in fit-mode Image', () => {
     const { container } = render(<BookCover book={makeBook()} coverFit='fit' />);
     const img = container.querySelector('img.cover-image');
     expect(img).toBeTruthy();
-    expect(img?.getAttribute('loading')).toBe('lazy');
+    expect(img?.getAttribute('loading')).toBe('eager');
   });
 
   it('reports natural aspect ratio via onAspectRatioChange when fit-mode image loads', () => {
@@ -181,6 +181,7 @@ describe('BookCover remote covers on Tauri', () => {
     await waitFor(() => {
       expect(first.container.querySelector('img.cover-image')?.getAttribute('src')).toBe(objectUrl);
     });
+    fireEvent.load(first.container.querySelector('img.cover-image')!);
     first.unmount();
 
     // Simulates Virtuoso remounting the same item after a fling crosses its
