@@ -92,6 +92,7 @@ export const wikipediaProvider: DictionaryProvider = {
       link.rel = 'noopener noreferrer';
       link.className = 'not-eink:text-primary underline';
       link.textContent = (ctx._ ?? _)('Read on Wikipedia →');
+      linkWrapper.dataset['noteSkip'] = '';
       linkWrapper.appendChild(link);
       ctx.container.append(linkWrapper);
 
