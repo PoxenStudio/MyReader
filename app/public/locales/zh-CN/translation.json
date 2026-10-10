@@ -2120,5 +2120,7 @@
   "Pronunciation playback failed: {{message}}": "发音播放失败：{{message}}",
   "No results available": "无可用结果",
   "Folders": "目录浏览",
-  "This folder is empty": "此目录为空"
+  "This folder is empty": "此目录为空",
+  "Add as annotation": "添加为批注",
+  "Added to annotation": "已添加到批注"
 }

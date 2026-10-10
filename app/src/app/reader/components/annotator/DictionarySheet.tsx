@@ -14,10 +14,17 @@ interface DictionarySheetProps {
   lang?: string;
   onDismiss: () => void;
   onManage?: () => void;
+  onAddNote?: (text: string) => void;
 }
 
-const DictionarySheet: React.FC<DictionarySheetProps> = ({ word, lang, onDismiss, onManage }) => {
-  const state = useDictionaryResults({ word, lang });
+const DictionarySheet: React.FC<DictionarySheetProps> = ({
+  word,
+  lang,
+  onDismiss,
+  onManage,
+  onAddNote,
+}) => {
+  const state = useDictionaryResults({ word, lang, onAddNote });
   return (
     <Dialog
       isOpen
@@ -40,7 +47,7 @@ const DictionarySheet: React.FC<DictionarySheetProps> = ({ word, lang, onDismiss
       contentClassName='!px-0 !mt-0'
       onClose={onDismiss}
     >
-      <DictionaryResultsBody {...state} />
+      <DictionaryResultsBody {...state} onAddNote={onAddNote} />
     </Dialog>
   );
 };

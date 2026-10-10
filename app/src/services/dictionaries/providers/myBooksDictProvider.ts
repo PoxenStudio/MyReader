@@ -22,6 +22,7 @@ import type {
 import { queryMyDict, type MyDictResult } from './myDictQuery';
 import { buildMyDictResourceUrl } from './myDictUrl';
 import { AUDIO_BOUND, wireDictAudio } from '../dictAudio';
+import { extractCardText } from '../cardText';
 import { wireEntryImageInteractions } from './dictEntryImages';
 
 // Rendered through `translate` (the popup's `_`), which i18next-scanner can't
@@ -59,6 +60,8 @@ export interface MyBooksRenderOptions {
   isDarkMode?: boolean;
   /** 该 provider 服务器的生词本；给了就在每个词典分组头渲染星标。 */
   vocab?: VocabCapability;
+  /** 给了就在每个词典分组头渲染「添加为批注」按钮（文本为该分组的释义）。 */
+  onAddNote?: (text: string) => void;
 }
 
 /** Root-relative prefix the server puts on entry resources. */
@@ -360,6 +363,29 @@ const attachVocabStar = (summary: HTMLElement, options: VocabOptions): void => {
 
   render();
   void sync(savedFor(word));
+  summary.appendChild(button);
+};
+
+/** 分组头里的「添加为批注」按钮：把该分组的释义文本加到当前选词的批注里。 */
+const attachNoteButton = (
+  summary: HTMLElement,
+  getText: () => string,
+  options: Pick<MyBooksRenderOptions, 'onAddNote' | '_'>,
+): void => {
+  const translate = options._ ?? ((key: string) => key);
+  const button = document.createElement('button');
+  button.type = 'button';
+  // Shares the star's look.
+  button.className = 'mydict-vocab-star mydict-note-add';
+  button.textContent = '✎';
+  button.title = translate('Add as annotation');
+  button.setAttribute('aria-label', translate('Add as annotation'));
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const text = getText();
+    if (text) options.onAddNote?.(text);
+  });
   summary.appendChild(button);
 };
 
@@ -678,6 +704,8 @@ export const renderMyBooksResults = (
       });
     }
 
+    if (options.onAddNote) attachNoteButton(summary, () => extractCardText(scopeHost), options);
+
     details.appendChild(summary);
 
     const scopeHost = document.createElement('div');
@@ -823,6 +851,7 @@ export const myBooksDictProvider: DictionaryProvider = {
         _: ctx._,
         lang: ctx.lang,
         isDarkMode: ctx.isDarkMode,
+        onAddNote: ctx.onAddNote,
       });
 
       return { ok: true, headword: trimmed, sourceLabel: 'MyBooks' };

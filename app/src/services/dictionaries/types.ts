@@ -22,6 +22,8 @@ export interface DictionaryLookupContext {
    * cross-link navigation can ignore it.
    */
   onNavigate?(word: string): void;
+  /** Adds text as a note on the reader's current selection; absent when not available. */
+  onAddNote?(text: string): void;
   /**
    * Theme hint forwarded by the shell. Providers that inject styles into a
    * shadow root (MDict) use this to pick blend modes / overrides that match

@@ -38,6 +38,7 @@ export const createMyDictProvider = (entry: MyDictEntry): DictionaryProvider => 
           // be re-anchored to this server, not to the reader's own origin.
           baseUrl: entry.url,
           onNavigate: ctx.onNavigate,
+          onAddNote: ctx.onAddNote,
           _: ctx._,
           lang: ctx.lang,
           isDarkMode: ctx.isDarkMode,

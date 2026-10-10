@@ -45,6 +45,7 @@ export const createSiteDictProvider = (entry: SiteDictEntry): DictionaryProvider
           baseUrl: `${dictBase}/res`,
           vocab,
           onNavigate: ctx.onNavigate,
+          onAddNote: ctx.onAddNote,
           _: ctx._,
           lang: ctx.lang,
           isDarkMode: ctx.isDarkMode,
