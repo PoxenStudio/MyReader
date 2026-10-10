@@ -25,6 +25,7 @@ function storeAndEvict(key: string, objectUrl: string): void {
   if (oldestKey === undefined || oldestKey === key) return;
   const oldestUrl = urlCache.get(oldestKey);
   urlCache.delete(oldestKey);
+  console.log('[cover] evict+revoke', urlCache.size);
   if (oldestUrl) URL.revokeObjectURL(oldestUrl);
 }
 

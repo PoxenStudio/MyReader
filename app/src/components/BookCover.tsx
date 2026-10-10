@@ -185,6 +185,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     };
 
     const handleImageError = () => {
+      console.log('[cover] img error', book.hash, (displayImageUrl ?? '').slice(0, 24));
       setImageLoaded(false);
       setImageError(true);
       toggleImageVisibility(false);
@@ -221,14 +222,19 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
 
       let cancelled = false;
       const { title, hash } = book;
+      const t0 = performance.now();
 
       getOrCreateCoverObjectUrl(coverUrl, () => fetchRemoteCoverObjectUrl(coverUrl, title, hash))
         .then((objectUrl) => {
+          const ms = Math.round(performance.now() - t0);
+          if (ms > 1000 || cancelled)
+            console.log('[cover] slow/late', hash, ms, 'ms cancelled', cancelled);
           if (cancelled) return;
           setDisplayImageUrl(objectUrl);
           toggleImageVisibility(true);
         })
         .catch((error: unknown) => {
+          console.log('[cover] fetch fail', hash, 'cancelled', cancelled, String(error));
           if (cancelled) return;
           const errorMsg = `[BookCover] Failed to fetch remote cover for book: ${title} (${hash}): ${error}`;
           console.error(errorMsg);
