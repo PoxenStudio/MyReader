@@ -450,6 +450,89 @@ pub async fn upload_file(
     }
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadPart {
+    field: String,
+    file_path: String,
+    file_name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadResponse {
+    status: u16,
+    body: String,
+    /// Raw `Set-Cookie` values, so JS can merge a rotated session back into its cookie store.
+    set_cookies: Vec<String>,
+}
+
+/// Multipart upload streamed from disk. File bytes never cross the JS<->Rust
+/// boundary, and the request carries only the caller-supplied headers (the
+/// `Cookie` header must be passed explicitly: reqwest here has no cookie jar).
+#[command]
+pub async fn upload_multipart(
+    app: AppHandle,
+    url: &str,
+    fields: Vec<(String, String)>,
+    files: Vec<UploadPart>,
+    headers: HashMap<String, String>,
+    on_progress: Channel<ProgressPayload>,
+) -> Result<UploadResponse> {
+    let mut opened = Vec::with_capacity(files.len());
+    let mut total = 0u64;
+    for part in &files {
+        ensure_path_allowed(&app, &part.file_path)?;
+        let file = File::open(&part.file_path).await?;
+        let len = file.metadata().await?.len();
+        total += len;
+        opened.push((file, len));
+    }
+
+    let stats = Arc::new(std::sync::Mutex::new(TransferStats::default()));
+    let mut form = reqwest::multipart::Form::new();
+    for (name, value) in fields {
+        form = form.text(name, value);
+    }
+    for (part, (file, len)) in files.into_iter().zip(opened) {
+        let stream = FramedRead::new(file, BytesCodec::new()).map_ok(|r| r.freeze());
+        let stats = Arc::clone(&stats);
+        let channel = on_progress.clone();
+        let body = reqwest::Body::wrap_stream(ReadProgressStream::new(
+            stream,
+            Box::new(move |chunk, _| {
+                let mut s = stats.lock().unwrap();
+                s.record_chunk_transfer(chunk as usize);
+                let _ = channel.send(ProgressPayload {
+                    progress: s.total_transferred,
+                    total,
+                    transfer_speed: s.transfer_speed,
+                });
+            }),
+        ));
+        form = form.part(
+            part.field,
+            reqwest::multipart::Part::stream_with_length(body, len).file_name(part.file_name),
+        );
+    }
+
+    let mut request = reqwest::Client::new().post(url).multipart(form);
+    for (key, value) in headers {
+        request = request.header(&key, value);
+    }
+
+    let response = request.send().await?;
+    let status = response.status().as_u16();
+    let set_cookies = response
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok().map(String::from))
+        .collect();
+    let body = response.text().await?;
+    Ok(UploadResponse { status, body, set_cookies })
+}
+
 fn file_to_body(channel: Channel<ProgressPayload>, file: File, file_len: u64) -> reqwest::Body {
     let stream = FramedRead::new(file, BytesCodec::new()).map_ok(|r| r.freeze());
 

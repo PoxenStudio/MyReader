@@ -1,13 +1,14 @@
 import clsx from 'clsx';
 import React, { useEffect, useState } from 'react';
-import { MdFileUpload } from 'react-icons/md';
+import { MdFileUpload, MdHistory } from 'react-icons/md';
 
 import Dialog from '@/components/Dialog';
 import { useEnv } from '@/context/EnvContext';
 import { useThemeStore } from '@/store/themeStore';
 import { useFileSelector } from '@/hooks/useFileSelector';
 import { useTranslation } from '@/hooks/useTranslation';
-import { fetchMyBooks } from '@/services/mybooksService';
+import { fetchMyBooks, uploadMyBooksFilesNative } from '@/services/mybooksService';
+import { isTauriAppPlatform } from '@/services/environment';
 
 interface BatchItem {
   id: number;
@@ -26,6 +27,16 @@ interface UploadFabProps {
   bottomOffset?: number;
   onUploaded?: () => void;
 }
+
+const LAST_IMPORT_KEY = 'mybooks_last_import_id';
+
+const readLastImportId = (): number | null => {
+  try {
+    return Number(localStorage.getItem(LAST_IMPORT_KEY)) || null;
+  } catch {
+    return null;
+  }
+};
 
 const STATUS_BADGE: Record<string, string> = {
   imported: 'badge-primary',
@@ -69,6 +80,7 @@ const UploadFab: React.FC<UploadFabProps> = ({ bottomOffset = 0, onUploaded }) =
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [batchId, setBatchId] = useState<number | null>(null);
+  const [lastImportId, setLastImportId] = useState<number | null>(readLastImportId);
   const [batch, setBatch] = useState<BatchStatus>({});
 
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -109,9 +121,32 @@ const UploadFab: React.FC<UploadFabProps> = ({ bottomOffset = 0, onUploaded }) =
     };
   }, [batchId, onUploaded]);
 
-  const closeBatch = () => {
-    setBatchId(null);
-    setOpen(false);
+  // Hiding the dialog must not stop polling or drop the record; the history button reopens it.
+  const closeBatch = () => setOpen(false);
+
+  const showLastBatch = () => {
+    if (!batchId) setBatchId(lastImportId);
+    setOpen(true);
+  };
+
+  const handleUploadResult = (
+    r: { err: string; msg?: string; import_id?: number },
+    single: boolean,
+  ) => {
+    if (r.err === 'ok' && single) {
+      toast('success', _('Upload succeeded'));
+      onUploaded?.();
+    } else if (r.err === 'ok' && r.import_id) {
+      setBatch({ importing: true, items: [] });
+      setBatchId(r.import_id);
+      setLastImportId(r.import_id);
+      try {
+        localStorage.setItem(LAST_IMPORT_KEY, String(r.import_id));
+      } catch {}
+      setOpen(true);
+    } else {
+      toast('error', r.msg || _('Upload failed'));
+    }
   };
 
   const handleClick = async () => {
@@ -120,6 +155,32 @@ const UploadFab: React.FC<UploadFabProps> = ({ bottomOffset = 0, onUploaded }) =
     if (result.error || result.files.length === 0) return;
     setUploading(true);
     try {
+      // Plain filesystem paths are streamed by Rust; content:// URIs and web Files
+      // can't be read there, so they take the in-memory FormData path below.
+      const nativeFiles = result.files.map((f) => ({
+        path: f.path,
+        name: f.name ?? '',
+      }));
+      if (
+        isTauriAppPlatform() &&
+        result.files.every((f) => !f.file && f.path && /^(\/|[A-Za-z]:[\\/])/.test(f.path))
+      ) {
+        const single = nativeFiles.length === 1;
+        const rsp = await uploadMyBooksFilesNative<unknown>(
+          single ? '/book/upload' : '/book/upload/batch',
+          nativeFiles.map((f) => ({
+            field: single ? 'ebook' : 'ebooks',
+            filePath: f.path!,
+            fileName: f.name,
+          })),
+          single ? [] : nativeFiles.map((): [string, string] => ['relative_paths', '']),
+        );
+        handleUploadResult(
+          rsp as unknown as { err: string; msg?: string; import_id?: number },
+          single,
+        );
+        return;
+      }
       // Read one at a time to keep peak memory low on mobile.
       const files: File[] = [];
       for (const f of result.files) {
@@ -137,27 +198,17 @@ const UploadFab: React.FC<UploadFabProps> = ({ bottomOffset = 0, onUploaded }) =
       if (files.length === 1) {
         data.append('ebook', files[0]!, files[0]!.name);
         const rsp = await fetchMyBooks<unknown>('/book/upload', undefined, 'POST', data);
-        const r = rsp as unknown as { err: string; msg?: string };
-        if (r.err === 'ok') {
-          toast('success', _('Upload succeeded'));
-          onUploaded?.();
-        } else {
-          toast('error', r.msg || _('Upload failed'));
-        }
+        handleUploadResult(rsp as unknown as { err: string; msg?: string }, true);
       } else {
         files.forEach((f) => {
           data.append('ebooks', f, f.name);
           data.append('relative_paths', '');
         });
         const rsp = await fetchMyBooks<unknown>('/book/upload/batch', undefined, 'POST', data);
-        const r = rsp as unknown as { err: string; msg?: string; import_id?: number };
-        if (r.err === 'ok' && r.import_id) {
-          setBatch({ importing: true, items: [] });
-          setBatchId(r.import_id);
-          setOpen(true);
-        } else {
-          toast('error', r.msg || _('Upload failed'));
-        }
+        handleUploadResult(
+          rsp as unknown as { err: string; msg?: string; import_id?: number },
+          false,
+        );
       }
     } catch (e) {
       toast('error', `${_('Upload failed')}: ${(e as Error).message}`);
@@ -179,6 +230,21 @@ const UploadFab: React.FC<UploadFabProps> = ({ bottomOffset = 0, onUploaded }) =
         >
           {message.text}
         </div>
+      )}
+      {lastImportId && (
+        <button
+          type='button'
+          aria-label={_('Batch import')}
+          onClick={showLastBatch}
+          className='bg-base-200 fixed right-20 z-10 flex h-10 w-10 items-center justify-center rounded-full shadow-lg active:opacity-80'
+          style={{ bottom: `calc(1rem + ${safeBottom}px + ${bottomOffset}px + 0.25rem)` }}
+        >
+          {batch.importing ? (
+            <span className='loading loading-spinner loading-sm' />
+          ) : (
+            <MdHistory className='h-5 w-5' />
+          )}
+        </button>
       )}
       <button
         type='button'

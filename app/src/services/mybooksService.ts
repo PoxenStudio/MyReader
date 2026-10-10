@@ -3,6 +3,7 @@
  * 提供与 MyReader 后端 API 的交互能力
  */
 
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { isTauriAppPlatform } from '@/services/environment';
 import { logTime } from '@/utils/misc';
@@ -396,6 +397,46 @@ export async function fetchMyBooks<T>(
   }
 
   return result;
+}
+
+export interface MyBooksUploadFile {
+  field: string;
+  filePath: string;
+  fileName: string;
+}
+
+/**
+ * Tauri only: multipart upload streamed from disk by Rust, so file bytes never
+ * enter the webview. reqwest there has no cookie jar, so the session (and NAS)
+ * cookies are passed explicitly, and any Set-Cookie in the reply is merged back.
+ */
+export async function uploadMyBooksFilesNative<T>(
+  endpoint: string,
+  files: MyBooksUploadFile[],
+  fields: [string, string][] = [],
+  onProgress?: (p: { progress: number; total: number }) => void,
+): Promise<MyBooksResponse<T>> {
+  const host = localStorage.getItem('mybooks_host');
+  if (!host) throw new Error('MyReader host not configured');
+  const url = `${host.replace(/\/$/, '')}/api${endpoint}`;
+  const channel = new Channel<{ progress: number; total: number }>();
+  if (onProgress) channel.onmessage = onProgress;
+  const rsp = await invoke<{ status: number; body: string; setCookies: string[] }>(
+    'upload_multipart',
+    {
+      url,
+      fields,
+      files,
+      headers: buildMyBooksCookieHeaders(url, { alwaysSession: true }),
+      onProgress: channel,
+    },
+  );
+  const pairs = rsp.setCookies.map((c) => c.split(';', 1)[0]!.trim()).filter(Boolean);
+  if (pairs.length) mergeTauriMyBooksCookie(pairs.join('; '));
+  if (rsp.status < 200 || rsp.status >= 300) {
+    throw new Error(`HTTP ${rsp.status}`);
+  }
+  return JSON.parse(rsp.body) as MyBooksResponse<T>;
 }
 
 /**
