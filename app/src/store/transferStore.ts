@@ -8,7 +8,9 @@ export type TransferStatus = 'pending' | 'in_progress' | 'completed' | 'failed' 
 // of a parallel one, but carries its own minimal payload in `audiobook`
 // rather than being looked up from the local library by `bookHash` the way
 // 'book' transfers are (audiobooks have no local library entry).
-export type TransferKind = 'book' | 'audiobook_track';
+// 'file_upload' — a local file picked for upload to MyBooks that is not in the
+// library yet (no Book/hash), so like audiobook tracks it carries its own payload.
+export type TransferKind = 'book' | 'audiobook_track' | 'file_upload';
 /**
  * Why a transfer was cancelled. 'user' = an explicit cancel action;
  * 'policy' = the app cancelled it because MyBooks Cloud is not the
@@ -37,6 +39,14 @@ export interface AudiobookTrackPayload {
   size: number;
 }
 
+// Self-contained payload for a 'file_upload' transfer. `filePath` is a plain
+// filesystem path or a content:// URI; a web File lives only in memory (see
+// TransferManager.queueFileUploads) so it has no path and can't survive a restart.
+export interface FileUploadPayload {
+  filePath?: string;
+  fileName: string;
+}
+
 export interface TransferItem {
   id: string;
   kind: TransferKind;
@@ -59,6 +69,8 @@ export interface TransferItem {
   isBackground: boolean;
   // Present only when kind === 'audiobook_track'.
   audiobook?: AudiobookTrackPayload;
+  // Present only when kind === 'file_upload'.
+  fileUpload?: FileUploadPayload;
 }
 
 interface TransferState {
@@ -99,6 +111,7 @@ interface TransferState {
     displayLabel: string,
     priority?: number,
   ) => string;
+  addFileUploadTransfers: (items: Array<FileUploadPayload & { key: string }>) => string[];
   removeTransfer: (transferId: string) => void;
   updateTransferProgress: (
     transferId: string,
@@ -270,6 +283,36 @@ export const useTransferStore = create<TransferState>((set, get) => ({
     }));
 
     return id;
+  },
+
+  addFileUploadTransfers: (items) => {
+    const now = Date.now();
+    const ids: string[] = [];
+    const created: Record<string, TransferItem> = {};
+    for (const { key, filePath, fileName } of items) {
+      const id = generateTransferId();
+      ids.push(id);
+      created[id] = {
+        id,
+        kind: 'file_upload',
+        bookHash: key,
+        bookTitle: fileName,
+        type: 'upload',
+        status: 'pending',
+        progress: 0,
+        totalBytes: 0,
+        transferredBytes: 0,
+        transferSpeed: 0,
+        retryCount: 0,
+        maxRetries: 3,
+        createdAt: now,
+        priority: 10,
+        isBackground: false,
+        fileUpload: { filePath, fileName },
+      };
+    }
+    set((state) => ({ transfers: { ...state.transfers, ...created } }));
+    return ids;
   },
 
   removeTransfer: (transferId) => {

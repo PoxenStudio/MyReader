@@ -12,7 +12,12 @@ import { isBookFileContentSource, resolveBookContentSource } from './bookContent
 import { EXTS, sniffBinaryBookFormat } from '@/libs/document';
 import { isTauriAppPlatform } from '@/services/environment';
 import { getCloudBookId, getMyBooksId } from '@/utils/bookConverter';
-import { uploadBookToMyBooks, deleteBookFromMyBooks } from '@/services/mybooksService';
+import {
+  uploadBookToMyBooks,
+  uploadMyBooksFilesNative,
+  isNativeFsPath,
+  deleteBookFromMyBooks,
+} from '@/services/mybooksService';
 import { buildMyBooksCookieHeaders } from '@/services/mybooks/cookieHeaders';
 
 export async function deleteBook(
@@ -92,6 +97,7 @@ export async function uploadBook(
   fs: FileSystem,
   book: Book,
   onProgress?: ProgressHandler,
+  resolveNativePath?: (book: Book) => Promise<string | null>,
 ): Promise<number> {
   let bookSource = await resolveBookContentSource(fs, book);
   if (bookSource.kind === 'url') {
@@ -108,20 +114,34 @@ export async function uploadBook(
     throw new Error('Book file not uploaded');
   }
 
-  const file = await fs.openFile(bookSource.path, bookSource.base);
-  const arrayBuffer = await file.arrayBuffer();
-  const f = file as ClosableFile;
-  if (f && f.close) {
-    await f.close();
-  }
+  // On Tauri, stream the file from disk in Rust so a large PDF never enters the
+  // webview's memory (the in-memory FormData path is what failed on big files).
+  const nativePath = isTauriAppPlatform() ? await resolveNativePath?.(book) : null;
+  let bookId: number;
+  if (nativePath && isNativeFsPath(nativePath)) {
+    const rsp = await uploadMyBooksFilesNative<unknown>(
+      '/book/upload',
+      [{ field: 'ebook', filePath: nativePath, fileName: getRemoteBookFilename(book) }],
+      [],
+      ({ progress, total }) => onProgress?.({ progress, total, transferSpeed: 0 }),
+    );
+    bookId = rsp.book_id ?? 0;
+  } else {
+    const file = await fs.openFile(bookSource.path, bookSource.base);
+    const arrayBuffer = await file.arrayBuffer();
+    const f = file as ClosableFile;
+    if (f && f.close) {
+      await f.close();
+    }
 
-  onProgress?.({ progress: 0, total: arrayBuffer.byteLength, transferSpeed: 0 });
-  const bookId = await uploadBookToMyBooks(new Blob([arrayBuffer]), getRemoteBookFilename(book));
-  onProgress?.({
-    progress: arrayBuffer.byteLength,
-    total: arrayBuffer.byteLength,
-    transferSpeed: 0,
-  });
+    onProgress?.({ progress: 0, total: arrayBuffer.byteLength, transferSpeed: 0 });
+    bookId = await uploadBookToMyBooks(new Blob([arrayBuffer]), getRemoteBookFilename(book));
+    onProgress?.({
+      progress: arrayBuffer.byteLength,
+      total: arrayBuffer.byteLength,
+      transferSpeed: 0,
+    });
+  }
 
   book.deletedAt = null;
   book.updatedAt = Date.now();

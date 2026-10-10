@@ -2126,6 +2126,8 @@
   "Auto retry and resume transfers": "自动重试并恢复传输",
   "Interrupted": "已中断",
   "File Transfers": "文件传输",
+  "Added to upload queue": "已加入上传队列",
+  "File is no longer available": "文件已不可用",
   "Upload succeeded": "上传成功",
   "Upload failed": "上传失败",
   "Batch import": "批量导入",

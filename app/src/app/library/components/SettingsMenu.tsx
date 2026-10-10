@@ -249,7 +249,9 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({
             )}
             <MenuItem
               label={_('File Transfers')}
-              Icon={MdCloudSync}
+              Icon={
+                hasActiveTransfers ? <MdCloudSync className='text-error h-5 w-5' /> : MdCloudSync
+              }
               description={
                 hasActiveTransfers
                   ? _('{{activeCount}} active, {{pendingCount}} pending', {
