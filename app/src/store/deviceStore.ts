@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { onBackButtonPress } from '@tauri-apps/api/app';
+import type { PluginListener } from '@tauri-apps/api/core';
 import { interceptKeys, getScreenBrightness, setScreenBrightness } from '@/utils/bridge';
 import { eventDispatcher } from '@/utils/event';
 import { NativeTouchEventType } from '@/types/system';
@@ -16,15 +18,28 @@ const handleNativeKeyDown = (keyName: string, keyCode?: number) => {
   // dispatched asynchronously through the same channel.
   if (keyName === 'Back') {
     const consumed = eventDispatcher.dispatchSync('native-key-down', { keyName, keyCode });
-    console.log(
-      '[back] listeners',
-      eventDispatcher.listenerCount('native-key-down'),
-      'consumed',
-      consumed,
-    );
+    console.log('[back] consumed', consumed);
     return consumed;
   }
   return eventDispatcher.dispatch('native-key-down', { keyName, keyCode });
+};
+
+// The native bridge doesn't forward Back; Android's back press reaches JS only
+// through Tauri's `back-button` event, and a registered listener replaces the default.
+let backListener: PluginListener | null = null;
+const attachBackListener = () => {
+  onBackButtonPress(() => {
+    if (!handleNativeKeyDown('Back')) window.history.back();
+  })
+    .then((l) => {
+      backListener = l;
+      console.log('[back] listener attached');
+    })
+    .catch((e) => console.log('[back] listener failed', String(e)));
+};
+const detachBackListener = () => {
+  void backListener?.unregister();
+  backListener = null;
 };
 
 type DeviceControlState = {
@@ -79,6 +94,7 @@ export const useDeviceControlStore = create<DeviceControlState>((set, get) => ({
     if (backKeyInterceptionCount == 0) {
       window.onNativeKeyDown = handleNativeKeyDown;
       interceptKeys({ backKey: true });
+      attachBackListener();
       set({ backKeyIntercepted: true });
     }
     set({ backKeyInterceptionCount: backKeyInterceptionCount + 1 });
@@ -88,6 +104,7 @@ export const useDeviceControlStore = create<DeviceControlState>((set, get) => ({
     const { backKeyInterceptionCount } = get();
     if (backKeyInterceptionCount <= 1) {
       interceptKeys({ backKey: false });
+      detachBackListener();
       set({ backKeyIntercepted: false, backKeyInterceptionCount: 0 });
     } else {
       set({ backKeyInterceptionCount: backKeyInterceptionCount - 1 });
