@@ -302,7 +302,12 @@ export abstract class BaseAppService implements AppService {
   }
 
   async uploadBook(book: Book, onProgress?: ProgressHandler): Promise<number> {
-    return CloudSvc.uploadBook(this.fs, book, onProgress);
+    return CloudSvc.uploadBook(
+      this.fs,
+      book,
+      onProgress,
+      this.resolveNativeBookFilePath.bind(this),
+    );
   }
 
   async downloadBook(

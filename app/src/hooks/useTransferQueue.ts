@@ -51,6 +51,12 @@ export function useTransferQueue(libraryLoaded = true, delayInit = 0) {
     return transferManager.queueBatchUploads(books, priority);
   }, []);
 
+  const queueFileUploads = useCallback(
+    (files: Array<{ path?: string; file?: File; name: string }>) =>
+      transferManager.queueFileUploads(files),
+    [],
+  );
+
   const cancelTransfer = useCallback((transferId: string) => {
     transferManager.cancelTransfer(transferId);
   }, []);
@@ -136,6 +142,7 @@ export function useTransferQueue(libraryLoaded = true, delayInit = 0) {
     queueUpload,
     queueDownload,
     queueBatchUploads,
+    queueFileUploads,
     cancelTransfer,
     retryTransfer,
     retryAllFailed,

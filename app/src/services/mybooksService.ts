@@ -252,6 +252,7 @@ export class MyBooksApiError extends Error {
 const MYBOOKS_REQUEST_TIMEOUT_MS = 5000;
 const MYBOOKS_REQUEST_MAX_RETRIES = 3;
 const MYBOOKS_RETRY_DELAY_MS = 300;
+export const MYBOOKS_UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 
 // Debug switch: flip to true by hand when building a test package; off by default.
 // Logs one `[status][cost][method][path]` line per request.
@@ -436,8 +437,15 @@ export async function uploadMyBooksFilesNative<T>(
   if (rsp.status < 200 || rsp.status >= 300) {
     throw new Error(`HTTP ${rsp.status}`);
   }
-  return JSON.parse(rsp.body) as MyBooksResponse<T>;
+  const result = JSON.parse(rsp.body) as MyBooksResponse<T>;
+  if (result.err !== 'ok') {
+    throw new MyBooksApiError(result.err, result.msg || 'Failed to fetch from MyReader');
+  }
+  return result;
 }
+
+/** Plain filesystem path (POSIX or Windows drive) that Rust can open, unlike content:// URIs. */
+export const isNativeFsPath = (p: string): boolean => /^(\/|[A-Za-z]:[\\/])/.test(p);
 
 /**
  * 检测与 MyBooks 服务器的连接性
@@ -978,7 +986,14 @@ export async function getBookReadingStats(
 export async function uploadBookToMyBooks(file: Blob, filename: string): Promise<number> {
   const formData = new FormData();
   formData.append('ebook', file, filename);
-  const response = await fetchMyBooks('/book/upload', undefined, 'POST', formData);
+  const response = await fetchMyBooks(
+    '/book/upload',
+    undefined,
+    'POST',
+    formData,
+    undefined,
+    MYBOOKS_UPLOAD_TIMEOUT_MS,
+  );
   return response.book_id ?? 0;
 }
 

@@ -35,6 +35,7 @@ import { refreshTauriAccessCodeCookie } from '@/services/mybooks/accessCodeRefre
 import { hasTauriMyBooksCookieNamed } from '@/services/mybooks/tauriCookieStore';
 import { isTauriAppPlatform } from '@/services/environment';
 import { eventDispatcher } from '@/utils/event';
+import { useTransferStore } from '@/store/transferStore';
 import { useTrafficLight } from '@/hooks/useTrafficLight';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { debounce } from '@/utils/debounce';
@@ -91,6 +92,11 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   const { systemUIVisible, statusBarHeight } = useThemeStore();
   const { currentBookshelf } = useLibraryStore();
   const connectionStatus = useMyBooksConnectionStatus();
+  const hasActiveTransfers = useTransferStore((state) =>
+    Object.values(state.transfers).some(
+      (t) => t.status === 'pending' || t.status === 'in_progress',
+    ),
+  );
   const { status, isGuest, setIsAdmin, host, logout } = useAuth();
   const openLoginDialog = useAuthUIStore((state) => state.openLoginDialog);
   const { setSettingsDialogOpen, setRequestedPanel } = useSettingsStore();
@@ -529,7 +535,13 @@ const LibraryHeader: React.FC<LibraryHeaderProps> = ({
               label={_('Settings Menu')}
               className='exclude-title-bar-mousedown dropdown-bottom dropdown-end'
               buttonClassName='btn btn-ghost h-8 min-h-8 w-8 p-0'
-              toggleButton={<MdOutlineMenu role='none' size={iconSize18} />}
+              toggleButton={
+                <MdOutlineMenu
+                  role='none'
+                  size={iconSize18}
+                  className={hasActiveTransfers ? 'text-error' : undefined}
+                />
+              }
             >
               <SettingsMenu onImportBooksFromDirectory={onImportBooksFromDirectory} />
             </Dropdown>

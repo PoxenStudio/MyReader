@@ -6,7 +6,14 @@ import { TranslationFunc } from '@/hooks/useTranslation';
 import { createProgressThrottle, ProgressPayload } from '@/utils/transfer';
 import { eventDispatcher } from '@/utils/event';
 import { getTransferMessages } from './transferMessages';
-import { MyBooksApiError } from './mybooksService';
+import {
+  MyBooksApiError,
+  fetchMyBooks,
+  isNativeFsPath,
+  MYBOOKS_UPLOAD_TIMEOUT_MS,
+  uploadMyBooksFilesNative,
+} from './mybooksService';
+import { isTauriAppPlatform } from './environment';
 import { downloadMyBooksUrl } from './cloudService';
 import { resolveAudioTrackUrl, type AudioTrack } from './audiobook/audiobookService';
 import {
@@ -32,6 +39,7 @@ const QUOTA_TOAST_FLUSH_MS = 1500;
 // more expensive. Cap what gets written to the most recently completed N —
 // the in-memory store (and thus the UI history list) is untouched.
 const MAX_PERSISTED_COMPLETED = 50;
+const MAX_CONCURRENT_UPLOADS = 1;
 
 interface PersistedQueueData {
   schemaVersion?: number;
@@ -73,6 +81,8 @@ class TransferManager {
   private updateBook: ((book: Book) => Promise<void>) | null = null;
   private _: TranslationFunc | null = null;
   private settingsUnsub: (() => void) | null = null;
+  // Web File objects can't be persisted, so they wait here keyed by dedup key.
+  private pendingWebFiles: Map<string, File> = new Map();
   private quotaFailureCount = 0;
   private quotaToastTimer: ReturnType<typeof setTimeout> | null = null;
   private readyResolve: () => void = () => {};
@@ -203,6 +213,31 @@ class TransferManager {
     this.persistQueue();
     this.processQueue();
     return transferId;
+  }
+
+  /**
+   * Queues local files (not in the library) for upload to MyBooks, one transfer
+   * per file. Identity is `file:<path|name+size>` so re-picking a file that is
+   * still queued/uploading is a no-op.
+   */
+  queueFileUploads(files: Array<{ path?: string; file?: File; name: string }>): string[] {
+    if (!this.isReady()) {
+      console.warn('TransferManager not initialized');
+      return [];
+    }
+    const store = useTransferStore.getState();
+    const items: Array<{ key: string; filePath?: string; fileName: string }> = [];
+    for (const f of files) {
+      const key = `file:${f.path ?? `${f.name}:${f.file?.size ?? 0}`}`;
+      if (store.getTransferByBookHash(key, 'upload')) continue;
+      if (f.file) this.pendingWebFiles.set(key, f.file);
+      items.push({ key, filePath: f.path, fileName: f.name });
+    }
+    if (items.length === 0) return [];
+    const ids = store.addFileUploadTransfers(items);
+    this.persistQueue();
+    this.processQueue();
+    return ids;
   }
 
   queueDownload(book: Book, priority: number = 10): string | null {
@@ -416,7 +451,17 @@ class TransferManager {
       return a.createdAt - b.createdAt;
     });
 
-    const toProcess = sortedPending.slice(0, availableSlots);
+    let activeUploads = store.getActiveTransfers().filter((t) => t.type === 'upload').length;
+    const toProcess: TransferItem[] = [];
+    for (const t of sortedPending) {
+      if (toProcess.length >= availableSlots) break;
+      if (t.type === 'upload') {
+        if (activeUploads >= MAX_CONCURRENT_UPLOADS) continue;
+        activeUploads++;
+      }
+      toProcess.push(t);
+    }
+    if (toProcess.length === 0) return;
 
     await Promise.all(toProcess.map((transfer) => this.executeTransfer(transfer)));
 
@@ -465,6 +510,8 @@ class TransferManager {
     try {
       if (transfer.kind === 'audiobook_track') {
         await this.executeAudiobookTrackTransfer(transfer, progressHandler);
+      } else if (transfer.kind === 'file_upload') {
+        await this.executeFileUpload(transfer, progressHandler);
       } else {
         await this.executeBookTransfer(transfer, progressHandler, abortController);
       }
@@ -632,6 +679,49 @@ class TransferManager {
     const dst = await appService.resolveFilePath(`${dirRel}/${payload.filename}`, 'Books');
     const resolvedUrl = resolveAudioTrackUrl(payload.url);
     await downloadMyBooksUrl(appService, resolvedUrl, dst, progressHandler);
+  }
+
+  /**
+   * Uploads one picked file to MyBooks. Plain filesystem paths are streamed by
+   * Rust (bytes never enter the webview); content:// URIs and web Files can't
+   * be read there and fall back to an in-memory FormData upload.
+   */
+  private async executeFileUpload(
+    transfer: TransferItem,
+    progressHandler: (p: ProgressPayload) => void,
+  ): Promise<void> {
+    const payload = transfer.fileUpload;
+    if (!payload) throw new Error('Missing file upload payload');
+    const { filePath, fileName } = payload;
+
+    let rsp: { err: string; msg?: string };
+    if (isTauriAppPlatform() && filePath && isNativeFsPath(filePath)) {
+      rsp = await uploadMyBooksFilesNative<unknown>(
+        '/book/upload',
+        [{ field: 'ebook', filePath, fileName }],
+        [],
+        ({ progress, total }) => progressHandler({ progress, total, transferSpeed: 0 }),
+      );
+    } else {
+      let file = this.pendingWebFiles.get(transfer.bookHash);
+      if (!file && filePath) {
+        const nf = await this.appService!.openFile(filePath, 'None');
+        file = new File([await nf.arrayBuffer()], fileName, { type: nf.type });
+      }
+      if (!file) throw new Error(this._!('File is no longer available'));
+      const data = new FormData();
+      data.append('ebook', file, fileName);
+      rsp = await fetchMyBooks<unknown>(
+        '/book/upload',
+        undefined,
+        'POST',
+        data,
+        undefined,
+        MYBOOKS_UPLOAD_TIMEOUT_MS,
+      );
+    }
+    if (rsp.err !== 'ok') throw new MyBooksApiError(rsp.err, rsp.msg);
+    this.pendingWebFiles.delete(transfer.bookHash);
   }
 
   private async loadPersistedQueue(): Promise<void> {
