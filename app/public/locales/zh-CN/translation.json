@@ -2125,5 +2125,18 @@
   "Transfer Settings": "传输设置",
   "Auto retry and resume transfers": "自动重试并恢复传输",
   "Interrupted": "已中断",
-  "File Transfers": "文件传输"
+  "File Transfers": "文件传输",
+  "Upload succeeded": "上传成功",
+  "Upload failed": "上传失败",
+  "Batch import": "批量导入",
+  "Import completed": "导入完成",
+  "Imported successfully": "导入成功",
+  "Same name exists": "存在同名",
+  "Ready to import": "可导入",
+  "Pending scan": "待扫描",
+  "Duplicate file": "文件重复",
+  "Invalid file": "文件无效",
+  "File missing": "文件丢失",
+  "Insufficient permission": "权限不足",
+  "Invalid ISBN": "ISBN无效"
 }

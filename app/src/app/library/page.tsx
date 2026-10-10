@@ -118,6 +118,7 @@ import ModalPortal from '@/components/ModalPortal';
 import ErrorMessageDialog from '@/components/ErrorMessageDialog';
 import TransferQueuePanel from './components/TransferQueuePanel';
 import LibraryDrawer from './components/LibraryDrawer';
+import UploadFab from './components/UploadFab';
 // MyBooks API imports
 import { getBooksByType, searchBooks } from '@/services/mybooksService';
 import { convertMyBooksToLocalBooks, resolveCloudBooksPageAppend } from '@/utils/bookConverter';
@@ -2113,6 +2114,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
               </div>
             </div>
           )}
+          {!!user && !isSelectMode && <UploadFab />}
           <NowPlayingBar isSelectMode={isSelectMode} />
           <AudiobookMiniBar isSelectMode={isSelectMode} />
           <AudiobookPlayerSheet />
