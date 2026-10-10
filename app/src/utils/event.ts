@@ -54,10 +54,6 @@ class EventDispatcher {
     }
   }
 
-  listenerCount(event: string): number {
-    return this.syncListeners.get(event)?.length ?? 0;
-  }
-
   dispatchSync(event: string, detail?: unknown): boolean {
     const listeners = this.syncListeners.get(event);
     if (listeners) {
