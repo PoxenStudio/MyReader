@@ -40,6 +40,9 @@ const QUOTA_TOAST_FLUSH_MS = 1500;
 // the in-memory store (and thus the UI history list) is untouched.
 const MAX_PERSISTED_COMPLETED = 50;
 const MAX_CONCURRENT_UPLOADS = 1;
+// Fallback uploads buffer the whole file in the webview; past this size that gets the
+// app killed (OOM) on mobile, so refuse instead.
+const MAX_IN_MEMORY_UPLOAD_BYTES = 32 * 1024 * 1024;
 
 interface PersistedQueueData {
   schemaVersion?: number;
@@ -488,6 +491,8 @@ class TransferManager {
 
     store.setTransferStatus(transfer.id, 'in_progress');
     store.setActiveCount(store.getActiveTransfers().length + 1);
+    // Persist the in-flight state so a kill mid-upload is restored as interrupted, not re-run.
+    if (transfer.kind === 'file_upload') this.persistQueue();
 
     const progressThrottle = createProgressThrottle((progress) => {
       const percentage = progress.total > 0 ? (progress.progress / progress.total) * 100 : 0;
@@ -706,9 +711,13 @@ class TransferManager {
       let file = this.pendingWebFiles.get(transfer.bookHash);
       if (!file && filePath) {
         const nf = await this.appService!.openFile(filePath, 'None');
+        if (nf.size > MAX_IN_MEMORY_UPLOAD_BYTES)
+          throw new Error(this._!('File is too large to upload'));
         file = new File([await nf.arrayBuffer()], fileName, { type: nf.type });
       }
       if (!file) throw new Error(this._!('File is no longer available'));
+      if (file.size > MAX_IN_MEMORY_UPLOAD_BYTES)
+        throw new Error(this._!('File is too large to upload'));
       const data = new FormData();
       data.append('ebook', file, fileName);
       rsp = await fetchMyBooks<unknown>(

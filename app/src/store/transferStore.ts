@@ -520,6 +520,19 @@ export const useTransferStore = create<TransferState>((set, get) => ({
       // restore.
       if (transfer.status === 'cancelled' && transfer.cancelReason === 'policy') return;
       const withKind: TransferItem = { ...transfer, kind: transfer.kind ?? 'book' };
+      // A file upload that was running when the app died never auto-resumes: if it
+      // is what killed the app, resuming would crash-loop. The user retries by hand.
+      if (withKind.kind === 'file_upload' && withKind.status === 'in_progress') {
+        restoredTransfers[id] = {
+          ...withKind,
+          status: 'failed',
+          error: 'Interrupted',
+          progress: 0,
+          transferredBytes: 0,
+          transferSpeed: 0,
+        };
+        return;
+      }
       const interrupted =
         withKind.status === 'in_progress' ||
         (withKind.status === 'pending' && withKind.retryCount > 0);

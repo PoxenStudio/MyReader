@@ -2128,6 +2128,7 @@
   "File Transfers": "檔案傳輸",
   "Added to upload queue": "已加入上傳佇列",
   "File is no longer available": "檔案已不可用",
+  "File is too large to upload": "檔案過大，無法上傳",
   "Upload succeeded": "上傳成功",
   "Upload failed": "上傳失敗",
   "Batch import": "批次匯入",
