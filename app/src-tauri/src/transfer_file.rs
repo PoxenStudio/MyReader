@@ -18,8 +18,10 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 
 use read_progress_stream::ReadProgressStream;
 
-use std::time::Instant;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const DEBUG_DOWNLOAD_TIMING: bool = true;
 
@@ -483,12 +485,36 @@ pub struct UploadResponse {
     set_cookies: Vec<String>,
 }
 
+/// Upload-cancellation registry: `upload_id` -> flag checked between body
+/// chunks. `cancel_upload` flips the flag and drops the entry; the multipart
+/// body stream then ends early at the next chunk, which breaks the length
+/// promise of `Part::stream_with_length` and fails the request.
+fn upload_cancels() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static CANCELS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    CANCELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Signals an in-flight `upload_multipart` to stop. Returns false when no
+/// upload with that id is running (already finished, or cancelled before it
+/// had a chance to register).
+#[command]
+pub fn cancel_upload(upload_id: String) -> bool {
+    if let Some(flag) = upload_cancels().lock().unwrap().remove(&upload_id) {
+        flag.store(true, Ordering::Relaxed);
+        return true;
+    }
+    false
+}
+
 /// Multipart upload streamed from disk. File bytes never cross the JS<->Rust
 /// boundary, and the request carries only the caller-supplied headers (the
 /// `Cookie` header must be passed explicitly: reqwest here has no cookie jar).
+/// `upload_id` names the upload in the cancellation registry (see
+/// `cancel_upload`); callers pass a fresh unique id per invocation.
 #[command]
 pub async fn upload_multipart(
     app: AppHandle,
+    upload_id: &str,
     url: &str,
     fields: Vec<(String, String)>,
     files: Vec<UploadPart>,
@@ -504,13 +530,24 @@ pub async fn upload_multipart(
         opened.push((file, len));
     }
 
+    let cancelled = Arc::new(AtomicBool::new(false));
+    upload_cancels()
+        .lock()
+        .unwrap()
+        .insert(upload_id.to_string(), Arc::clone(&cancelled));
+
     let stats = Arc::new(std::sync::Mutex::new(TransferStats::default()));
     let mut form = reqwest::multipart::Form::new();
     for (name, value) in fields {
         form = form.text(name, value);
     }
     for (part, (file, len)) in files.into_iter().zip(opened) {
-        let stream = FramedRead::new(file, BytesCodec::new()).map_ok(|r| r.freeze());
+        let stream = FramedRead::new(file, BytesCodec::new())
+            .map_ok(|r| r.freeze())
+            .try_take_while({
+                let cancelled = Arc::clone(&cancelled);
+                move |_| std::future::ready(Ok(!cancelled.load(Ordering::Relaxed)))
+            });
         let stats = Arc::clone(&stats);
         let channel = on_progress.clone();
         let body = reqwest::Body::wrap_stream(ReadProgressStream::new(
@@ -531,12 +568,19 @@ pub async fn upload_multipart(
         );
     }
 
-    let mut request = reqwest::Client::new().post(url).multipart(form);
+    // A connect timeout keeps a dead server from pinning the upload slot
+    // forever; the body itself is only bounded by the cancellation registry.
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .build()?;
+    let mut request = client.post(url).multipart(form);
     for (key, value) in headers {
         request = request.header(&key, value);
     }
 
-    let response = request.send().await?;
+    let response = request.send().await;
+    upload_cancels().lock().unwrap().remove(upload_id);
+    let response = response?;
     let status = response.status().as_u16();
     let set_cookies = response
         .headers()
@@ -546,6 +590,25 @@ pub async fn upload_multipart(
         .collect();
     let body = response.text().await?;
     Ok(UploadResponse { status, body, set_cookies })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancel_upload_only_signals_registered_id() {
+        let flag = Arc::new(AtomicBool::new(false));
+        upload_cancels()
+            .lock()
+            .unwrap()
+            .insert("test-upload".to_string(), Arc::clone(&flag));
+        assert!(cancel_upload("test-upload".to_string()));
+        assert!(flag.load(Ordering::Relaxed));
+        // Already removed by the first cancel: not signalled again.
+        assert!(!cancel_upload("test-upload".to_string()));
+        assert!(!cancel_upload("unknown-upload".to_string()));
+    }
 }
 
 fn file_to_body(channel: Channel<ProgressPayload>, file: File, file_len: u64) -> reqwest::Body {

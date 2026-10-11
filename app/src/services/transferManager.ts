@@ -516,9 +516,16 @@ class TransferManager {
       if (transfer.kind === 'audiobook_track') {
         await this.executeAudiobookTrackTransfer(transfer, progressHandler);
       } else if (transfer.kind === 'file_upload') {
-        await this.executeFileUpload(transfer, progressHandler);
+        await this.executeFileUpload(transfer, progressHandler, abortController);
       } else {
         await this.executeBookTransfer(transfer, progressHandler, abortController);
+      }
+
+      // Uploads don't throw on abort (the native invoke may still land), so an
+      // already-cancelled transfer must not be re-marked completed here.
+      if (abortController.signal.aborted) {
+        // Already cancelled, don't update status
+        return;
       }
 
       // Land the final progress value that the throttle may still be holding.
@@ -689,11 +696,14 @@ class TransferManager {
   /**
    * Uploads one picked file to MyBooks. Plain filesystem paths are streamed by
    * Rust (bytes never enter the webview); content:// URIs and web Files can't
-   * be read there and fall back to an in-memory FormData upload.
+   * be read there and fall back to an in-memory FormData upload. The caller's
+   * abort signal stops both paths: the native one via the Rust cancellation
+   * registry, the in-memory one via the fetch signal.
    */
   private async executeFileUpload(
     transfer: TransferItem,
     progressHandler: (p: ProgressPayload) => void,
+    abortController: AbortController,
   ): Promise<void> {
     const payload = transfer.fileUpload;
     if (!payload) throw new Error('Missing file upload payload');
@@ -706,6 +716,7 @@ class TransferManager {
         [{ field: 'ebook', filePath, fileName }],
         [],
         ({ progress, total }) => progressHandler({ progress, total, transferSpeed: 0 }),
+        { signal: abortController.signal },
       );
     } else {
       let file = this.pendingWebFiles.get(transfer.bookHash);
@@ -727,6 +738,7 @@ class TransferManager {
         data,
         undefined,
         MYBOOKS_UPLOAD_TIMEOUT_MS,
+        abortController.signal,
       );
     }
     if (rsp.err !== 'ok') throw new MyBooksApiError(rsp.err, rsp.msg);
