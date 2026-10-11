@@ -322,3 +322,111 @@ describe('quota failure handling', () => {
     expect(transfer?.retryCount).toBe(3);
   });
 });
+
+describe('deferred resume decision (autoRetryTransfers)', () => {
+  const persistedDownload = (overrides: Partial<TransferItem> = {}) =>
+    makeTransferItem({
+      id: 'dl1',
+      type: 'download',
+      status: 'in_progress',
+      ...overrides,
+    });
+
+  test('before settings hydrate, an interrupted download is parked as failed and not started', async () => {
+    settingsNotLoaded();
+    localStorage.setItem(
+      'readest_transfer_queue',
+      JSON.stringify({ transfers: { dl1: persistedDownload() }, isQueuePaused: false }),
+    );
+
+    const appService = makeAppService();
+    await initManager(appService, [makeBook()]);
+    await flushAsync();
+
+    const transfer = useTransferStore.getState().transfers['dl1'];
+    expect(transfer?.status).toBe('failed');
+    expect(transfer?.error).toBe('Interrupted');
+    expect(appService['downloadBook']).not.toHaveBeenCalled();
+  });
+
+  test('hydrating with autoRetryTransfers=true revives the parked download into the queue', async () => {
+    settingsNotLoaded();
+    localStorage.setItem(
+      'readest_transfer_queue',
+      JSON.stringify({ transfers: { dl1: persistedDownload() }, isQueuePaused: false }),
+    );
+
+    const appService = makeAppService();
+    await initManager(appService, [makeBook()]);
+    await flushAsync();
+    expect(useTransferStore.getState().transfers['dl1']?.status).toBe('failed');
+
+    settingsLoaded({ autoRetryTransfers: true });
+    await flushAsync();
+
+    expect(appService['downloadBook']).toHaveBeenCalledTimes(1);
+    expect(useTransferStore.getState().transfers['dl1']?.status).toBe('completed');
+  });
+
+  test('hydrating with autoRetryTransfers=false leaves the download for manual retry', async () => {
+    settingsNotLoaded();
+    localStorage.setItem(
+      'readest_transfer_queue',
+      JSON.stringify({ transfers: { dl1: persistedDownload() }, isQueuePaused: false }),
+    );
+
+    const appService = makeAppService();
+    await initManager(appService, [makeBook()]);
+    await flushAsync();
+
+    settingsLoaded({ autoRetryTransfers: false });
+    await flushAsync();
+
+    expect(useTransferStore.getState().transfers['dl1']?.status).toBe('failed');
+    expect(appService['downloadBook']).not.toHaveBeenCalled();
+  });
+
+  test('a crash-interrupted file_upload never auto-resumes, whatever the setting says', async () => {
+    settingsNotLoaded();
+    localStorage.setItem(
+      'readest_transfer_queue',
+      JSON.stringify({
+        transfers: {
+          up1: makeTransferItem({
+            id: 'up1',
+            kind: 'file_upload',
+            type: 'upload',
+            status: 'in_progress',
+            fileUpload: { fileName: 'a.epub' },
+          }),
+        },
+        isQueuePaused: false,
+      }),
+    );
+
+    const appService = makeAppService();
+    await initManager(appService, [makeBook()]);
+    await flushAsync();
+    expect(useTransferStore.getState().transfers['up1']?.status).toBe('failed');
+
+    settingsLoaded({ autoRetryTransfers: true });
+    await flushAsync();
+
+    expect(useTransferStore.getState().transfers['up1']?.status).toBe('failed');
+  });
+
+  test('settings already hydrated at restore keep deciding immediately (existing behavior)', async () => {
+    settingsLoaded({ autoRetryTransfers: true });
+    localStorage.setItem(
+      'readest_transfer_queue',
+      JSON.stringify({ transfers: { dl1: persistedDownload() }, isQueuePaused: false }),
+    );
+
+    const appService = makeAppService();
+    await initManager(appService, [makeBook()]);
+    await flushAsync();
+
+    expect(appService['downloadBook']).toHaveBeenCalledTimes(1);
+    expect(useTransferStore.getState().transfers['dl1']?.status).toBe('completed');
+  });
+});

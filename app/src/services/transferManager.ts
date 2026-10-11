@@ -1,6 +1,6 @@
 import { Book } from '@/types/book';
 import { AppService } from '@/types/system';
-import { useTransferStore, TransferItem } from '@/store/transferStore';
+import { useTransferStore, TransferItem, isInterruptedTransfer } from '@/store/transferStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { TranslationFunc } from '@/hooks/useTranslation';
 import { createProgressThrottle, ProgressPayload } from '@/utils/transfer';
@@ -86,6 +86,9 @@ class TransferManager {
   private settingsUnsub: (() => void) | null = null;
   // Web File objects can't be persisted, so they wait here keyed by dedup key.
   private pendingWebFiles: Map<string, File> = new Map();
+  // Interrupted rows restored before settings hydrated, whose resume decision
+  // (autoRetryTransfers) couldn't be read yet; see applyDeferredResume().
+  private deferredResumeIds: string[] = [];
   private quotaFailureCount = 0;
   private quotaToastTimer: ReturnType<typeof setTimeout> | null = null;
   private readyResolve: () => void = () => {};
@@ -169,9 +172,13 @@ class TransferManager {
     this.settingsUnsub?.();
     this.settingsUnsub = useSettingsStore.subscribe((state, prev) => {
       if (state.settings === prev.settings) return;
+      this.applyDeferredResume();
       this.reconcileUploadsWithProvider();
       this.processQueue();
     });
+    // Settings may have hydrated between loadPersistedQueue and the
+    // subscription above; the deferred resume decision must not miss it.
+    this.applyDeferredResume();
 
     // Start processing queue
     this.processQueue();
@@ -757,11 +764,51 @@ class TransferManager {
 
       // Restore all transfers using the store's restore method
       // This preserves the original IDs and handles in_progress -> pending conversion
-      const resume = useSettingsStore.getState().settings.autoRetryTransfers === true;
+      //
+      // The resume decision needs the persisted autoRetryTransfers setting,
+      // but initialize can run before settings hydrate (settings are always
+      // `{}` then, so the default would read as false). When that's the case,
+      // restore conservatively (no resume) and remember which interrupted
+      // rows the decision applies to; applyDeferredResume() re-decides once
+      // settings actually arrive.
+      const settings = useSettingsStore.getState().settings;
+      if (!this.isSettingsLoaded()) {
+        this.deferredResumeIds = Object.values(data.transfers)
+          .filter((t) => isInterruptedTransfer({ ...t, kind: t.kind ?? 'book' }))
+          .map((t) => t.id);
+      }
+      const resume = settings.autoRetryTransfers === true;
       store.restoreTransfers(data.transfers, data.isQueuePaused, resume);
     } catch (error) {
       console.error('Failed to load transfer queue:', error);
     }
+  }
+
+  /**
+   * Applies the resume half of `autoRetryTransfers` once settings are
+   * actually loaded. Rows restored while settings were still empty sit as
+   * failed/'Interrupted'; with the setting on they are revived to pending
+   * exactly as if the setting had been readable at restore time. With it
+   * off they stay failed for the user to retry by hand.
+   */
+  private applyDeferredResume(): void {
+    if (this.deferredResumeIds.length === 0) return;
+    const settings = useSettingsStore.getState().settings;
+    if (!this.isSettingsLoaded()) return;
+    const ids = this.deferredResumeIds;
+    this.deferredResumeIds = [];
+    if (settings.autoRetryTransfers !== true) return;
+
+    const store = useTransferStore.getState();
+    let revived = 0;
+    ids.forEach((id) => {
+      const transfer = store.transfers[id];
+      if (transfer && transfer.status === 'failed' && transfer.error === 'Interrupted') {
+        store.retryTransfer(id);
+        revived++;
+      }
+    });
+    if (revived > 0) this.persistQueue();
   }
 
   private persistQueue(): void {
