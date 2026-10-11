@@ -49,7 +49,7 @@ use tauri_plugin_native_bridge::{NativeBridgeExt, OpenExternalUrlRequest};
 use tauri_plugin_oauth::start;
 #[cfg(not(target_os = "android"))]
 use tauri_plugin_opener::OpenerExt;
-use transfer_file::{download_file, upload_file, upload_multipart};
+use transfer_file::{cancel_upload, download_file, upload_file, upload_multipart};
 
 #[cfg(any(desktop, target_os = "ios"))]
 fn allow_file_in_scopes(app: &AppHandle, files: Vec<PathBuf>) {
@@ -450,6 +450,7 @@ pub fn run() {
             download_file,
             upload_file,
             upload_multipart,
+            cancel_upload,
             get_environment_variable,
             get_executable_dir,
             set_webview_info,
