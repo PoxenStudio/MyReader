@@ -450,6 +450,22 @@ pub async fn upload_file(
     }
 }
 
+/// Opens a file for upload. Android `content://` URIs (what the file picker hands
+/// back) can't go through `File::open`; the fs plugin resolves them to a file
+/// descriptor via the ContentResolver, so the bytes still never enter the webview.
+/// Access to such a URI is enforced by Android itself, so no path scope check applies.
+async fn open_upload_file(app: &AppHandle, file_path: &str) -> Result<File> {
+    if file_path.starts_with("content://") {
+        let url = tauri::Url::parse(file_path)
+            .map_err(|e| Error::UnexpectedResponse(format!("invalid content uri: {e}")))?;
+        let opts = tauri_plugin_fs::OpenOptions::new().read(true).clone();
+        let file = app.fs().open(tauri_plugin_fs::FilePath::Url(url), opts)?;
+        return Ok(File::from_std(file));
+    }
+    ensure_path_allowed(app, file_path)?;
+    Ok(File::open(file_path).await?)
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadPart {
@@ -482,8 +498,7 @@ pub async fn upload_multipart(
     let mut opened = Vec::with_capacity(files.len());
     let mut total = 0u64;
     for part in &files {
-        ensure_path_allowed(&app, &part.file_path)?;
-        let file = File::open(&part.file_path).await?;
+        let file = open_upload_file(&app, &part.file_path).await?;
         let len = file.metadata().await?.len();
         total += len;
         opened.push((file, len));

@@ -444,8 +444,8 @@ export async function uploadMyBooksFilesNative<T>(
   return result;
 }
 
-/** Plain filesystem path (POSIX or Windows drive) that Rust can open, unlike content:// URIs. */
-export const isNativeFsPath = (p: string): boolean => /^(\/|[A-Za-z]:[\\/])/.test(p);
+/** A filesystem path (POSIX or Windows drive) or Android content:// URI that Rust can open directly. */
+export const isNativeFsPath = (p: string): boolean => /^(\/|[A-Za-z]:[\\/]|content:\/\/)/.test(p);
 
 /**
  * 检测与 MyBooks 服务器的连接性
