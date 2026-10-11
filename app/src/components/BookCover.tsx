@@ -51,6 +51,26 @@ export function isRemoteCoverUrl(coverUrl: string): boolean {
   return isTauriAppPlatform() && isRemoteImageUrl(coverUrl);
 }
 
+// Local covers on Tauri live behind the asset:// protocol. WKWebView loads such an <img>
+// once, then fails every later load of the same URL (fetch() on it keeps working), so they
+// are rendered from a blob object URL like remote covers.
+function isLocalAssetCoverUrl(coverUrl: string): boolean {
+  return isTauriAppPlatform() && /^(asset:|https?:\/\/asset\.localhost)/.test(coverUrl);
+}
+
+const needsBlobCover = (coverUrl: string): boolean =>
+  isRemoteCoverUrl(coverUrl) || isLocalAssetCoverUrl(coverUrl);
+
+// The path of a local cover never changes when it is replaced, so key it by updatedAt too.
+const coverCacheKey = (book: Book, coverUrl: string): string =>
+  isLocalAssetCoverUrl(coverUrl) ? `${coverUrl}#${book.updatedAt ?? 0}` : coverUrl;
+
+async function fetchLocalCoverObjectUrl(coverUrl: string): Promise<string> {
+  const response = await fetch(coverUrl);
+  if (!response.ok) throw new Error(`Local cover request failed with status ${response.status}`);
+  return URL.createObjectURL(await response.blob());
+}
+
 /**
  * Fetches a remote cover (via the Cache API first, then the network) and
  * returns a blob object URL for it. Callers should route this through
@@ -160,8 +180,8 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
     const [displayImageUrl, setDisplayImageUrl] = useState<string | null>(() => {
       const coverUrl = resolveCoverUrl(book);
       if (!coverUrl) return null;
-      if (!isRemoteCoverUrl(coverUrl)) return coverUrl;
-      return peekCachedCoverObjectUrl(coverUrl) ?? null;
+      if (!needsBlobCover(coverUrl)) return coverUrl;
+      return peekCachedCoverObjectUrl(coverCacheKey(book, coverUrl)) ?? null;
     });
 
     const imageLoaded =
@@ -201,12 +221,13 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
       );
       if (!coverUrl) return;
 
-      if (!isRemoteCoverUrl(coverUrl)) {
+      if (!needsBlobCover(coverUrl)) {
         setDisplayImageUrl(coverUrl);
         return;
       }
 
-      const cached = peekCachedCoverObjectUrl(coverUrl);
+      const cacheKey = coverCacheKey(book, coverUrl);
+      const cached = peekCachedCoverObjectUrl(cacheKey);
       if (cached) {
         setDisplayImageUrl(cached);
         return;
@@ -216,7 +237,12 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
       let cancelled = false;
       const { title, hash } = book;
 
-      getOrCreateCoverObjectUrl(coverUrl, () => fetchRemoteCoverObjectUrl(coverUrl, title, hash))
+      const createObjectUrl = () =>
+        isLocalAssetCoverUrl(coverUrl)
+          ? fetchLocalCoverObjectUrl(coverUrl)
+          : fetchRemoteCoverObjectUrl(coverUrl, title, hash);
+
+      getOrCreateCoverObjectUrl(cacheKey, createObjectUrl)
         .then((objectUrl) => {
           if (cancelled) return;
           setDisplayImageUrl(objectUrl);
@@ -232,7 +258,7 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
       return () => {
         cancelled = true;
       };
-    }, [book.metadata?.coverImageUrl, book.coverImageUrl, book.hash, book.title]);
+    }, [book.metadata?.coverImageUrl, book.coverImageUrl, book.hash, book.title, book.updatedAt]);
 
     const hasDisplayUrl = !!displayImageUrl;
     // Title text is only for covers that don't exist or failed; while one is still
