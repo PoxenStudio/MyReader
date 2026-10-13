@@ -113,7 +113,8 @@ describe('EdgeSpeechTTS on Cloudflare Workers', () => {
     const call = fetchSpy.mock.calls[0]!;
     const calledUrl = call[0] as string | URL;
     const calledInit = call[1] as RequestInit;
-    expect(String(calledUrl)).toContain('https://speech.platform.bing.com/');
+    expect(String(calledUrl)).toContain('https://api.msedgeservices.com/');
+    expect(String(calledUrl)).toContain('Ocp-Apim-Subscription-Key=');
     expect(String(calledUrl)).not.toContain('wss://');
     const headers = calledInit.headers as Record<string, string>;
     expect(headers['Upgrade']).toBe('websocket');

@@ -30,11 +30,11 @@ interface AcceptableWebSocket {
 
 type UpgradeResponse = Response & { webSocket?: AcceptableWebSocket };
 
-const EDGE_SPEECH_URL =
-  'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1';
+const EDGE_SPEECH_URL = 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1';
 const EDGE_API_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
 const CHROMIUM_FULL_VERSION = '143.0.3650.75';
 const CHROMIUM_MAJOR_VERSION = CHROMIUM_FULL_VERSION.split('.')[0];
+const SEC_MS_GEC_VERSION = `1-${CHROMIUM_FULL_VERSION}`;
 
 const EDGE_TTS_VOICES = {
   'af-ZA': ['af-ZA-AdriNeural', 'af-ZA-WillemNeural'],
@@ -217,28 +217,15 @@ const EDGE_TTS_VOICES = {
   'zu-ZA': ['zu-ZA-ThandoNeural', 'zu-ZA-ThembaNeural'],
 };
 
-/**
- * Generates the Sec-MS-GEC token value.
- * This function generates a token value based on the current time in Windows file time format
- * adjusted for clock skew, and rounded down to the nearest 5 minutes. The token is then hashed
- * using SHA256 and returned as an uppercased hex digest.
- *
- * @returns The generated Sec-MS-GEC token value.
- * @see https://github.com/rany2/edge-tts/issues/290#issuecomment-2464956570
- */
-const WIN_EPOCH_OFFSET = 11644473600; // Windows epoch offset in seconds (1601 to 1970)
-const S_TO_NS = 1000000000; // Seconds to nanoseconds conversion
+const WIN_EPOCH_OFFSET = 11644473600;
+const S_TO_NS = 1_000_000_000;
+
 const generateSecMsGec = async () => {
   let ticks = Math.floor(Date.now() / 1000);
-  // Switch to Windows file time epoch (1601-01-01 00:00:00 UTC)
   ticks += WIN_EPOCH_OFFSET;
-  // Round down to the nearest 5 minutes (300 seconds)
   ticks -= ticks % 300;
-  // Convert the ticks to 100-nanosecond intervals (Windows file time format)
   ticks *= S_TO_NS / 100;
-  // Create the string to hash by concatenating the ticks and the trusted client token
   const strToHash = `${ticks.toFixed(0)}${EDGE_API_TOKEN}`;
-  // Compute the SHA256 hash and return the uppercased hex digest
   const encoder = new TextEncoder();
   const data = encoder.encode(strToHash);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -724,12 +711,13 @@ export class EdgeSpeechTTS {
   async #fetchEdgeSpeechWs({ lang, text, voice, rate }: EdgeTTSPayload): Promise<EdgeSpeechAudio> {
     const connectId = randomMd5();
     const params = new URLSearchParams({
+      'Ocp-Apim-Subscription-Key': EDGE_API_TOKEN,
       ConnectionId: connectId,
-      TrustedClientToken: EDGE_API_TOKEN,
       'Sec-MS-GEC': await generateSecMsGec(),
-      'Sec-MS-GEC-Version': `1-${CHROMIUM_FULL_VERSION}`,
+      'Sec-MS-GEC-Version': SEC_MS_GEC_VERSION,
     });
     const url = `${EDGE_SPEECH_URL}?${params.toString()}`;
+    console.log('[EdgeTTS] WebSocket URL:', url);
     const date = new Date().toString();
     const baseHeaders = {
       'User-Agent':
