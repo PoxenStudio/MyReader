@@ -176,6 +176,16 @@ const generateTransferId = (): string => {
 export const isFailedLikeTransfer = (t: TransferItem): boolean =>
   t.status === 'failed' || (t.status === 'cancelled' && t.cancelReason !== 'policy');
 
+/**
+ * The single interrupted predicate: rows a previous session left mid-flight
+ * that restoreTransfers downgrades to failed/'Interrupted' (and TransferManager
+ * may revive to pending when autoRetryTransfers is on). `file_upload` rows are
+ * excluded — a crash-interrupted upload never auto-resumes (crash-loop guard).
+ */
+export const isInterruptedTransfer = (t: TransferItem): boolean =>
+  (t.status === 'in_progress' || (t.status === 'pending' && t.retryCount > 0)) &&
+  (t.kind ?? 'book') !== 'file_upload';
+
 export const useTransferStore = create<TransferState>((set, get) => ({
   transfers: {},
   isQueuePaused: false,
@@ -533,9 +543,7 @@ export const useTransferStore = create<TransferState>((set, get) => ({
         };
         return;
       }
-      const interrupted =
-        withKind.status === 'in_progress' ||
-        (withKind.status === 'pending' && withKind.retryCount > 0);
+      const interrupted = isInterruptedTransfer(withKind);
       if (interrupted && !resumeInterrupted) {
         // Left for the user to retry by hand.
         restoredTransfers[id] = {
