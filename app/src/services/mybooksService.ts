@@ -265,6 +265,7 @@ export async function fetchMyBooks<T>(
   body?: BodyInit | null,
   contentType?: string,
   timeoutMs: number = MYBOOKS_REQUEST_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<MyBooksResponse<T>> {
   const host = typeof window !== 'undefined' ? localStorage.getItem('mybooks_host') : null;
 
@@ -334,6 +335,11 @@ export async function fetchMyBooks<T>(
   let attempt = 0;
   for (;;) {
     const controller = new AbortController();
+    // Merge the caller's signal into this attempt's controller by hand:
+    // browserslist is chrome 92, so AbortSignal.any can't be relied on.
+    const onAbort = () => controller.abort();
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
     fetchOptions.signal = controller.signal;
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const startedAt = performance.now();
@@ -364,6 +370,11 @@ export async function fetchMyBooks<T>(
       break;
     } catch (error) {
       attempt++;
+      // A caller abort is not a network failure: surface it at once, with no
+      // retry and no offline flag.
+      if (signal?.aborted) {
+        throw error;
+      }
       if (attempt <= MYBOOKS_REQUEST_MAX_RETRIES) {
         await new Promise((resolve) => setTimeout(resolve, MYBOOKS_RETRY_DELAY_MS * attempt));
         continue;
@@ -383,6 +394,7 @@ export async function fetchMyBooks<T>(
       throw error;
     } finally {
       clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onAbort);
       if (DEBUG_REQUEST_TIMING) {
         const cost = (performance.now() - startedAt).toFixed(2);
         console.log(
@@ -410,38 +422,70 @@ export interface MyBooksUploadFile {
  * Tauri only: multipart upload streamed from disk by Rust, so file bytes never
  * enter the webview. reqwest there has no cookie jar, so the session (and NAS)
  * cookies are passed explicitly, and any Set-Cookie in the reply is merged back.
+ * `options.signal` aborts the in-flight upload: it triggers the Rust-side
+ * `cancel_upload` for this invocation's id and rejects this promise at once.
  */
 export async function uploadMyBooksFilesNative<T>(
   endpoint: string,
   files: MyBooksUploadFile[],
   fields: [string, string][] = [],
   onProgress?: (p: { progress: number; total: number }) => void,
+  options?: { signal?: AbortSignal },
 ): Promise<MyBooksResponse<T>> {
   const host = localStorage.getItem('mybooks_host');
   if (!host) throw new Error('MyReader host not configured');
   const url = `${host.replace(/\/$/, '')}/api${endpoint}`;
   const channel = new Channel<{ progress: number; total: number }>();
   if (onProgress) channel.onmessage = onProgress;
-  const rsp = await invoke<{ status: number; body: string; setCookies: string[] }>(
-    'upload_multipart',
-    {
-      url,
-      fields,
-      files,
-      headers: buildMyBooksCookieHeaders(url, { alwaysSession: true }),
-      onProgress: channel,
-    },
-  );
-  const pairs = rsp.setCookies.map((c) => c.split(';', 1)[0]!.trim()).filter(Boolean);
-  if (pairs.length) mergeTauriMyBooksCookie(pairs.join('; '));
-  if (rsp.status < 200 || rsp.status >= 300) {
-    throw new Error(`HTTP ${rsp.status}`);
+  const signal = options?.signal;
+  const abortError = () => new DOMException('Upload aborted', 'AbortError');
+  // A unique id per invocation: `cancel_upload` (transfer_file.rs) looks the
+  // in-flight request up by it when the caller's signal aborts.
+  const uploadId = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  let rejectOnAbort: ((reason?: unknown) => void) | null = null;
+  const onAbort = () => {
+    void invoke('cancel_upload', { uploadId }).catch(() => {});
+    rejectOnAbort?.(abortError());
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    if (signal?.aborted) throw abortError();
+    const invokePromise = invoke<{ status: number; body: string; setCookies: string[] }>(
+      'upload_multipart',
+      {
+        uploadId,
+        url,
+        fields,
+        files,
+        headers: buildMyBooksCookieHeaders(url, { alwaysSession: true }),
+        onProgress: channel,
+      },
+    );
+    // Cancellation may orphan the invoke (Rust unwinds it asynchronously);
+    // keep a no-op handler so it never surfaces as an unhandled rejection.
+    invokePromise.catch(() => {});
+    // Reject promptly on abort rather than waiting for the Rust side to
+    // notice the cancelled body stream.
+    const rsp = await Promise.race([
+      invokePromise,
+      new Promise<never>((_, reject) => {
+        if (signal?.aborted) reject(abortError());
+        else rejectOnAbort = reject;
+      }),
+    ]);
+    const pairs = rsp.setCookies.map((c) => c.split(';', 1)[0]!.trim()).filter(Boolean);
+    if (pairs.length) mergeTauriMyBooksCookie(pairs.join('; '));
+    if (rsp.status < 200 || rsp.status >= 300) {
+      throw new Error(`HTTP ${rsp.status}`);
+    }
+    const result = JSON.parse(rsp.body) as MyBooksResponse<T>;
+    if (result.err !== 'ok') {
+      throw new MyBooksApiError(result.err, result.msg || 'Failed to fetch from MyReader');
+    }
+    return result;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
-  const result = JSON.parse(rsp.body) as MyBooksResponse<T>;
-  if (result.err !== 'ok') {
-    throw new MyBooksApiError(result.err, result.msg || 'Failed to fetch from MyReader');
-  }
-  return result;
 }
 
 /** A filesystem path (POSIX or Windows drive) or Android content:// URI that Rust can open directly. */
