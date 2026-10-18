@@ -194,7 +194,8 @@
       "book_recommend": true,
       "shared_notes": true
     },
-    "sidebar_items": ["audiobooks", "printbooks", "tags", "series", "memo"]
+    "sidebar_items": ["audiobooks", "printbooks", "tags", "series", "memo"],
+    "mynexus_enabled": false
   },
   "user": {
     "id": 1,
@@ -252,6 +253,8 @@ sys中为基础系统信息，title为网站标题, books为在库书籍数量�
 | `languages` | 语言 | |
 | `rating` | 评分 | |
 | `memo` | 站内留言 | |
+
+`sys.mynexus_enabled`（boolean，对应配置项 `MYNEXUS_ENABLE`，默认 `false`）为站点是否开启 MyNexus 功能。
 
 登录用户的 `user` 字段：
 
@@ -1078,6 +1081,8 @@ user.appearance为外观设置（顶栏品牌色、侧栏图标配色、深浅�
 - **响应**：
   - `err` (string): `ok` / `params.book.invalid`
   - `book` (object): 完整图书对象（含文件列表 `files` 与当前用户权限 `permissions` 等），见[图书对象结构](#图书对象结构)；另含 `state`（阅读状态）、`reading_stats`（当前用户分格式阅读统计，见 3.49，未登录为空数组）
+  - `book.ai_companion_available` (bool): 该书是否可用 MyNexus AI 伴读（需登录且书籍 AI 分析已完成，见 3.66；未登录或分析未完成时为 `false`）
+  - `book.ai_reading_guide` (string): MyNexus 生成的阅读指南，可用时返回（可能为空字符串）
   - `kindle_sender` (string): 推送 Kindle 时使用的发件邮箱（需加入 Kindle 信任列表）
   - `audios` (object): 有声书信息
 - **响应示例**：
@@ -1086,7 +1091,7 @@ user.appearance为外观设置（顶栏品牌色、侧栏图标配色、深浅�
 {
   "err": "ok",
   "kindle_sender": "sender@example.com",
-  "book": {"id": 42, "title": "三体", "state": {"read_state": 1, "...": "..."}, "reading_stats": [...], "...": "..."},
+  "book": {"id": 42, "title": "三体", "state": {"read_state": 1}, "reading_stats": [], "ai_companion_available": true, "ai_reading_guide": "本书围绕……", "...": "..."},
   "audios": {}
 }
 ```
@@ -2455,6 +2460,83 @@ user.appearance为外观设置（顶栏品牌色、侧栏图标配色、深浅�
   "reviews": [{"id": 8, "rating": 9, "comment": "值得一读", "nickname": "reader", "is_own": false, "...": "..."}]
 }
 ```
+
+### 3.66 MyNexus AI 伴读
+
+MyNexus 是 MyBooks 集成的 AI 阅读助手：对书籍做 AI 分析，并按用户隔离会话。以下接口均需登录，且整站开关由 `sys.mynexus_enabled`（配置项 `MYNEXUS_ENABLE`，见 1.5）控制；关闭时不保证可用。
+
+#### 3.66.1 查询书籍可用性
+
+- **路径**：`/api/book/<id>/mynexus/availability`
+- **方法**：GET
+- **认证**：需要登录
+- **参数**：
+  - `id` (path, 必填): 图书ID
+- **说明**：按需向 MyNexus 同步该书最新分析状态，`available` 可与 3.9 的 `book.ai_companion_available` 不一致时以本接口为准。
+- **响应**：
+  - `err` (string): `ok` / `permission`
+  - `available` (boolean): 该书是否可用 AI 伴读
+  - `reading_guide` (string): 阅读指南，可能为空
+- **响应示例**：
+
+```json
+{
+  "err": "ok",
+  "available": true,
+  "reading_guide": "本书围绕……"
+}
+```
+
+#### 3.66.2 获取会话
+
+- **路径**：`/api/book/<id>/mynexus/session`
+- **方法**：GET
+- **认证**：需要登录
+- **参数**：
+  - `id` (path, 必填): 图书ID
+- **响应**：
+  - `err` (string): `ok` / `not_found`（该书分析未完成或无会话记录）
+  - `session_id` (string|null): 远端会话ID，无会话时为 `null`
+  - `messages` (array): 历史消息，无会话时为空数组
+- **消息对象**：
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `role` | string | `user` 或 `assistant` |
+| `content` | string | 消息正文 |
+| `citations` | array | 可选，引用列表，元素为 `{ content }` |
+
+- **响应示例**：
+
+```json
+{
+  "err": "ok",
+  "session_id": "s-8f3c...",
+  "messages": [{"role": "user", "content": "现在我们开始伴读《三体》这本书"}, {"role": "assistant", "content": "好的……"}]
+}
+```
+
+#### 3.66.3 流式对话
+
+- **路径**：`/api/book/<id>/mynexus/chat`
+- **方法**：POST
+- **认证**：需要登录
+- **Content-Type**：请求为 `application/json`，响应为 `text/event-stream`（SSE）
+- **参数**：
+  - `id` (path, 必填): 图书ID
+  - JSON Body：`messages` (array, 必填): 对话历史，元素同 3.66.2 的消息对象；**最后一条必须为 `user`**
+- **响应**：SSE 帧以 `\n\n` 分隔，每帧由以 `data:` 开头的行拼接而成：
+
+```
+data: {"choices":[{"delta":{"content":"..."}}],"citations":[{"content":"..."}]}
+data: [DONE]
+data: {"error":"<message>"}
+```
+
+- `choices[0].delta.content` (string): 正文增量
+- `citations` (array, 可选): 引用列表，元素为 `{ content }`
+- `[DONE]`: 结束标记
+- `{"error": "..."}`: 仅出错时出现，客户端应终止并提示
 
 ---
 
