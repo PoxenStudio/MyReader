@@ -2,7 +2,7 @@
 
 import clsx from 'clsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { IoCheckmark, IoCopyOutline, IoSend } from 'react-icons/io5';
+import { IoCheckmark, IoCopyOutline, IoArrowUp } from 'react-icons/io5';
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { useBookDataStore } from '@/store/bookDataStore';
@@ -206,7 +206,7 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
         </div>
       </div>
       <div className='border-base-300 flex-shrink-0 border-t p-2'>
-        <div className='flex items-end gap-2'>
+        <div className='relative'>
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
@@ -218,12 +218,12 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
             }}
             rows={2}
             placeholder={_('Ask a question to start reading with this book')}
-            className='textarea textarea-sm textarea-bordered max-h-32 w-full resize-none'
+            className='textarea textarea-sm textarea-bordered max-h-32 w-full resize-none pr-11'
             disabled={loading}
           />
           <button
             type='button'
-            className='btn btn-primary btn-sm h-9 min-h-9'
+            className='btn btn-primary btn-sm absolute right-1.5 bottom-2.5 h-7 w-7 min-h-7 rounded-full p-0'
             title={_('Send')}
             onClick={() => send(question)}
             disabled={loading || !question.trim()}
@@ -231,7 +231,7 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
             {loading ? (
               <span className='loading loading-spinner loading-xs' />
             ) : (
-              <IoSend size={16} />
+              <IoArrowUp size={14} />
             )}
           </button>
         </div>
