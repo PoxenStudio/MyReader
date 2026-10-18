@@ -15,6 +15,7 @@ const NotebookHeader: React.FC<{
   handleToggleSearchBar: () => void;
   showSearchButton?: boolean;
   showPinButton?: boolean;
+  isCompanionTab?: boolean;
 }> = ({
   isPinned,
   isSearchBarVisible,
@@ -23,6 +24,7 @@ const NotebookHeader: React.FC<{
   handleToggleSearchBar,
   showSearchButton = true,
   showPinButton = true,
+  isCompanionTab = false,
 }) => {
   const _ = useTranslation();
   const iconSize15 = useResponsiveSize(15);
@@ -31,7 +33,9 @@ const NotebookHeader: React.FC<{
     <div className='notebook-header relative flex h-11 items-center px-3' dir='ltr'>
       <div className='absolute inset-0 z-[-1] flex items-center justify-center space-x-2'>
         <RiQuillPenLine size={iconSize18} />
-        <div className='notebook-title hidden text-sm font-medium sm:flex'>{_('Notebook')}</div>
+        <div className='notebook-title hidden text-sm font-medium sm:flex'>
+          {isCompanionTab ? _('AI Companion') : _('Notebook')}
+        </div>
       </div>
       <div className='flex w-full items-center gap-x-4'>
         {showPinButton && (

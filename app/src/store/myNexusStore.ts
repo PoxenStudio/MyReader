@@ -30,7 +30,14 @@ export const useMyNexusStore = create<MyNexusState>((set, get) => ({
   loading: {},
   loadAvailability: async (bookId, force = false) => {
     if (!bookId) return false;
-    if (useMyBooksStatusStore.getState().sysInfo?.mynexus_enabled !== true) return false;
+    const status = useMyBooksStatusStore.getState();
+    if (status.sysInfo?.mynexus_enabled !== true) return false;
+    // MyBooks is unreachable: skip the probe (the answer is a foregone "no")
+    // and save the request until the connection recovers.
+    if (status.isOffline) {
+      console.log(`[MyNexus] skipping availability probe for book ${bookId}: MyBooks offline`);
+      return false;
+    }
 
     const entry = get().availability[bookId];
     if (!force && entry && Date.now() - entry.fetchedAt < AVAILABILITY_TTL_MS) {
@@ -47,16 +54,12 @@ export const useMyNexusStore = create<MyNexusState>((set, get) => ({
       }));
       return available;
     } catch (error) {
+      // Unreachable or rejected: treated as unusable, and deliberately left
+      // uncached so the next probe can retry as soon as MyBooks is back.
       console.error(
         `[MyNexus] availability probe for book ${bookId} failed:`,
         error instanceof Error ? error.message : error,
       );
-      set((state) => ({
-        availability: {
-          ...state.availability,
-          [bookId]: { available: false, fetchedAt: Date.now() },
-        },
-      }));
       return false;
     } finally {
       set((state) => ({ loading: { ...state.loading, [bookId]: false } }));

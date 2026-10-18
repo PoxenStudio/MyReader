@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "enables the default permissions",
-  "windows": ["main", "updater", "reader-*", "nas-login-*"],
+  "windows": ["main", "updater", "reader-*", "nas-login-*", "mindmap-*"],
   "permissions": [
     "core:default",
     "fs:default",

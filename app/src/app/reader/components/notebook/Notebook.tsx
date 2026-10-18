@@ -455,6 +455,7 @@ const Notebook: React.FC = ({}) => {
             handleToggleSearchBar={handleToggleSearchBar}
             showSearchButton={notebookActiveTab === 'notes'}
             showPinButton={!isCompanionTab}
+            isCompanionTab={isCompanionTab}
           />
           {notebookActiveTab === 'notes' && (
             <div

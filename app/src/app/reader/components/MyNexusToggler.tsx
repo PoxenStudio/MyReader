@@ -45,14 +45,12 @@ const MyNexusToggler: React.FC<MyNexusTogglerProps> = ({ bookKey }) => {
     void getUserInfo();
   }, [platformOk, sysInfo]);
 
+  const isOffline = useMyBooksStatusStore((state) => state.isOffline);
+  const canProbe = platformOk && mynexusEnabled && !isOffline && !!bookId;
   useEffect(() => {
-    if (!visible || !bookId) return;
+    if (!canProbe || !bookId) return;
     void useMyNexusStore.getState().loadAvailability(bookId);
-  }, [visible, bookId]);
-
-  console.log(
-    `[MyNexus] toggler book=${getBookHash(bookKey)} bookId=${bookId ?? 'none'} platform=${platformOk} enabled=${mynexusEnabled} available=${companionAvailable} show=${visible}`,
-  );
+  }, [canProbe, bookId]);
 
   if (!visible) return null;
 
