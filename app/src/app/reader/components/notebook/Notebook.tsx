@@ -8,6 +8,7 @@ import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSidebarStore } from '@/store/sidebarStore';
 import { useNotebookStore } from '@/store/notebookStore';
+import { NotebookTab } from '@/store/notebookStore';
 import { useAIChatStore } from '@/store/aiChatStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useThemeStore } from '@/store/themeStore';
@@ -42,6 +43,7 @@ import NotebookHeader from './Header';
 import NoteEditor from './NoteEditor';
 import SearchBar from './SearchBar';
 import NotebookTabNavigation from './NotebookTabNavigation';
+import MyNexusChatPanel from '../mynexus/MyNexusChatPanel';
 import EmptyState from '../EmptyState';
 
 const MIN_NOTEBOOK_WIDTH = 0.15;
@@ -63,6 +65,10 @@ const Notebook: React.FC = ({}) => {
   const { setNotebookNewAnnotation, setNotebookNewHighlightId } = useNotebookStore();
   const { setNotebookEditAnnotation, setNotebookActiveTab } = useNotebookStore();
   const { activeConversationId } = useAIChatStore();
+  // AI companion always floats over the reading area, so it is never pinned
+  // even when the notebook's own pin setting is on.
+  const isCompanionTab = notebookActiveTab === 'companion';
+  const effectivePinned = isNotebookPinned && !isCompanionTab;
   const currentUserId = useMyBooksStatusStore((state) => state.currentUserId);
   const isOwnNote = useCallback(
     (note: BookNote) => !note.userId || note.userId === String(currentUserId),
@@ -150,7 +156,7 @@ const Notebook: React.FC = ({}) => {
     saveSysSettings(envConfig, 'globalReadSettings', newGlobalReadSettings);
   };
 
-  const handleTabChange = (tab: 'notes' | 'ai') => {
+  const handleTabChange = (tab: NotebookTab) => {
     setNotebookActiveTab(tab);
     const globalReadSettings = settings.globalReadSettings;
     const newGlobalReadSettings = { ...globalReadSettings, notebookActiveTab: tab };
@@ -369,7 +375,7 @@ const Notebook: React.FC = ({}) => {
 
   return isNotebookVisible ? (
     <>
-      {!isNotebookPinned && (
+      {!effectivePinned && (
         <Overlay
           className={clsx('z-[45]', viewSettings?.isEink ? '' : 'bg-black/50 sm:bg-black/20')}
           onDismiss={handleClickOverlay}
@@ -382,8 +388,8 @@ const Notebook: React.FC = ({}) => {
           'full-height font-sans text-base font-normal transition-[padding-top] duration-300 sm:text-sm',
           viewSettings?.isEink ? 'bg-base-100' : 'bg-base-200',
           appService?.hasRoundedWindow && 'rounded-window-top-right rounded-window-bottom-right',
-          isNotebookPinned ? 'z-20' : 'z-[45] shadow-2xl',
-          !isNotebookPinned && viewSettings?.isEink && 'border-base-content border-s',
+          effectivePinned ? 'z-20' : 'z-[45] shadow-2xl',
+          !effectivePinned && viewSettings?.isEink && 'border-base-content border-s',
         )}
         role='group'
         aria-label={_('Notebook')}
@@ -391,7 +397,7 @@ const Notebook: React.FC = ({}) => {
         style={{
           width: isMobile ? '100%' : `${notebookWidth}`,
           maxWidth: isMobile ? '100%' : `${MAX_NOTEBOOK_WIDTH * 100}%`,
-          position: isMobile ? 'fixed' : isNotebookPinned ? 'relative' : 'absolute',
+          position: isMobile ? 'fixed' : effectivePinned ? 'relative' : 'absolute',
           paddingTop: `${getPanelTopInset({
             isMobile,
             isFullHeightInMobile,
@@ -442,12 +448,13 @@ const Notebook: React.FC = ({}) => {
             </div>
           )}
           <NotebookHeader
-            isPinned={isNotebookPinned}
+            isPinned={effectivePinned}
             isSearchBarVisible={isSearchBarVisible && notebookActiveTab === 'notes'}
             handleClose={() => setNotebookVisible(false)}
             handleTogglePin={handleTogglePin}
             handleToggleSearchBar={handleToggleSearchBar}
             showSearchButton={notebookActiveTab === 'notes'}
+            showPinButton={!isCompanionTab}
           />
           {notebookActiveTab === 'notes' && (
             <div
@@ -467,6 +474,10 @@ const Notebook: React.FC = ({}) => {
         {notebookActiveTab === 'ai' ? (
           <div className='flex min-h-0 flex-1 flex-col'>
             <AIAssistant key={activeConversationId ?? 'new'} bookKey={sideBarBookKey} />
+          </div>
+        ) : notebookActiveTab === 'companion' ? (
+          <div className='flex min-h-0 flex-1 flex-col'>
+            <MyNexusChatPanel bookKey={sideBarBookKey} />
           </div>
         ) : isNotesTabEmpty ? (
           <div className='flex flex-grow items-center justify-center overflow-y-auto px-3'>
@@ -586,7 +597,11 @@ const Notebook: React.FC = ({}) => {
             paddingBottom: `${(safeAreaInsets?.bottom || 0) / 2}px`,
           }}
         >
-          <NotebookTabNavigation activeTab={notebookActiveTab} onTabChange={handleTabChange} />
+          <NotebookTabNavigation
+            activeTab={notebookActiveTab}
+            onTabChange={handleTabChange}
+            bookKey={sideBarBookKey}
+          />
         </div>
       </div>
     </>
