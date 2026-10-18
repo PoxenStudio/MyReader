@@ -236,7 +236,7 @@ export interface MyBooksResponse<T = unknown> {
   book_status?: MyBooksReadingStatsBookStatus;
   // /book/<id>/reading_stats — document/MyBooks_WebAPI.md §3.49
   stats?: MyBooksBookReadingStat[];
-  // /book/<id>/mynexus/* — document/MyBooks_WebAPI.md §3.50
+  // /book/<id>/mynexus/* — document/MyBooks_WebAPI.md §3.66
   available?: boolean;
   reading_guide?: string;
   session_id?: string | null;
