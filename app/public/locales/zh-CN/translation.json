@@ -2141,5 +2141,10 @@
   "Invalid file": "文件无效",
   "File missing": "文件丢失",
   "Insufficient permission": "权限不足",
-  "Invalid ISBN": "ISBN无效"
+  "Invalid ISBN": "ISBN无效",
+  "AI Companion": "AI 伴读",
+  "AI Companion request failed": "AI 伴读请求失败",
+  "Ask a question to start reading with this book": "提出一个问题，开始与这本书对话",
+  "Citation": "引用",
+  "You": "你"
 }

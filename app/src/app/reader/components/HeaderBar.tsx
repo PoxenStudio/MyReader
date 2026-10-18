@@ -27,6 +27,7 @@ import QuickActionMenu from './annotator/QuickActionMenu';
 import SidebarToggler from './SidebarToggler';
 import BookmarkToggler from './BookmarkToggler';
 import NotebookToggler from './NotebookToggler';
+import MyNexusToggler from './MyNexusToggler';
 import SettingsToggler from './SettingsToggler';
 import ThemeStyleToggler from './ThemeStyleToggler';
 import TranslationToggler from './TranslationToggler';
@@ -285,6 +286,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           {!isHeaderCompact && <ThemeStyleToggler />}
           {!isHeaderCompact && <SettingsToggler bookKey={bookKey} />}
           <NotebookToggler bookKey={bookKey} />
+          <MyNexusToggler bookKey={bookKey} />
           <Dropdown
             label={_('View Options')}
             containerClassName='h-8'
