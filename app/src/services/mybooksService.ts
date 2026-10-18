@@ -273,6 +273,11 @@ export interface MyNexusChatMessage {
   role: 'user' | 'assistant';
   content: string;
   citations?: { content: string }[];
+  // Raw persisted frames as returned by /mynexus/session history.
+  tool_results?: { tool_name?: string; result_json?: string }[];
+  // Normalized generate_mindmap frame the panel renders, filled from
+  // either the live SSE stream or the replayed tool_results above.
+  toolResult?: { toolName?: string; resultJson?: string };
 }
 
 interface ResolvedMyBooksRequest {
@@ -1150,11 +1155,17 @@ export async function getMyNexusSession(bookId: number): Promise<{
   }>(`/book/${bookId}/mynexus/session`);
   return {
     sessionId: response.session_id ?? null,
-    messages: (response.messages || []).map((m) => ({
-      role: m.role,
-      content: m.content,
-      citations: m.citations,
-    })),
+    messages: (response.messages || []).map((m) => {
+      const frame = (m.tool_results || []).find((t) => t.tool_name === 'generate_mindmap');
+      return {
+        role: m.role,
+        content: m.content,
+        citations: m.citations,
+        toolResult: frame
+          ? { toolName: frame.tool_name, resultJson: frame.result_json }
+          : undefined,
+      };
+    }),
   };
 }
 

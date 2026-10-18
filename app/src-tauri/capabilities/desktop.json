@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "desktop-capability",
-  "windows": ["main", "updater", "reader-*"],
+  "windows": ["main", "updater", "reader-*", "mindmap-*"],
   "platforms": ["linux", "macOS", "windows"],
   "permissions": ["updater:default", "cli:default", "turso:default"]
 }

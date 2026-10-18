@@ -6,12 +6,12 @@ import { IoSend } from 'react-icons/io5';
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { useBookDataStore } from '@/store/bookDataStore';
-import Dialog from '@/components/Dialog';
 import {
   getMyNexusSession,
   streamMyNexusChat,
   MyNexusChatMessage,
 } from '@/services/mybooksService';
+import { openMindmapWindow } from '@/helpers/mindmapWindow';
 import MyNexusMarkdown from './MyNexusMarkdown';
 import MyNexusMindmap from './MyNexusMindmap';
 
@@ -25,6 +25,95 @@ interface MyNexusMessage extends MyNexusChatMessage {
   mindmap?: { title: string; markdown: string };
 }
 
+interface CachedMindmap {
+  userContent: string;
+  mindmap: { title: string; markdown: string };
+}
+
+// Cached per book so the mind map survives a panel remount (hiding/reopening
+// the notebook reloads the session from upstream, which has no tool_result).
+const mindmapCache = new Map<number, CachedMindmap[]>();
+
+const findLastUserContent = (messages: MyNexusMessage[]): string => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'user') return message.content;
+  }
+  return '';
+};
+
+const findLastUserContentIndex = (messages: MyNexusMessage[], userContent: string): number => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'user' && message.content === userContent) return i;
+  }
+  return -1;
+};
+
+const cacheMindmap = (bookId: number, entry: CachedMindmap) => {
+  const cached = mindmapCache.get(bookId) ?? [];
+  mindmapCache.set(bookId, [...cached, entry]);
+  console.log(`[MyNexus] mindmap cached book=${bookId} entries=${cached.length + 1}`);
+};
+
+const restoreMindmaps = (bookId: number, messages: MyNexusMessage[]): MyNexusMessage[] => {
+  const cached = mindmapCache.get(bookId);
+  if (!cached?.length || !messages.length) return messages;
+  const next = [...messages];
+  cached.forEach((entry) => {
+    const anchor = findLastUserContentIndex(next, entry.userContent);
+    const target = anchor >= 0 ? next[anchor + 1] : undefined;
+    if (target?.role === 'assistant' && !target.mindmap) {
+      next[anchor + 1] = { ...target, mindmap: entry.mindmap };
+      console.log(`[MyNexus] mindmap restored book=${bookId} index=${anchor + 1}`);
+      return;
+    }
+    console.warn(`[MyNexus] mindmap restore skipped book=${bookId} anchor=${anchor}`);
+  });
+  return next;
+};
+
+const parseMindmapFrame = (
+  bookId: number,
+  toolName?: string,
+  resultJson?: string,
+): { title: string; markdown: string } | null => {
+  if (toolName !== 'generate_mindmap' || !resultJson) return null;
+  let parsed: { title?: string; markdown?: string; stats?: { node_count?: number } };
+  try {
+    parsed = JSON.parse(resultJson);
+  } catch (e) {
+    console.error(
+      `[MyNexus] mindmap result_json parse failed book=${bookId}: ${e instanceof Error ? e.message : e}`,
+    );
+    return null;
+  }
+  const markdown = parsed.markdown || '';
+  if (!markdown) {
+    console.warn(`[MyNexus] mindmap has no markdown book=${bookId}`);
+    return null;
+  }
+  console.log(
+    `[MyNexus] mindmap parsed book=${bookId} nodes=${parsed.stats?.node_count ?? 0} length=${markdown.length}`,
+  );
+  return { title: parsed.title || '', markdown };
+};
+
+// Persisted history carries tool_results, so replay those first; the in-memory
+// cache then covers turns from a server build that does not persist them yet.
+const applyMindmaps = (bookId: number, messages: MyNexusMessage[]): MyNexusMessage[] => {
+  const replayed = messages.map((message) => {
+    if (message.role !== 'assistant' || message.mindmap) return message;
+    const mindmap = parseMindmapFrame(
+      bookId,
+      message.toolResult?.toolName,
+      message.toolResult?.resultJson,
+    );
+    return mindmap ? { ...message, mindmap } : message;
+  });
+  return restoreMindmaps(bookId, replayed);
+};
+
 const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
   const _ = useTranslation();
   const { getBookData } = useBookDataStore();
@@ -36,10 +125,6 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [expandedMindmap, setExpandedMindmap] = useState<{
-    title: string;
-    markdown: string;
-  } | null>(null);
 
   const messagesRef = useRef<MyNexusMessage[]>([]);
   messagesRef.current = messages;
@@ -47,9 +132,15 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
   const listRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    requestAnimationFrame(() => {
+      const el = listRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
   }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
 
   const send = useCallback(
     async (text: string, base?: MyNexusMessage[]) => {
@@ -88,32 +179,16 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
             });
           },
           onToolResult: (tool) => {
-            if (tool.toolName !== 'generate_mindmap') return;
-            let parsed: { title?: string; markdown?: string; stats?: { node_count?: number } };
-            try {
-              parsed = JSON.parse(tool.resultJson);
-            } catch (e) {
-              console.error(
-                `[MyNexus] mindmap result_json parse failed book=${bookId}: ${e instanceof Error ? e.message : e}`,
-              );
-              return;
-            }
-            const markdown = parsed.markdown || '';
-            if (!markdown) {
-              console.warn(`[MyNexus] mindmap has no markdown book=${bookId}`);
-              return;
-            }
-            console.log(
-              `[MyNexus] mindmap received book=${bookId} nodes=${parsed.stats?.node_count ?? 0} length=${markdown.length}`,
-            );
+            const mindmap = parseMindmapFrame(bookId, tool.toolName, tool.resultJson);
+            if (!mindmap) return;
+            console.log(`[MyNexus] mindmap received book=${bookId}`);
+            const userContent = findLastUserContent(messagesRef.current);
+            if (userContent) cacheMindmap(bookId, { userContent, mindmap });
             setMessages((prev) => {
               const next = [...prev];
               const last = next[next.length - 1];
               if (last && last.role === 'assistant') {
-                next[next.length - 1] = {
-                  ...last,
-                  mindmap: { title: parsed.title || '', markdown },
-                };
+                next[next.length - 1] = { ...last, mindmap };
               }
               return next;
             });
@@ -141,7 +216,6 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
     let cancelled = false;
     setError('');
     setMessages([]);
-    setExpandedMindmap(null);
     console.log(`[MyNexus] load session book=${bookId}`);
     void (async () => {
       try {
@@ -150,7 +224,7 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
         console.log(
           `[MyNexus] session book=${bookId} id=${sessionId ?? 'none'} messages=${history.length}`,
         );
-        setMessages(history);
+        setMessages(applyMindmaps(bookId, history));
         if (history.length === 0 && bookTitle) {
           void sendRef.current(`现在我们开始伴读《${bookTitle}》这本书`, []);
         }
@@ -235,10 +309,14 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
                       markdown={message.mindmap.markdown}
                       title={message.mindmap.title}
                       onExpand={() => {
+                        if (!bookId || !message.mindmap) return;
                         console.log(
-                          `[MyNexus] mindmap expand length=${message.mindmap?.markdown.length ?? 0}`,
+                          `[MyNexus] mindmap expand book=${bookId} length=${message.mindmap.markdown.length}`,
                         );
-                        setExpandedMindmap(message.mindmap ?? null);
+                        void openMindmapWindow(bookId, {
+                          title: message.mindmap.title || _('Mind Map'),
+                          markdown: message.mindmap.markdown,
+                        });
                       }}
                     />
                   )}
@@ -297,25 +375,6 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
           </button>
         </div>
       </div>
-      {expandedMindmap && (
-        <Dialog
-          id='mynexus-mindmap-dialog'
-          isOpen
-          title={expandedMindmap.title || _('Mind Map')}
-          className='!z-[60]'
-          boxClassName='sm:!h-[75vh] sm:!w-[75vw] sm:!max-w-none'
-          contentClassName='!my-0 !px-3 flex min-h-0 flex-1 flex-col overflow-hidden'
-          onClose={() => setExpandedMindmap(null)}
-        >
-          <MyNexusMindmap
-            markdown={expandedMindmap.markdown}
-            title={expandedMindmap.title}
-            fill
-            hideTitle
-            showExpand={false}
-          />
-        </Dialog>
-      )}
     </div>
   );
 };

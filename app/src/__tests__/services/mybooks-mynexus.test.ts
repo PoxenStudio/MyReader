@@ -189,6 +189,7 @@ describe('MyNexus availability gating', () => {
     localStorage.setItem('mybooks_host', 'http://mybooks.local');
     vi.restoreAllMocks();
     useMyNexusStore.setState({ availability: {}, loading: {} });
+    useMyBooksStatusStore.setState({ isOffline: false });
   });
 
   it('does not probe the book when mynexus_enabled is false', async () => {
@@ -196,6 +197,18 @@ describe('MyNexus availability gating', () => {
     vi.spyOn(global, 'fetch').mockImplementation(fetchMock);
     useMyBooksStatusStore.setState({
       sysInfo: { mynexus_enabled: false } as MyBooksSysInfo,
+    });
+
+    await expect(useMyNexusStore.getState().loadAvailability(9)).resolves.toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not probe the book while MyBooks is offline', async () => {
+    const fetchMock = vi.fn();
+    vi.spyOn(global, 'fetch').mockImplementation(fetchMock);
+    useMyBooksStatusStore.setState({
+      sysInfo: { mynexus_enabled: true } as MyBooksSysInfo,
+      isOffline: true,
     });
 
     await expect(useMyNexusStore.getState().loadAvailability(9)).resolves.toBe(false);
