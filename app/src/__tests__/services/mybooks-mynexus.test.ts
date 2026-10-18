@@ -76,6 +76,57 @@ describe('MyNexus chat streaming', () => {
     expect(done).toBe(true);
   });
 
+  it('captures a tool_result frame alongside a content delta', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation((url: unknown) => {
+      if (!isMyBooksRequest(url)) return Promise.reject(new Error('unrelated fetch'));
+      return Promise.resolve(
+        sseResponse([
+          'data: {"choices":[{"delta":{"content":"看这张图"}}],"tool_result":{"tool_name":"generate_mindmap","result_json":"{\\"title\\":\\"章节脉络\\",\\"markdown\\":\\"# 主题\\",\\"stats\\":{\\"node_count\\":12}}"}}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+      );
+    });
+
+    let text = '';
+    const tools: { toolName: string; resultJson: string }[] = [];
+    await streamMyNexusChat(7, [{ role: 'user', content: 'hi' }], {
+      onDelta: (delta) => {
+        text += delta;
+      },
+      onToolResult: (value) => {
+        tools.push(value);
+      },
+    });
+
+    expect(text).toBe('看这张图');
+    expect(tools).toHaveLength(1);
+    const tool = tools.at(0);
+    expect(tool?.toolName).toBe('generate_mindmap');
+    expect(JSON.parse(tool?.resultJson ?? '{}').stats.node_count).toBe(12);
+  });
+
+  it('forwards a tool_result whose result_json is not valid JSON', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation((url: unknown) => {
+      if (!isMyBooksRequest(url)) return Promise.reject(new Error('unrelated fetch'));
+      return Promise.resolve(
+        sseResponse([
+          'data: {"tool_result":{"tool_name":"generate_mindmap","result_json":"not-json"}}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+      );
+    });
+
+    const tools: { toolName: string; resultJson: string }[] = [];
+    await streamMyNexusChat(7, [{ role: 'user', content: 'hi' }], {
+      onToolResult: (value) => {
+        tools.push(value);
+      },
+    });
+
+    expect(tools).toHaveLength(1);
+    expect(tools.at(0)?.resultJson).toBe('not-json');
+  });
+
   it('throws when a frame carries an error', async () => {
     vi.spyOn(global, 'fetch').mockImplementation((url: unknown) => {
       if (!isMyBooksRequest(url)) return Promise.reject(new Error('unrelated fetch'));

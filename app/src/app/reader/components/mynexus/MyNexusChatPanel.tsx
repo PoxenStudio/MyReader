@@ -6,15 +6,23 @@ import { IoSend } from 'react-icons/io5';
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { useBookDataStore } from '@/store/bookDataStore';
+import Dialog from '@/components/Dialog';
 import {
   getMyNexusSession,
   streamMyNexusChat,
   MyNexusChatMessage,
 } from '@/services/mybooksService';
 import MyNexusMarkdown from './MyNexusMarkdown';
+import MyNexusMindmap from './MyNexusMindmap';
 
 interface MyNexusChatPanelProps {
   bookKey: string | null;
+}
+
+// The mind map only ever lives in the streaming turn that produced it (the
+// upstream never persists tool_result), so it stays on the in-memory message.
+interface MyNexusMessage extends MyNexusChatMessage {
+  mindmap?: { title: string; markdown: string };
 }
 
 const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
@@ -24,12 +32,16 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
   const bookId = book?.bookId;
   const bookTitle = book?.title;
 
-  const [messages, setMessages] = useState<MyNexusChatMessage[]>([]);
+  const [messages, setMessages] = useState<MyNexusMessage[]>([]);
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [expandedMindmap, setExpandedMindmap] = useState<{
+    title: string;
+    markdown: string;
+  } | null>(null);
 
-  const messagesRef = useRef<MyNexusChatMessage[]>([]);
+  const messagesRef = useRef<MyNexusMessage[]>([]);
   messagesRef.current = messages;
   const sendingRef = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -40,11 +52,11 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
   }, []);
 
   const send = useCallback(
-    async (text: string, base?: MyNexusChatMessage[]) => {
+    async (text: string, base?: MyNexusMessage[]) => {
       const content = text.trim();
       if (!content || !bookId || sendingRef.current) return;
       const prior = base ?? messagesRef.current;
-      const requestMessages: MyNexusChatMessage[] = [...prior, { role: 'user', content }];
+      const requestMessages: MyNexusMessage[] = [...prior, { role: 'user', content }];
       sendingRef.current = true;
       setMessages([...requestMessages, { role: 'assistant', content: '', citations: [] }]);
       setQuestion('');
@@ -75,6 +87,37 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
               return next;
             });
           },
+          onToolResult: (tool) => {
+            if (tool.toolName !== 'generate_mindmap') return;
+            let parsed: { title?: string; markdown?: string; stats?: { node_count?: number } };
+            try {
+              parsed = JSON.parse(tool.resultJson);
+            } catch (e) {
+              console.error(
+                `[MyNexus] mindmap result_json parse failed book=${bookId}: ${e instanceof Error ? e.message : e}`,
+              );
+              return;
+            }
+            const markdown = parsed.markdown || '';
+            if (!markdown) {
+              console.warn(`[MyNexus] mindmap has no markdown book=${bookId}`);
+              return;
+            }
+            console.log(
+              `[MyNexus] mindmap received book=${bookId} nodes=${parsed.stats?.node_count ?? 0} length=${markdown.length}`,
+            );
+            setMessages((prev) => {
+              const next = [...prev];
+              const last = next[next.length - 1];
+              if (last && last.role === 'assistant') {
+                next[next.length - 1] = {
+                  ...last,
+                  mindmap: { title: parsed.title || '', markdown },
+                };
+              }
+              return next;
+            });
+          },
         });
         console.log(`[MyNexus] send done book=${bookId}`);
       } catch (e) {
@@ -98,6 +141,7 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
     let cancelled = false;
     setError('');
     setMessages([]);
+    setExpandedMindmap(null);
     console.log(`[MyNexus] load session book=${bookId}`);
     void (async () => {
       try {
@@ -175,6 +219,7 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
               </div>
               {message.role === 'assistant' &&
               !message.content &&
+              !message.mindmap &&
               loading &&
               index === messages.length - 1 ? (
                 <span className='thinking-dots'>
@@ -183,7 +228,21 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
                   <span />
                 </span>
               ) : message.role === 'assistant' ? (
-                <MyNexusMarkdown content={message.content} />
+                <>
+                  <MyNexusMarkdown content={message.content} />
+                  {message.mindmap && (
+                    <MyNexusMindmap
+                      markdown={message.mindmap.markdown}
+                      title={message.mindmap.title}
+                      onExpand={() => {
+                        console.log(
+                          `[MyNexus] mindmap expand length=${message.mindmap?.markdown.length ?? 0}`,
+                        );
+                        setExpandedMindmap(message.mindmap ?? null);
+                      }}
+                    />
+                  )}
+                </>
               ) : (
                 <div className='break-words whitespace-pre-wrap'>{message.content}</div>
               )}
@@ -238,6 +297,25 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
           </button>
         </div>
       </div>
+      {expandedMindmap && (
+        <Dialog
+          id='mynexus-mindmap-dialog'
+          isOpen
+          title={expandedMindmap.title || _('Mind Map')}
+          className='!z-[60]'
+          boxClassName='sm:!h-[75vh] sm:!w-[75vw] sm:!max-w-none'
+          contentClassName='!my-0 !px-3 flex min-h-0 flex-1 flex-col overflow-hidden'
+          onClose={() => setExpandedMindmap(null)}
+        >
+          <MyNexusMindmap
+            markdown={expandedMindmap.markdown}
+            title={expandedMindmap.title}
+            fill
+            hideTitle
+            showExpand={false}
+          />
+        </Dialog>
+      )}
     </div>
   );
 };

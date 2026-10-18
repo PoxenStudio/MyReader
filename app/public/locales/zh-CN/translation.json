@@ -2146,5 +2146,11 @@
   "AI Companion request failed": "AI 伴读请求失败",
   "Ask a question to start reading with this book": "提出一个问题，开始与这本书对话",
   "Citation": "引用",
-  "You": "你"
+  "You": "你",
+  "Mind Map": "思维导图",
+  "Reset View": "复原视图",
+  "Expand": "放大显示",
+  "Download SVG": "下载 SVG",
+  "Download PNG": "下载 PNG",
+  "Download Markdown": "下载 Markdown"
 }

@@ -241,6 +241,7 @@ export interface MyBooksResponse<T = unknown> {
   reading_guide?: string;
   session_id?: string | null;
   messages?: MyNexusChatMessage[];
+  tool_result?: { tool_name?: string; result_json?: string };
 }
 
 // Thrown when MyReader responded but reported a logical error (e.g. not logged
@@ -1168,6 +1169,7 @@ export async function streamMyNexusChat(
   callbacks: {
     onDelta?: (delta: string) => void;
     onCitations?: (citations: { content: string }[]) => void;
+    onToolResult?: (tool: { toolName: string; resultJson: string }) => void;
     onDone?: () => void;
     signal?: AbortSignal;
   } = {},
@@ -1213,11 +1215,18 @@ export async function streamMyNexusChat(
           error?: string;
           choices?: { delta?: { content?: string } }[];
           citations?: { content: string }[];
+          tool_result?: { tool_name?: string; result_json?: string };
         };
         if (event.error) throw new Error(event.error);
         const delta = event.choices?.[0]?.delta?.content;
         if (delta) callbacks.onDelta?.(delta);
         if (event.citations) callbacks.onCitations?.(event.citations);
+        if (event.tool_result?.tool_name) {
+          callbacks.onToolResult?.({
+            toolName: event.tool_result.tool_name,
+            resultJson: event.tool_result.result_json ?? '',
+          });
+        }
       }
       boundary = buffer.indexOf('\n\n');
     }
