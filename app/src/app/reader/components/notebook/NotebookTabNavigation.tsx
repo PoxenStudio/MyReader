@@ -1,27 +1,49 @@
 import clsx from 'clsx';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { PiNotePencil, PiRobot } from 'react-icons/pi';
+import { MdOutlineForum } from 'react-icons/md';
 
 import { useEnv } from '@/context/EnvContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useBookDataStore } from '@/store/bookDataStore';
+import { useMyNexusAvailability, useMyNexusEnabled, useMyNexusStore } from '@/store/myNexusStore';
 import { NotebookTab } from '@/store/notebookStore';
 
 interface NotebookTabNavigationProps {
   activeTab: NotebookTab;
   onTabChange: (tab: NotebookTab) => void;
+  bookKey: string | null;
 }
 
 const NotebookTabNavigation: React.FC<NotebookTabNavigationProps> = ({
   activeTab,
   onTabChange,
+  bookKey,
 }) => {
   const _ = useTranslation();
   const { appService } = useEnv();
   const { settings } = useSettingsStore();
   const aiEnabled = settings?.aiSettings?.enabled ?? false;
 
-  const tabs: NotebookTab[] = aiEnabled ? ['notes', 'ai'] : [];
+  const { getBookData } = useBookDataStore();
+  const bookId = bookKey ? getBookData(bookKey)?.book?.bookId : undefined;
+  const mynexusEnabled = useMyNexusEnabled();
+  const companionAvailable = useMyNexusAvailability(bookId);
+  const showCompanion = mynexusEnabled && companionAvailable;
+
+  useEffect(() => {
+    if (mynexusEnabled && bookId) void useMyNexusStore.getState().loadAvailability(bookId);
+  }, [mynexusEnabled, bookId]);
+
+  console.log(
+    `[MyNexus] tab nav bookKey=${bookKey ?? 'none'} bookId=${bookId ?? 'none'} enabled=${mynexusEnabled} available=${companionAvailable}`,
+  );
+
+  const tabs: NotebookTab[] = [];
+  if (aiEnabled || showCompanion) tabs.push('notes');
+  if (aiEnabled) tabs.push('ai');
+  if (showCompanion) tabs.push('companion');
 
   const getTabLabel = (tab: NotebookTab) => {
     switch (tab) {
@@ -29,6 +51,8 @@ const NotebookTabNavigation: React.FC<NotebookTabNavigationProps> = ({
         return _('Notes');
       case 'ai':
         return _('AI');
+      case 'companion':
+        return _('AI Companion');
       default:
         return '';
     }
@@ -40,6 +64,8 @@ const NotebookTabNavigation: React.FC<NotebookTabNavigationProps> = ({
         return <PiNotePencil className='mx-auto' size={20} />;
       case 'ai':
         return <PiRobot className='mx-auto' size={20} />;
+      case 'companion':
+        return <MdOutlineForum className='mx-auto' size={20} />;
       default:
         return null;
     }

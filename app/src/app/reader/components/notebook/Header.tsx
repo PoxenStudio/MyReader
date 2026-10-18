@@ -14,6 +14,7 @@ const NotebookHeader: React.FC<{
   handleTogglePin: () => void;
   handleToggleSearchBar: () => void;
   showSearchButton?: boolean;
+  showPinButton?: boolean;
 }> = ({
   isPinned,
   isSearchBarVisible,
@@ -21,6 +22,7 @@ const NotebookHeader: React.FC<{
   handleTogglePin,
   handleToggleSearchBar,
   showSearchButton = true,
+  showPinButton = true,
 }) => {
   const _ = useTranslation();
   const iconSize15 = useResponsiveSize(15);
@@ -32,16 +34,18 @@ const NotebookHeader: React.FC<{
         <div className='notebook-title hidden text-sm font-medium sm:flex'>{_('Notebook')}</div>
       </div>
       <div className='flex w-full items-center gap-x-4'>
-        <button
-          title={isPinned ? _('Unpin Notebook') : _('Pin Notebook')}
-          onClick={handleTogglePin}
-          className={clsx(
-            'btn btn-ghost btn-circle hidden h-6 min-h-6 w-6 sm:flex',
-            isPinned ? 'bg-base-300' : 'bg-base-300/65',
-          )}
-        >
-          {isPinned ? <MdPushPin size={iconSize15} /> : <MdOutlinePushPin size={iconSize15} />}
-        </button>
+        {showPinButton && (
+          <button
+            title={isPinned ? _('Unpin Notebook') : _('Pin Notebook')}
+            onClick={handleTogglePin}
+            className={clsx(
+              'btn btn-ghost btn-circle hidden h-6 min-h-6 w-6 sm:flex',
+              isPinned ? 'bg-base-300' : 'bg-base-300/65',
+            )}
+          >
+            {isPinned ? <MdPushPin size={iconSize15} /> : <MdOutlinePushPin size={iconSize15} />}
+          </button>
+        )}
         <button
           title={_('Close')}
           onClick={handleClose}
