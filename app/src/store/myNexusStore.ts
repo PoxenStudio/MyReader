@@ -177,7 +177,7 @@ export const useMyNexusStore = create<MyNexusState>((set, get) => ({
       );
       set((state) => mergeSession(state, bookId, { messages: applyMindmaps(bookId, messages) }));
       if (messages.length === 0 && bookTitle) {
-        void get().send(bookId, `现在我们开始伴读《${bookTitle}》这本书`);
+        void get().send(bookId, `现在我们开始读《${bookTitle}》这本书`);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
