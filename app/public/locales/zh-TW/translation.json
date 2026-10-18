@@ -2146,5 +2146,11 @@
   "AI Companion request failed": "AI 伴讀請求失敗",
   "Ask a question to start reading with this book": "提出一個問題，開始與這本書對話",
   "Citation": "引用",
-  "You": "你"
+  "You": "你",
+  "Mind Map": "思維導圖",
+  "Reset View": "復原視圖",
+  "Expand": "放大顯示",
+  "Download SVG": "下載 SVG",
+  "Download PNG": "下載 PNG",
+  "Download Markdown": "下載 Markdown"
 }
