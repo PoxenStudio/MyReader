@@ -2,16 +2,14 @@
 
 import clsx from 'clsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { IoSend } from 'react-icons/io5';
+import { IoCheckmark, IoCopyOutline, IoSend } from 'react-icons/io5';
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { useBookDataStore } from '@/store/bookDataStore';
-import {
-  getMyNexusSession,
-  streamMyNexusChat,
-  MyNexusChatMessage,
-} from '@/services/mybooksService';
+import { EMPTY_MYNEXUS_SESSION, useMyNexusStore } from '@/store/myNexusStore';
 import { openMindmapWindow } from '@/helpers/mindmapWindow';
+import { writeTextToClipboard } from '@/utils/clipboard';
+import { getLocale } from '@/utils/misc';
 import MyNexusMarkdown from './MyNexusMarkdown';
 import MyNexusMindmap from './MyNexusMindmap';
 
@@ -19,100 +17,14 @@ interface MyNexusChatPanelProps {
   bookKey: string | null;
 }
 
-// The mind map only ever lives in the streaming turn that produced it (the
-// upstream never persists tool_result), so it stays on the in-memory message.
-interface MyNexusMessage extends MyNexusChatMessage {
-  mindmap?: { title: string; markdown: string };
-}
-
-interface CachedMindmap {
-  userContent: string;
-  mindmap: { title: string; markdown: string };
-}
-
-// Cached per book so the mind map survives a panel remount (hiding/reopening
-// the notebook reloads the session from upstream, which has no tool_result).
-const mindmapCache = new Map<number, CachedMindmap[]>();
-
-const findLastUserContent = (messages: MyNexusMessage[]): string => {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message?.role === 'user') return message.content;
-  }
-  return '';
-};
-
-const findLastUserContentIndex = (messages: MyNexusMessage[], userContent: string): number => {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message?.role === 'user' && message.content === userContent) return i;
-  }
-  return -1;
-};
-
-const cacheMindmap = (bookId: number, entry: CachedMindmap) => {
-  const cached = mindmapCache.get(bookId) ?? [];
-  mindmapCache.set(bookId, [...cached, entry]);
-  console.log(`[MyNexus] mindmap cached book=${bookId} entries=${cached.length + 1}`);
-};
-
-const restoreMindmaps = (bookId: number, messages: MyNexusMessage[]): MyNexusMessage[] => {
-  const cached = mindmapCache.get(bookId);
-  if (!cached?.length || !messages.length) return messages;
-  const next = [...messages];
-  cached.forEach((entry) => {
-    const anchor = findLastUserContentIndex(next, entry.userContent);
-    const target = anchor >= 0 ? next[anchor + 1] : undefined;
-    if (target?.role === 'assistant' && !target.mindmap) {
-      next[anchor + 1] = { ...target, mindmap: entry.mindmap };
-      console.log(`[MyNexus] mindmap restored book=${bookId} index=${anchor + 1}`);
-      return;
-    }
-    console.warn(`[MyNexus] mindmap restore skipped book=${bookId} anchor=${anchor}`);
+const formatMessageTime = (timestamp: number) =>
+  new Date(timestamp).toLocaleString(getLocale(), {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   });
-  return next;
-};
-
-const parseMindmapFrame = (
-  bookId: number,
-  toolName?: string,
-  resultJson?: string,
-): { title: string; markdown: string } | null => {
-  if (toolName !== 'generate_mindmap' || !resultJson) return null;
-  let parsed: { title?: string; markdown?: string; stats?: { node_count?: number } };
-  try {
-    parsed = JSON.parse(resultJson);
-  } catch (e) {
-    console.error(
-      `[MyNexus] mindmap result_json parse failed book=${bookId}: ${e instanceof Error ? e.message : e}`,
-    );
-    return null;
-  }
-  const markdown = parsed.markdown || '';
-  if (!markdown) {
-    console.warn(`[MyNexus] mindmap has no markdown book=${bookId}`);
-    return null;
-  }
-  console.log(
-    `[MyNexus] mindmap parsed book=${bookId} nodes=${parsed.stats?.node_count ?? 0} length=${markdown.length}`,
-  );
-  return { title: parsed.title || '', markdown };
-};
-
-// Persisted history carries tool_results, so replay those first; the in-memory
-// cache then covers turns from a server build that does not persist them yet.
-const applyMindmaps = (bookId: number, messages: MyNexusMessage[]): MyNexusMessage[] => {
-  const replayed = messages.map((message) => {
-    if (message.role !== 'assistant' || message.mindmap) return message;
-    const mindmap = parseMindmapFrame(
-      bookId,
-      message.toolResult?.toolName,
-      message.toolResult?.resultJson,
-    );
-    return mindmap ? { ...message, mindmap } : message;
-  });
-  return restoreMindmaps(bookId, replayed);
-};
 
 const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
   const _ = useTranslation();
@@ -121,15 +33,26 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
   const bookId = book?.bookId;
   const bookTitle = book?.title;
 
-  const [messages, setMessages] = useState<MyNexusMessage[]>([]);
-  const [question, setQuestion] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const session =
+    useMyNexusStore((state) => (bookId ? state.sessions[bookId] : undefined)) ??
+    EMPTY_MYNEXUS_SESSION;
+  const { messages, loading, error } = session;
 
-  const messagesRef = useRef<MyNexusMessage[]>([]);
-  messagesRef.current = messages;
-  const sendingRef = useRef(false);
+  const [question, setQuestion] = useState('');
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const copyMessage = useCallback((index: number, text: string) => {
+    void writeTextToClipboard(text).then((ok) => {
+      if (!ok) return;
+      setCopiedIndex(index);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopiedIndex(null), 1500);
+    });
+  }, []);
+
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -142,103 +65,19 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  const send = useCallback(
-    async (text: string, base?: MyNexusMessage[]) => {
-      const content = text.trim();
-      if (!content || !bookId || sendingRef.current) return;
-      const prior = base ?? messagesRef.current;
-      const requestMessages: MyNexusMessage[] = [...prior, { role: 'user', content }];
-      sendingRef.current = true;
-      setMessages([...requestMessages, { role: 'assistant', content: '', citations: [] }]);
-      setQuestion('');
-      setError('');
-      setLoading(true);
-      scrollToBottom();
-      console.log(`[MyNexus] send book=${bookId} messages=${requestMessages.length}`);
-      try {
-        await streamMyNexusChat(bookId, requestMessages, {
-          onDelta: (delta) => {
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last && last.role === 'assistant') {
-                next[next.length - 1] = { ...last, content: last.content + delta };
-              }
-              return next;
-            });
-            scrollToBottom();
-          },
-          onCitations: (citations) => {
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last && last.role === 'assistant') {
-                next[next.length - 1] = { ...last, citations };
-              }
-              return next;
-            });
-          },
-          onToolResult: (tool) => {
-            const mindmap = parseMindmapFrame(bookId, tool.toolName, tool.resultJson);
-            if (!mindmap) return;
-            console.log(`[MyNexus] mindmap received book=${bookId}`);
-            const userContent = findLastUserContent(messagesRef.current);
-            if (userContent) cacheMindmap(bookId, { userContent, mindmap });
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last && last.role === 'assistant') {
-                next[next.length - 1] = { ...last, mindmap };
-              }
-              return next;
-            });
-          },
-        });
-        console.log(`[MyNexus] send done book=${bookId}`);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        console.error(`[MyNexus] send failed book=${bookId}: ${message}`);
-        setMessages((prev) => prev.slice(0, Math.max(0, prev.length - 2)));
-        setError(message || _('AI Companion request failed'));
-      } finally {
-        sendingRef.current = false;
-        setLoading(false);
-      }
-    },
-    [bookId, _, scrollToBottom],
-  );
-
-  const sendRef = useRef(send);
-  sendRef.current = send;
-
   useEffect(() => {
     if (!bookId) return;
-    let cancelled = false;
-    setError('');
-    setMessages([]);
-    console.log(`[MyNexus] load session book=${bookId}`);
-    void (async () => {
-      try {
-        const { sessionId, messages: history } = await getMyNexusSession(bookId);
-        if (cancelled) return;
-        console.log(
-          `[MyNexus] session book=${bookId} id=${sessionId ?? 'none'} messages=${history.length}`,
-        );
-        setMessages(applyMindmaps(bookId, history));
-        if (history.length === 0 && bookTitle) {
-          void sendRef.current(`现在我们开始伴读《${bookTitle}》这本书`, []);
-        }
-      } catch (e) {
-        if (cancelled) return;
-        const message = e instanceof Error ? e.message : String(e);
-        console.error(`[MyNexus] session failed book=${bookId}: ${message}`);
-        setError(message || _('AI Companion request failed'));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [bookId, bookTitle, _]);
+    void useMyNexusStore.getState().ensureSession(bookId, bookTitle);
+  }, [bookId, bookTitle]);
+
+  const send = useCallback(
+    (text: string) => {
+      if (!bookId) return;
+      setQuestion('');
+      void useMyNexusStore.getState().send(bookId, text);
+    },
+    [bookId],
+  );
 
   const isEmpty = messages.length === 0 && !loading;
 
@@ -324,6 +163,28 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
               ) : (
                 <div className='break-words whitespace-pre-wrap'>{message.content}</div>
               )}
+              {message.role === 'assistant' && message.createdAt && (
+                <div className='text-base-content/50 mt-1 text-xs'>
+                  {formatMessageTime(message.createdAt)}
+                </div>
+              )}
+              {message.role === 'user' && (
+                <div className='text-base-content/50 mt-1 flex items-center justify-end gap-1.5 text-xs'>
+                  {message.createdAt && <span>{formatMessageTime(message.createdAt)}</span>}
+                  <button
+                    type='button'
+                    className='hover:text-base-content cursor-pointer'
+                    title={_('Copy')}
+                    onClick={() => copyMessage(index, message.content)}
+                  >
+                    {copiedIndex === index ? (
+                      <IoCheckmark size={13} />
+                    ) : (
+                      <IoCopyOutline size={13} />
+                    )}
+                  </button>
+                </div>
+              )}
               {(message.citations ?? []).map((citation, citationIndex) => (
                 <details key={citationIndex} className='mt-2'>
                   <summary className='cursor-pointer text-xs'>
@@ -352,7 +213,7 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                void send(question);
+                send(question);
               }
             }}
             rows={2}
@@ -364,7 +225,7 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
             type='button'
             className='btn btn-primary btn-sm h-9 min-h-9'
             title={_('Send')}
-            onClick={() => void send(question)}
+            onClick={() => send(question)}
             disabled={loading || !question.trim()}
           >
             {loading ? (
