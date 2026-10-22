@@ -14,6 +14,7 @@ import { useContentInsets } from '../hooks/useContentInsets';
 import SearchResultsNav from './sidebar/SearchResultsNav';
 import BooknotesNav from './sidebar/BooknotesNav';
 import FoliateViewer from './FoliateViewer';
+import BackToPreviousLocation from './BackToPreviousLocation';
 import SectionInfo from './SectionInfo';
 import HeaderBar from './HeaderBar';
 import PageNavigationButtons from './PageNavigationButtons';
@@ -116,7 +117,7 @@ const BookCellInner: React.FC<BookCellProps> = ({
   // subscriptions above already drive the re-render that picks them up.
   const bookData = getBookData(bookKey);
   const config = getConfig(bookKey);
-  const { book, bookDoc } = bookData || {};
+  const { book, bookDoc, isFixedLayout } = bookData || {};
 
   // viewInsets/contentInsets stay stable while the user is just turning pages
   // (margins are unchanged) but update when a margin setting changes — even
@@ -171,6 +172,9 @@ const BookCellInner: React.FC<BookCellProps> = ({
         gridInsets={gridInsets}
         contentInsets={contentInsets}
       />
+      {/* Fixed-layout books treat every page as a section, so a page turn
+          would look like a chapter switch. */}
+      {!isFixedLayout && <BackToPreviousLocation bookKey={bookKey} />}
       {viewSettings.vertical && viewSettings.scrolled && (
         <>
           {(showFooter || viewSettings.doubleBorder) && (
