@@ -123,13 +123,15 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
             <div
               key={index}
               className={clsx(
-                'max-w-[92%] rounded-xl px-3 py-2',
-                message.role === 'user' ? 'bg-primary/15 self-end' : 'bg-base-300/40 self-start',
+                'rounded-xl px-3 py-2',
+                message.role === 'user'
+                  ? 'bg-primary/15 max-w-[92%] self-end'
+                  : 'bg-base-300/40 w-full',
               )}
             >
-              <div className='text-base-content/60 mb-1 text-xs font-semibold'>
-                {message.role === 'user' ? _('You') : '✴'}
-              </div>
+              {message.role === 'assistant' && (
+                <div className='text-base-content/60 mb-1 text-xs font-semibold'>✴</div>
+              )}
               {message.role === 'assistant' &&
               !message.content &&
               !message.mindmap &&
