@@ -15,6 +15,7 @@ import { getBookProgress, useBookProgress } from '@/store/readerProgressStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useNotebookStore } from '@/store/notebookStore';
+import { useMyNexusAvailability, useMyNexusEnabled, useMyNexusStore } from '@/store/myNexusStore';
 import { useSidebarStore } from '@/store/sidebarStore';
 import { useCustomDictionaryStore } from '@/store/customDictionaryStore';
 import { isSystemDictionaryEnabled } from '@/services/dictionaries/registry';
@@ -71,6 +72,8 @@ import {
   removeGlobalAnnotationOverlays,
   sourceCfiFromSyntheticValue,
 } from '../../utils/globalAnnotations';
+import { buildReadingContext, buildSelectionContext } from '@/utils/mynexusContext';
+import { addAiSelectionMarker } from '../../utils/aiSelectionMarker';
 import { annotationToolButtons } from './AnnotationTools';
 import AnnotationRangeEditor from './AnnotationRangeEditor';
 import SelectionRangeEditor from './SelectionRangeEditor';
@@ -137,6 +140,16 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   const view = getView(bookKey);
   const viewSettings = getViewSettings(bookKey)!;
   const primaryLang = bookData.book?.primaryLanguage || 'en';
+  const myNexusEnabled = useMyNexusEnabled();
+  const bookId = bookData.book?.bookId;
+  const myNexusAvailable = useMyNexusAvailability(bookId);
+  const canUseAi = myNexusEnabled && myNexusAvailable;
+
+  useEffect(() => {
+    if (myNexusEnabled && bookId) {
+      void useMyNexusStore.getState().loadAvailability(bookId);
+    }
+  }, [myNexusEnabled, bookId]);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
 
@@ -217,6 +230,7 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   const visibleToolCount = getToolbarToolTypes(
     viewSettings.annotationToolbarItems,
     canShare,
+    canUseAi,
   ).length;
   const annotPopupWidth = selection?.annotated
     ? annotPopupMaxWidth
@@ -1327,6 +1341,24 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
     handleDismissPopup();
   };
 
+  const handleAiChat = () => {
+    if (!selection || !selection.text.trim()) return;
+    const { sectionHref: href } = progress;
+    if (!selection.href) selection.href = href;
+    const cfi = selection.cfi || view?.getCFI(selection.index, selection.range);
+    if (cfi) selection.cfi = cfi;
+    const selectionContext = buildSelectionContext(bookKey, selection);
+    if (!selectionContext) {
+      console.warn(`[MyNexus] selection context build failed book=${bookKey}`);
+      return;
+    }
+    addAiSelectionMarker(view, bookKey, selection);
+    useMyNexusStore
+      .getState()
+      .openCompanionWithSelection(bookKey, selectionContext, buildReadingContext(bookKey));
+    handleDismissPopupAndSelection();
+  };
+
   const handleSearch = () => {
     if (!selection || !selection.text) return;
     handleDismissPopupAndSelection();
@@ -1737,6 +1769,8 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
         };
       case 'annotate':
         return { tooltipText: _(label), Icon, onClick: handleAnnotate };
+      case 'ai-chat':
+        return canUseAi ? { tooltipText: _(label), Icon, onClick: handleAiChat } : null;
       case 'search':
         return { tooltipText: _(label), Icon, onClick: handleSearch };
       case 'dictionary':
@@ -1759,7 +1793,7 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
     }
   };
 
-  const toolButtons = getToolbarToolTypes(viewSettings.annotationToolbarItems, canShare)
+  const toolButtons = getToolbarToolTypes(viewSettings.annotationToolbarItems, canShare, canUseAi)
     .map(buildToolButton)
     .filter((button): button is NonNullable<typeof button> => button !== null);
 

@@ -6,11 +6,13 @@ import { IoCheckmark, IoCopyOutline, IoArrowUp } from 'react-icons/io5';
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { useReaderStore } from '@/store/readerStore';
 import { EMPTY_MYNEXUS_SESSION, useMyNexusStore } from '@/store/myNexusStore';
 import { openMindmapWindow } from '@/helpers/mindmapWindow';
 import { writeTextToClipboard } from '@/utils/clipboard';
 import { getLocale } from '@/utils/misc';
-import { buildMessageContext } from '@/utils/mynexusContext';
+import { buildMessageContext, buildReadingContext } from '@/utils/mynexusContext';
+import { removeAiSelectionMarker } from '../../utils/aiSelectionMarker';
 import MyNexusMarkdown from './MyNexusMarkdown';
 import MyNexusMindmap from './MyNexusMindmap';
 
@@ -30,6 +32,7 @@ const formatMessageTime = (timestamp: number) =>
 const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
   const _ = useTranslation();
   const { getBookData } = useBookDataStore();
+  const getView = useReaderStore((state) => state.getView);
   const book = bookKey ? getBookData(bookKey)?.book : null;
   const bookId = book?.bookId;
   const bookTitle = book?.title;
@@ -38,11 +41,15 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
     useMyNexusStore((state) => (bookId ? state.sessions[bookId] : undefined)) ??
     EMPTY_MYNEXUS_SESSION;
   const { messages, loading, error } = session;
+  const pendingSelection = useMyNexusStore((state) =>
+    state.pendingSelection?.bookKey === bookKey ? state.pendingSelection : null,
+  );
 
   const [question, setQuestion] = useState('');
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const copyMessage = useCallback((index: number, text: string) => {
     void writeTextToClipboard(text).then((ok) => {
@@ -71,14 +78,40 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
     void useMyNexusStore.getState().ensureSession(bookId, bookTitle, buildMessageContext(bookKey));
   }, [bookId, bookTitle, bookKey]);
 
+  const clearStagedQuote = useCallback(() => {
+    const pending = useMyNexusStore.getState().pendingSelection;
+    if (!pending) return;
+    removeAiSelectionMarker(getView(pending.bookKey), pending.bookKey);
+    useMyNexusStore.getState().clearPendingSelection();
+  }, [getView]);
+
+  const buildContext = useCallback(() => {
+    if (!pendingSelection) return buildMessageContext(bookKey);
+    return {
+      reading: buildReadingContext(bookKey) ?? pendingSelection.reading,
+      selection: pendingSelection.selection,
+    };
+  }, [bookKey, pendingSelection]);
+
   const send = useCallback(
     (text: string) => {
       if (!bookId) return;
+      const context = buildContext();
+      const hasStagedQuote = !!pendingSelection;
       setQuestion('');
-      void useMyNexusStore.getState().send(bookId, text, buildMessageContext(bookKey));
+      void useMyNexusStore.getState().send(bookId, text, context);
+      if (hasStagedQuote) {
+        clearStagedQuote();
+      }
     },
-    [bookId, bookKey],
+    [bookId, buildContext, pendingSelection, clearStagedQuote],
   );
+
+  useEffect(() => {
+    if (pendingSelection) {
+      inputRef.current?.focus();
+    }
+  }, [pendingSelection]);
 
   const isEmpty = messages.length === 0 && !loading;
 
@@ -118,6 +151,55 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
           }
         }
       `}</style>
+      {pendingSelection && (
+        <div className='border-primary/40 bg-primary/5 border-b px-3 py-2'>
+          <div className='text-base-content/60 flex items-center justify-between gap-2 text-[11px]'>
+            <span className='truncate'>
+              ❝{' '}
+              {[
+                pendingSelection.selection.chapter_title,
+                pendingSelection.selection.progress_fraction
+                  ? `${Math.round(pendingSelection.selection.progress_fraction * 100)}%`
+                  : '',
+                pendingSelection.selection.page ? `p.${pendingSelection.selection.page}` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </span>
+            <button
+              type='button'
+              className='hover:text-base-content cursor-pointer px-1'
+              title={_('Cancel')}
+              onClick={clearStagedQuote}
+            >
+              ✕
+            </button>
+          </div>
+          <div className='line-clamp-3 text-xs italic'>{pendingSelection.selection.text}</div>
+          <div className='mt-1.5 flex flex-wrap gap-1.5'>
+            <button
+              type='button'
+              className='btn btn-xs'
+              onClick={() => {
+                setQuestion(_('Explain this passage'));
+                inputRef.current?.focus();
+              }}
+            >
+              {_('Explain this passage')}
+            </button>
+            <button
+              type='button'
+              className='btn btn-xs'
+              onClick={() => {
+                setQuestion(_('What is this passage about'));
+                inputRef.current?.focus();
+              }}
+            >
+              {_('What is this passage about')}
+            </button>
+          </div>
+        </div>
+      )}
       <div ref={listRef} className='min-h-0 flex-1 overflow-y-auto px-3 py-3'>
         <div className='flex flex-col gap-3'>
           {messages.map((message, index) => (
@@ -164,7 +246,30 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
                   )}
                 </>
               ) : (
-                <div className='break-words whitespace-pre-wrap'>{message.content}</div>
+                <div>
+                  {message.context?.selection?.text && (
+                    <details className='border-base-content/20 bg-base-100/50 mb-1.5 border-s-2 px-2 py-1'>
+                      <summary className='text-base-content/50 cursor-pointer text-[11px]'>
+                        ❝{' '}
+                        {[
+                          message.context.selection.chapter_title,
+                          message.context.selection.progress_fraction
+                            ? `${Math.round(message.context.selection.progress_fraction * 100)}%`
+                            : '',
+                          message.context.selection.page
+                            ? `p.${message.context.selection.page}`
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </summary>
+                      <div className='mt-1 text-xs break-words whitespace-pre-wrap italic'>
+                        {message.context.selection.text}
+                      </div>
+                    </details>
+                  )}
+                  <div className='break-words whitespace-pre-wrap'>{message.content}</div>
+                </div>
               )}
               {message.role === 'assistant' && message.createdAt && (
                 <div className='text-base-content/50 mt-1 text-xs'>
@@ -211,6 +316,7 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
       <div className='border-base-300 flex-shrink-0 border-t p-2'>
         <div className='relative'>
           <textarea
+            ref={inputRef}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
@@ -220,7 +326,11 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
               }
             }}
             rows={2}
-            placeholder={_('Ask a question to start reading with this book')}
+            placeholder={
+              pendingSelection
+                ? _('Ask about the selected text')
+                : _('Ask a question to start reading with this book')
+            }
             className='textarea textarea-bordered max-h-32 w-full resize-none pr-11 !leading-6 text-sm'
             disabled={loading}
           />
