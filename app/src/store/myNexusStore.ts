@@ -4,6 +4,7 @@ import {
   getMyNexusSession,
   streamMyNexusChat,
   MyNexusChatMessage,
+  MyNexusMessageContext,
 } from '@/services/mybooksService';
 import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { stubTranslation as _ } from '@/utils/misc';
@@ -41,8 +42,12 @@ interface MyNexusState {
   loading: Record<number, boolean>;
   sessions: Record<number, MyNexusSession>;
   loadAvailability: (bookId: number, force?: boolean) => Promise<boolean>;
-  ensureSession: (bookId: number, bookTitle?: string) => Promise<void>;
-  send: (bookId: number, text: string) => Promise<void>;
+  ensureSession: (
+    bookId: number,
+    bookTitle?: string,
+    context?: MyNexusMessageContext,
+  ) => Promise<void>;
+  send: (bookId: number, text: string, context?: MyNexusMessageContext) => Promise<void>;
 }
 
 // Chat state lives in the store, not the panel: hiding the notebook unmounts
@@ -157,7 +162,7 @@ export const useMyNexusStore = create<MyNexusState>((set, get) => ({
     }
   },
 
-  ensureSession: async (bookId, bookTitle) => {
+  ensureSession: async (bookId, bookTitle, context) => {
     if (!bookId) return;
     // Already loaded (or loading) — a remount must not wipe an in-flight answer.
     if (get().sessions[bookId]?.initialized) return;
@@ -177,7 +182,7 @@ export const useMyNexusStore = create<MyNexusState>((set, get) => ({
       );
       set((state) => mergeSession(state, bookId, { messages: applyMindmaps(bookId, messages) }));
       if (messages.length === 0 && bookTitle) {
-        void get().send(bookId, `现在我们开始读《${bookTitle}》这本书`);
+        void get().send(bookId, `现在我们开始读《${bookTitle}》这本书`, context);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -188,15 +193,20 @@ export const useMyNexusStore = create<MyNexusState>((set, get) => ({
     }
   },
 
-  send: async (bookId, text) => {
+  send: async (bookId, text, context) => {
     const content = text.trim();
     if (!bookId || !content) return;
     const current = get().sessions[bookId];
     if (current?.loading) return;
-    const requestMessages: MyNexusMessage[] = [
-      ...(current?.messages ?? []),
-      { role: 'user', content, createdAt: Date.now() },
-    ];
+    const msg: MyNexusMessage = {
+      role: 'user',
+      content,
+      createdAt: Date.now(),
+    };
+    if (context) {
+      msg.context = context;
+    }
+    const requestMessages: MyNexusMessage[] = [...(current?.messages ?? []), msg];
     set((state) =>
       mergeSession(state, bookId, {
         messages: [

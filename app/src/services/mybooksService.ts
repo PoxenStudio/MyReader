@@ -269,6 +269,31 @@ export const MYBOOKS_UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 // Logs one `[status][cost][method][path]` line per request.
 const DEBUG_REQUEST_TIMING = true;
 
+export interface MyNexusReadingContext {
+  book_title?: string;
+  chapter_title?: string;
+  chapter_href?: string;
+  section_index?: number;
+  progress_fraction?: number;
+  page?: number;
+  cfi?: string;
+}
+
+export interface MyNexusSelectionContext {
+  text: string;
+  chapter_title?: string;
+  chapter_href?: string;
+  section_index?: number;
+  page?: number;
+  progress_fraction?: number;
+  cfi?: string;
+}
+
+export interface MyNexusMessageContext {
+  reading?: MyNexusReadingContext;
+  selection?: MyNexusSelectionContext;
+}
+
 export interface MyNexusChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -278,6 +303,9 @@ export interface MyNexusChatMessage {
   // Normalized generate_mindmap frame the panel renders, filled from
   // either the live SSE stream or the replayed tool_results above.
   toolResult?: { toolName?: string; resultJson?: string };
+  // Reading position / selected passage snapshot captured when the message
+  // was sent; only user messages carry it.
+  context?: MyNexusMessageContext;
 }
 
 interface ResolvedMyBooksRequest {
@@ -1161,6 +1189,7 @@ export async function getMyNexusSession(bookId: number): Promise<{
         role: m.role,
         content: m.content,
         citations: m.citations,
+        context: m.context,
         toolResult: frame
           ? { toolName: frame.tool_name, resultJson: frame.result_json }
           : undefined,
@@ -1189,7 +1218,11 @@ export async function streamMyNexusChat(
   const response = await fetchMyBooksStream(`/book/${bookId}/mynexus/chat`, {
     method: 'POST',
     body: JSON.stringify({
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        ...(m.context ? { context: m.context } : {}),
+      })),
     }),
     contentType: 'application/json',
     signal: callbacks.signal,
