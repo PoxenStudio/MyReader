@@ -10,6 +10,7 @@ import { EMPTY_MYNEXUS_SESSION, useMyNexusStore } from '@/store/myNexusStore';
 import { openMindmapWindow } from '@/helpers/mindmapWindow';
 import { writeTextToClipboard } from '@/utils/clipboard';
 import { getLocale } from '@/utils/misc';
+import { buildMessageContext } from '@/utils/mynexusContext';
 import MyNexusMarkdown from './MyNexusMarkdown';
 import MyNexusMindmap from './MyNexusMindmap';
 
@@ -67,16 +68,16 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
 
   useEffect(() => {
     if (!bookId) return;
-    void useMyNexusStore.getState().ensureSession(bookId, bookTitle);
-  }, [bookId, bookTitle]);
+    void useMyNexusStore.getState().ensureSession(bookId, bookTitle, buildMessageContext(bookKey));
+  }, [bookId, bookTitle, bookKey]);
 
   const send = useCallback(
     (text: string) => {
       if (!bookId) return;
       setQuestion('');
-      void useMyNexusStore.getState().send(bookId, text);
+      void useMyNexusStore.getState().send(bookId, text, buildMessageContext(bookKey));
     },
-    [bookId],
+    [bookId, bookKey],
   );
 
   const isEmpty = messages.length === 0 && !loading;
@@ -220,12 +221,12 @@ const MyNexusChatPanel: React.FC<MyNexusChatPanelProps> = ({ bookKey }) => {
             }}
             rows={2}
             placeholder={_('Ask a question to start reading with this book')}
-            className='textarea textarea-sm textarea-bordered max-h-32 w-full resize-none pr-11'
+            className='textarea textarea-bordered max-h-32 w-full resize-none pr-11 !leading-6 text-sm'
             disabled={loading}
           />
           <button
             type='button'
-            className='btn btn-primary btn-sm absolute right-1.5 bottom-2.5 h-7 w-7 min-h-7 rounded-full p-0'
+            className='btn btn-primary btn-sm absolute right-1.5 bottom-2 h-7 w-7 min-h-7 rounded-full p-0'
             title={_('Send')}
             onClick={() => send(question)}
             disabled={loading || !question.trim()}
