@@ -97,6 +97,22 @@ describe('buildReadingContext', () => {
     expect(context?.cfi).toHaveLength(500);
   });
 
+  it('takes a whitespace-squeezed 50-character snippet from the visible range', () => {
+    h.getBookProgress.mockReturnValue(
+      progress({
+        range: { toString: () => `  上官仪\n\n收了  ${'字'.repeat(80)}` } as unknown as Range,
+      }),
+    );
+    const snippet = buildReadingContext('book-1')?.snippet;
+    expect(snippet?.startsWith('上官仪 收了')).toBe(true);
+    expect(snippet).toHaveLength(50);
+  });
+
+  it('omits the snippet when progress carries no range', () => {
+    h.getBookProgress.mockReturnValue(progress());
+    expect(buildReadingContext('book-1')?.snippet).toBeUndefined();
+  });
+
   it('returns undefined when neither progress nor book exists', () => {
     h.getBookProgress.mockReturnValue(null);
     h.getBookData.mockReturnValue(undefined);

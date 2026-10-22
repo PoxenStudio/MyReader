@@ -9,6 +9,7 @@ import type { TextSelection } from '@/utils/sel';
 
 const MAX_SELECTION_CHARS = 2000;
 const MAX_TITLE_CHARS = 200;
+const MAX_SNIPPET_CHARS = 50;
 
 const cut = (value: string | undefined, limit: number): string | undefined => {
   if (!value) return undefined;
@@ -16,6 +17,11 @@ const cut = (value: string | undefined, limit: number): string | undefined => {
 };
 
 const squeeze = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const readRangeSnippet = (range: Range | undefined): string | undefined => {
+  if (!range || typeof range.toString !== 'function') return undefined;
+  return cut(squeeze(range.toString()), MAX_SNIPPET_CHARS);
+};
 
 const clampFraction = (value: number | undefined): number | undefined => {
   if (typeof value !== 'number' || Number.isNaN(value)) return undefined;
@@ -37,9 +43,10 @@ export const buildReadingContext = (bookKey: string | null): MyNexusReadingConte
     progress_fraction: clampFraction(progress?.fraction),
     page: typeof progress?.page === 'number' && progress.page > 0 ? progress.page : undefined,
     cfi: cut(progress?.location, 500),
+    snippet: readRangeSnippet(progress?.range),
   };
   console.log(
-    `[MyNexus] reading context book=${bookKey} chapter=${context.chapter_title ?? ''} section=${context.section_index ?? ''} fraction=${context.progress_fraction ?? ''}`,
+    `[MyNexus] reading context book=${bookKey} chapter=${context.chapter_title ?? ''} section=${context.section_index ?? ''} fraction=${context.progress_fraction ?? ''} snippet_len=${context.snippet?.length ?? 0}`,
   );
   return context;
 };

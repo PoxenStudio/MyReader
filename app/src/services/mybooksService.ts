@@ -277,6 +277,7 @@ export interface MyNexusReadingContext {
   progress_fraction?: number;
   page?: number;
   cfi?: string;
+  snippet?: string;
 }
 
 export interface MyNexusSelectionContext {
