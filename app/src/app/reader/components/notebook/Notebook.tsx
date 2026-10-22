@@ -8,6 +8,7 @@ import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSidebarStore } from '@/store/sidebarStore';
 import { useNotebookStore } from '@/store/notebookStore';
+import { useMyNexusStore } from '@/store/myNexusStore';
 import { NotebookTab } from '@/store/notebookStore';
 import { useAIChatStore } from '@/store/aiChatStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -37,6 +38,7 @@ import {
   expandAllRenderedSections,
   removeGlobalAnnotationOverlays,
 } from '../../utils/globalAnnotations';
+import { removeAiSelectionMarker } from '../../utils/aiSelectionMarker';
 import BooknoteItem from '../sidebar/BooknoteItem';
 import AIAssistant from './AIAssistant';
 import NotebookHeader from './Header';
@@ -215,6 +217,19 @@ const Notebook: React.FC = ({}) => {
   useEffect(() => {
     return () => handleCancelNewAnnotation(sideBarBookKey);
   }, [sideBarBookKey, handleCancelNewAnnotation]);
+
+  // The AI-chat entry stages a quoted passage and draws a temporary highlight.
+  // Both live only while the companion panel presents that same book; closing
+  // the notebook, switching tabs or books must not leave a stale marker behind.
+  useEffect(() => {
+    const pending = useMyNexusStore.getState().pendingSelection;
+    if (!pending) return;
+    const active =
+      isNotebookVisible && notebookActiveTab === 'companion' && pending.bookKey === sideBarBookKey;
+    if (active) return;
+    removeAiSelectionMarker(getView(pending.bookKey), pending.bookKey);
+    useMyNexusStore.getState().clearPendingSelection();
+  }, [isNotebookVisible, notebookActiveTab, sideBarBookKey, getView]);
 
   const handleClickOverlay = () => {
     setNotebookVisible(false);

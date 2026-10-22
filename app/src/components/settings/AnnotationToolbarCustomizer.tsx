@@ -22,6 +22,7 @@ import { useEnv } from '@/context/EnvContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useReaderStore } from '@/store/readerStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useMyNexusEnabled } from '@/store/myNexusStore';
 import { saveViewSettings } from '@/helpers/settings';
 import { AnnotationToolType } from '@/types/annotator';
 import { annotationToolButtons } from '@/app/reader/components/annotator/AnnotationTools';
@@ -152,6 +153,7 @@ const AnnotationToolbarCustomizer: React.FC<AnnotationToolbarCustomizerProps> = 
   const viewSettings = getViewSettings(bookKey) || settings.globalViewSettings;
 
   const canShare = canShareText(appService);
+  const canUseAi = useMyNexusEnabled();
 
   // `share` is hidden on platforms that can't share (Windows/Linux desktop).
   // If the user enabled it on a share-capable device (e.g. their phone) and it
@@ -161,10 +163,16 @@ const AnnotationToolbarCustomizer: React.FC<AnnotationToolbarCustomizerProps> = 
     'share',
   );
   const preserveHiddenShare = !canShare && savedHasShare;
+  // Same for the MyNexus entry: read it on a platform where it is available so
+  // editing the toolbar elsewhere does not silently delete it.
+  const savedHasAi = getToolbarToolTypes(viewSettings.annotationToolbarItems, true, true).includes(
+    'ai-chat',
+  );
+  const preserveHiddenAi = !canUseAi && savedHasAi;
 
   const [items, setItems] = useState<Record<ZoneId, AnnotationToolType[]>>(() => ({
-    toolbar: getToolbarToolTypes(viewSettings.annotationToolbarItems, canShare),
-    available: getAvailableToolTypes(viewSettings.annotationToolbarItems, canShare),
+    toolbar: getToolbarToolTypes(viewSettings.annotationToolbarItems, canShare, canUseAi),
+    available: getAvailableToolTypes(viewSettings.annotationToolbarItems, canShare, canUseAi),
   }));
   // dnd-kit invokes onDragEnd with the handler captured at drag start, so the
   // closed-over `items` is stale by the time a cross-zone drag finishes. Read
@@ -207,17 +215,16 @@ const AnnotationToolbarCustomizer: React.FC<AnnotationToolbarCustomizerProps> = 
   );
 
   const persist = (toolbar: AnnotationToolType[]) => {
-    const toSave =
-      preserveHiddenShare && !toolbar.includes('share')
-        ? [...toolbar, 'share' as AnnotationToolType]
-        : toolbar;
+    const toSave = [...toolbar];
+    if (preserveHiddenShare && !toSave.includes('share')) toSave.push('share');
+    if (preserveHiddenAi && !toSave.includes('ai-chat')) toSave.push('ai-chat');
     saveViewSettings(envConfig, bookKey, 'annotationToolbarItems', toSave, false, true);
   };
 
   // Commit a new toolbar order: keep the user's arrangement, recompute the
   // available tray as its canonical-order complement, and persist.
   const commit = (toolbar: AnnotationToolType[]) => {
-    setItems({ toolbar, available: getAvailableToolTypes(toolbar, canShare) });
+    setItems({ toolbar, available: getAvailableToolTypes(toolbar, canShare, canUseAi) });
     persist(toolbar);
   };
 
@@ -235,7 +242,12 @@ const AnnotationToolbarCustomizer: React.FC<AnnotationToolbarCustomizerProps> = 
 
   // "Add all" rebuilds the toolbar in the canonical predefined order (not the
   // user's prior arrangement); "Clear all" empties it.
-  const addAll = () => commit(ALL_ANNOTATION_TOOL_TYPES.filter((t) => canShare || t !== 'share'));
+  const addAll = () =>
+    commit(
+      ALL_ANNOTATION_TOOL_TYPES.filter(
+        (t) => (canShare || t !== 'share') && (canUseAi || t !== 'ai-chat'),
+      ),
+    );
   const clearAll = () => commit([]);
 
   const handleDragStart = () => {

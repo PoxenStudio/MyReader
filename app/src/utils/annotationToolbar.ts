@@ -6,6 +6,7 @@ export const ALL_ANNOTATION_TOOL_TYPES: AnnotationToolType[] = [
   'copy',
   'highlight',
   'annotate',
+  'ai-chat',
   'search',
   'dictionary',
   'translate',
@@ -14,12 +15,13 @@ export const ALL_ANNOTATION_TOOL_TYPES: AnnotationToolType[] = [
   'share',
 ];
 
-// Default toolbar: the eight pre-existing tools in their original order.
+// Default toolbar: the nine pre-existing tools in their original order.
 // 'share' starts hidden in the Available tray per the #4014 design.
 export const DEFAULT_ANNOTATION_TOOLBAR_ITEMS: AnnotationToolType[] = [
   'copy',
   'highlight',
   'annotate',
+  'ai-chat',
   'search',
   'dictionary',
   'translate',
@@ -46,16 +48,22 @@ const sanitize = (items: AnnotationToolType[] | undefined): AnnotationToolType[]
 export const getToolbarToolTypes = (
   items: AnnotationToolType[] | undefined,
   canShare: boolean,
-): AnnotationToolType[] => sanitize(items).filter((type) => canShare || type !== 'share');
+  canUseAi = true,
+): AnnotationToolType[] =>
+  sanitize(items).filter(
+    (type) => (canShare || type !== 'share') && (canUseAi || type !== 'ai-chat'),
+  );
 
 // Hidden tools (the "Available" tray), in canonical order.
 export const getAvailableToolTypes = (
   items: AnnotationToolType[] | undefined,
   canShare: boolean,
+  canUseAi = true,
 ): AnnotationToolType[] => {
   const visible = new Set(sanitize(items));
   return ALL_ANNOTATION_TOOL_TYPES.filter(
-    (type) => !visible.has(type) && (canShare || type !== 'share'),
+    (type) =>
+      !visible.has(type) && (canShare || type !== 'share') && (canUseAi || type !== 'ai-chat'),
   );
 };
 

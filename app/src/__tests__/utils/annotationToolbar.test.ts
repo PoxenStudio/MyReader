@@ -15,11 +15,12 @@ describe('annotationToolbar helpers', () => {
     expect(ALL_ANNOTATION_TOOL_TYPES).toEqual(annotationToolButtons.map((b) => b.type));
   });
 
-  test('default toolbar is the eight non-share tools in canonical order', () => {
+  test('default toolbar is the nine non-share tools in canonical order', () => {
     expect(DEFAULT_ANNOTATION_TOOLBAR_ITEMS).toEqual([
       'copy',
       'highlight',
       'annotate',
+      'ai-chat',
       'search',
       'dictionary',
       'translate',
@@ -47,6 +48,7 @@ describe('annotationToolbar helpers', () => {
     expect(getAvailableToolTypes(['copy'], true)).toEqual([
       'highlight',
       'annotate',
+      'ai-chat',
       'search',
       'dictionary',
       'translate',
@@ -58,6 +60,12 @@ describe('annotationToolbar helpers', () => {
 
   test('getAvailableToolTypes hides share when !canShare', () => {
     expect(getAvailableToolTypes(['copy'], false)).not.toContain('share');
+  });
+
+  test('ai-chat is hidden when MyNexus is unavailable', () => {
+    expect(getToolbarToolTypes(['copy', 'ai-chat'], true, false)).toEqual(['copy']);
+    expect(getAvailableToolTypes(['copy'], true, false)).not.toContain('ai-chat');
+    expect(getToolbarToolTypes(['copy', 'ai-chat'], true, true)).toEqual(['copy', 'ai-chat']);
   });
 
   test('addToolToToolbar appends by default and is a no-op when present', () => {

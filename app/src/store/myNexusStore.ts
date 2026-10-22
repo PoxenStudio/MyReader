@@ -5,8 +5,11 @@ import {
   streamMyNexusChat,
   MyNexusChatMessage,
   MyNexusMessageContext,
+  MyNexusReadingContext,
+  MyNexusSelectionContext,
 } from '@/services/mybooksService';
 import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
+import { useNotebookStore } from '@/store/notebookStore';
 import { stubTranslation as _ } from '@/utils/misc';
 
 // How long a probed per-book availability stays valid before re-checking.
@@ -20,6 +23,14 @@ interface MyNexusAvailabilityEntry {
 export interface MyNexusMessage extends MyNexusChatMessage {
   mindmap?: { title: string; markdown: string };
   createdAt?: number;
+}
+
+// A selected passage staged from the annotation toolbar. It is scoped to one
+// book and cleared as soon as the user sends (or cancels) it.
+export interface MyNexusPendingSelection {
+  bookKey: string;
+  reading?: MyNexusReadingContext;
+  selection: MyNexusSelectionContext;
 }
 
 interface MyNexusSession {
@@ -41,7 +52,14 @@ interface MyNexusState {
   availability: Record<number, MyNexusAvailabilityEntry>;
   loading: Record<number, boolean>;
   sessions: Record<number, MyNexusSession>;
+  pendingSelection: MyNexusPendingSelection | null;
   loadAvailability: (bookId: number, force?: boolean) => Promise<boolean>;
+  openCompanionWithSelection: (
+    bookKey: string,
+    selection: MyNexusSelectionContext,
+    reading?: MyNexusReadingContext,
+  ) => void;
+  clearPendingSelection: () => void;
   ensureSession: (
     bookId: number,
     bookTitle?: string,
@@ -123,6 +141,19 @@ export const useMyNexusStore = create<MyNexusState>((set, get) => ({
   availability: {},
   loading: {},
   sessions: {},
+  pendingSelection: null,
+
+  openCompanionWithSelection: (bookKey, selection, reading) => {
+    console.log(
+      `[MyNexus] open companion with selection book=${bookKey} len=${selection.text.length}`,
+    );
+    set({ pendingSelection: { bookKey, selection, reading } });
+    const notebook = useNotebookStore.getState();
+    notebook.setNotebookActiveTab('companion');
+    notebook.setNotebookVisible(true);
+  },
+
+  clearPendingSelection: () => set({ pendingSelection: null }),
 
   loadAvailability: async (bookId, force = false) => {
     if (!bookId) return false;

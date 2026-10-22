@@ -8,6 +8,7 @@ import { BsPencilSquare } from 'react-icons/bs';
 import { BsTranslate } from 'react-icons/bs';
 import { FaHeadphones } from 'react-icons/fa6';
 import { IoIosBuild } from 'react-icons/io';
+import { AiCompanionIcon } from '@/components/icons/AiCompanionIcon';
 import { AnnotationToolType } from '@/types/annotator';
 import { stubTranslation as _ } from '@/utils/misc';
 
@@ -55,6 +56,12 @@ export const annotationToolButtons = createAnnotationToolButtons([
     label: _('Annotate'),
     tooltip: _('Annotate text after selection'),
     Icon: BsPencilSquare,
+  },
+  {
+    type: 'ai-chat',
+    label: _('AI Chat'),
+    tooltip: _('Ask AI about the selected text'),
+    Icon: AiCompanionIcon,
   },
   {
     type: 'search',
