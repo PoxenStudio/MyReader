@@ -3,6 +3,7 @@ import { annotationToolButtons } from '@/app/reader/components/annotator/Annotat
 import {
   ALL_ANNOTATION_TOOL_TYPES,
   DEFAULT_ANNOTATION_TOOLBAR_ITEMS,
+  migrateLegacyDefaultAnnotationToolbarItems,
   getToolbarToolTypes,
   getAvailableToolTypes,
   addToolToToolbar,
@@ -28,6 +29,26 @@ describe('annotationToolbar helpers', () => {
       'proofread',
     ]);
     expect(DEFAULT_ANNOTATION_TOOLBAR_ITEMS).not.toContain('share');
+  });
+
+  test('migration upgrades only the previous default toolbar', () => {
+    expect(
+      migrateLegacyDefaultAnnotationToolbarItems([
+        'copy',
+        'highlight',
+        'annotate',
+        'search',
+        'dictionary',
+        'translate',
+        'tts',
+        'proofread',
+      ]),
+    ).toEqual(DEFAULT_ANNOTATION_TOOLBAR_ITEMS);
+    expect(migrateLegacyDefaultAnnotationToolbarItems(['copy', 'search'])).toEqual([
+      'copy',
+      'search',
+    ]);
+    expect(migrateLegacyDefaultAnnotationToolbarItems([])).toEqual([]);
   });
 
   test('getToolbarToolTypes preserves order and falls back to default when undefined', () => {

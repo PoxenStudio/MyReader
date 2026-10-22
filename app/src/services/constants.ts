@@ -470,7 +470,7 @@ export const DEFAULT_VIEW_SETTINGS_CONFIG: ViewSettingsConfig = {
   isGlobal: true,
 };
 
-export const SYSTEM_SETTINGS_VERSION = 1;
+export const SYSTEM_SETTINGS_VERSION = 2;
 
 export const SERIF_FONTS = [
   'Bitter',

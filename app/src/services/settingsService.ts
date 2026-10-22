@@ -26,6 +26,7 @@ import {
 } from './constants';
 import { DEFAULT_AI_SETTINGS } from './ai/constants';
 import { getTargetLang, isCJKEnv } from '@/utils/misc';
+import { migrateLegacyDefaultAnnotationToolbarItems } from '@/utils/annotationToolbar';
 import { safeLoadJSON, safeSaveJSON } from './persistence';
 
 export interface Context {
@@ -161,6 +162,12 @@ export async function loadSettings(ctx: Context): Promise<SystemSettings> {
     ...getDefaultViewSettings(ctx),
     ...settings.globalViewSettings,
   };
+  if (version < SYSTEM_SETTINGS_VERSION) {
+    settings.globalViewSettings.annotationToolbarItems =
+      migrateLegacyDefaultAnnotationToolbarItems(
+        settings.globalViewSettings.annotationToolbarItems,
+      ) ?? settings.globalViewSettings.annotationToolbarItems;
+  }
   migrateCJKFontNames(settings.globalViewSettings);
   settings.aiSettings = {
     ...DEFAULT_AI_SETTINGS,

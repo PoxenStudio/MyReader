@@ -6,6 +6,7 @@ import {
 } from '@/types/book';
 import { unifyAnnotations } from '@/utils/booknoteMigration';
 import { DEFAULT_NEARBY_WORDS, ensureSearchMode, modeToWholeWords } from '@/utils/searchConfig';
+import { migrateLegacyDefaultAnnotationToolbarItems } from '@/utils/annotationToolbar';
 
 export const stampBookConfigSchema = <T extends Partial<BookConfig>>(config: T): T => {
   return { ...config, schemaVersion: BOOK_CONFIG_SCHEMA_VERSION };
@@ -72,9 +73,15 @@ export const deserializeConfig = (
   defaultSearchConfig: BookSearchConfig,
 ): BookConfig => {
   const config = JSON.parse(str) as BookConfig;
+  const schemaVersion = config.schemaVersion ?? 0;
   const { viewSettings, searchConfig } = config;
   config.viewSettings = { ...globalViewSettings, ...viewSettings };
   config.searchConfig = { ...defaultSearchConfig, ...searchConfig };
+  if (schemaVersion < 4) {
+    config.viewSettings.annotationToolbarItems =
+      migrateLegacyDefaultAnnotationToolbarItems(config.viewSettings.annotationToolbarItems) ??
+      config.viewSettings.annotationToolbarItems;
+  }
   // v2 -> v3: search gained a `mode` enum (contains/whole-words/regex/nearby-words)
   // replacing the `matchWholeWords` boolean. Derive `mode` from the boolean when a
   // pre-v3 config (or sync peer) omits it, then keep the boolean mirrored on the wire.

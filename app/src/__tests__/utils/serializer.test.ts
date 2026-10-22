@@ -6,6 +6,7 @@ import {
   ViewSettings,
 } from '@/types/book';
 import { deserializeConfig, serializeConfig, serializeRawConfig } from '@/utils/serializer';
+import { DEFAULT_ANNOTATION_TOOLBAR_ITEMS } from '@/utils/annotationToolbar';
 
 const globalViewSettings = {
   zoomLevel: 100,
@@ -166,6 +167,39 @@ describe('BookConfig serialization', () => {
     const sc = config.searchConfig as BookSearchConfig;
     expect(sc.mode).toBe('contains');
     expect(sc.matchWholeWords).toBe(false);
+  });
+
+  it('migrates the legacy default annotation toolbar without changing custom toolbars', () => {
+    const legacyDefault = [
+      'copy',
+      'highlight',
+      'annotate',
+      'search',
+      'dictionary',
+      'translate',
+      'tts',
+      'proofread',
+    ];
+    const migrated = deserializeConfig(
+      JSON.stringify({ schemaVersion: 3, viewSettings: { annotationToolbarItems: legacyDefault } }),
+      globalViewSettings,
+      defaultSearchConfig,
+    );
+    expect(migrated.viewSettings?.annotationToolbarItems).toEqual(DEFAULT_ANNOTATION_TOOLBAR_ITEMS);
+
+    const custom = deserializeConfig(
+      JSON.stringify({ schemaVersion: 3, viewSettings: { annotationToolbarItems: ['copy'] } }),
+      globalViewSettings,
+      defaultSearchConfig,
+    );
+    expect(custom.viewSettings?.annotationToolbarItems).toEqual(['copy']);
+
+    const intentionallyHidden = deserializeConfig(
+      JSON.stringify({ schemaVersion: 4, viewSettings: { annotationToolbarItems: ['copy'] } }),
+      globalViewSettings,
+      defaultSearchConfig,
+    );
+    expect(intentionallyHidden.viewSettings?.annotationToolbarItems).toEqual(['copy']);
   });
 
   it('preserves an explicit mode and mirrors the deprecated boolean', () => {
