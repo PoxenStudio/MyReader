@@ -258,6 +258,12 @@ describe('getLayoutStyles branches (via getStyles)', () => {
     expect(css).toContain('text-indent: 2em');
   });
 
+  it('does not indent paragraphs containing a standalone wrapped image', () => {
+    const css = getStyles(makeViewSettings({ textIndent: 2 }), theme);
+    expect(css).toContain('p:has(> :only-child > img:only-child)');
+    expect(css).toContain('text-indent: initial !important');
+  });
+
   it('sets paragraph margins vertically (margin-left/right) when vertical is true', () => {
     const vs = makeViewSettings({ vertical: true, paragraphMargin: 1.0 });
     const css = getStyles(vs, theme);
