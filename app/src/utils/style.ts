@@ -506,7 +506,7 @@ const getPageLayoutStyles = (
     height: auto;
   }
   /* some mobi */
-  p[width][height] > img:only-child { 
+  p[width][height] > img:only-child {
     width: unset !important;
     height: unset !important;
   }
@@ -593,7 +593,7 @@ const getParagraphLayoutStyles = (
   dd.aligned-justify, div.aligned-justify {
     ${!justify && overrideLayout ? 'text-align: initial !important;' : ''};
   }
-  p:has(> img:only-child), p:has(> span:only-child > img:only-child),
+  p:has(> img:only-child), p:has(> :only-child > img:only-child),
   p:has(> img:not(.has-text-siblings)),
   p:has(> a:first-child + img:last-child) {
     text-indent: initial !important;
@@ -621,8 +621,8 @@ const getParagraphLayoutStyles = (
     ${!vertical && overrideLayout ? `margin-top: ${paragraphMargin}em !important;` : ''}
     ${!vertical && overrideLayout ? `margin-bottom: ${paragraphMargin}em !important;` : ''}
   }
-  p > font:only-child { 
-    display: flow-root; 
+  p > font:only-child {
+    display: flow-root;
   }
 
   :lang(zh), :lang(ja), :lang(ko) {
