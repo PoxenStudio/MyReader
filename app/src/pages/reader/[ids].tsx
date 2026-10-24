@@ -3,6 +3,7 @@ import { AuthProvider } from '@/context/AuthContext';
 import { EnvProvider } from '@/context/EnvContext';
 import { CSPostHogProvider } from '@/context/PHContext';
 import Reader from '@/app/reader/components/Reader';
+import { ReaderAccessGuard } from '@/app/reader/components/ReaderAccessGuard';
 
 export default function Page() {
   const router = useRouter();
@@ -11,7 +12,9 @@ export default function Page() {
     <CSPostHogProvider>
       <EnvProvider>
         <AuthProvider>
-          <Reader ids={ids} />
+          <ReaderAccessGuard>
+            <Reader ids={ids} />
+          </ReaderAccessGuard>
         </AuthProvider>
       </EnvProvider>
     </CSPostHogProvider>
