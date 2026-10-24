@@ -13,7 +13,6 @@ import { useMyNexusAvailability, useMyNexusEnabled, useMyNexusStore } from '@/st
 import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { getUserInfo } from '@/services/mybooksService';
-import { hasEmbedReturnUrl } from '@/utils/embedReturn';
 import { getBookHash } from '@/utils/book';
 import Button from '@/components/Button';
 
@@ -32,21 +31,20 @@ const MyNexusToggler: React.FC<MyNexusTogglerProps> = ({ bookKey }) => {
 
   const bookId = useBookDataStore((state) => state.booksData[getBookHash(bookKey)]?.book?.bookId);
   const sysInfo = useMyBooksStatusStore((state) => state.sysInfo);
-  const platformOk = appService?.isDesktopApp === true || hasEmbedReturnUrl(getBookHash(bookKey));
   const mynexusEnabled = useMyNexusEnabled();
   const companionAvailable = useMyNexusAvailability(bookId);
-  const visible = platformOk && mynexusEnabled && companionAvailable;
+  const visible = mynexusEnabled && companionAvailable;
 
   const fetchInfoRef = useRef(false);
   useEffect(() => {
-    if (!platformOk || fetchInfoRef.current || sysInfo) return;
+    if (fetchInfoRef.current || sysInfo) return;
     fetchInfoRef.current = true;
     console.log('[MyNexus] sysInfo missing, fetching user info to resolve mynexus_enabled');
     void getUserInfo();
-  }, [platformOk, sysInfo]);
+  }, [sysInfo]);
 
   const isOffline = useMyBooksStatusStore((state) => state.isOffline);
-  const canProbe = platformOk && mynexusEnabled && !isOffline && !!bookId;
+  const canProbe = mynexusEnabled && !isOffline && !!bookId;
   useEffect(() => {
     if (!canProbe || !bookId) return;
     void useMyNexusStore.getState().loadAvailability(bookId);
