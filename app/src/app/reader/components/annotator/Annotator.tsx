@@ -113,8 +113,12 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   const getView = useReaderStore((s) => s.getView);
   const getViewsById = useReaderStore((s) => s.getViewsById);
   const getViewSettings = useReaderStore((s) => s.getViewSettings);
-  const { setNotebookVisible, setNotebookNewAnnotation, setNotebookNewHighlightId } =
-    useNotebookStore();
+  const {
+    setNotebookVisible,
+    setNotebookNewAnnotation,
+    setNotebookNewHighlightId,
+    setNotebookActiveTab,
+  } = useNotebookStore();
   const { clearBooknotesNav } = useSidebarStore();
   const { listenToNativeTouchEvents } = useDeviceControlStore();
   const { loadCustomDictionaries } = useCustomDictionaryStore();
@@ -1126,6 +1130,9 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
       saveConfig(envConfig, bookKey, updatedConfig, settings);
     }
     if (!appService?.isMobile) {
+      // The excerpt just landed in the notes list, so surface it instead of
+      // leaving the notebook on whatever tab it was last showing.
+      setNotebookActiveTab('notes');
       setNotebookVisible(true);
     }
   };
@@ -1332,6 +1339,9 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
     const { sectionHref: href } = progress;
     selection.href = href;
     const created = handleHighlight(true);
+    // Entering the notebook to write a note must land on the notes editor even
+    // if the panel was previously left on the AI or companion tab.
+    setNotebookActiveTab('notes');
     setNotebookVisible(true);
     setNotebookNewAnnotation(selection);
     // Remember the eagerly-created highlight so the notebook can remove it if the
