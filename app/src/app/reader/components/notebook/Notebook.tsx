@@ -8,7 +8,7 @@ import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSidebarStore } from '@/store/sidebarStore';
 import { useNotebookStore } from '@/store/notebookStore';
-import { useMyNexusStore } from '@/store/myNexusStore';
+import { useMyNexusAvailability, useMyNexusEnabled, useMyNexusStore } from '@/store/myNexusStore';
 import { NotebookTab } from '@/store/notebookStore';
 import { useAIChatStore } from '@/store/aiChatStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -67,9 +67,20 @@ const Notebook: React.FC = ({}) => {
   const { setNotebookNewAnnotation, setNotebookNewHighlightId } = useNotebookStore();
   const { setNotebookEditAnnotation, setNotebookActiveTab } = useNotebookStore();
   const { activeConversationId } = useAIChatStore();
+  const bookId = sideBarBookKey ? getBookData(sideBarBookKey)?.book?.bookId : undefined;
+  const mynexusEnabled = useMyNexusEnabled();
+  const companionAvailable = useMyNexusAvailability(bookId);
+  // Books without MyNexus support have no companion panel. Fall back to notes
+  // instead of rendering MyNexusChatPanel for them, even if the persisted tab
+  // was left on 'companion' (the toolbar and tab navigation already hide their
+  // own AI-chat entries for these books).
+  const activeTab: NotebookTab =
+    notebookActiveTab === 'companion' && !(mynexusEnabled && companionAvailable)
+      ? 'notes'
+      : notebookActiveTab;
   // AI companion always floats over the reading area, so it is never pinned
   // even when the notebook's own pin setting is on.
-  const isCompanionTab = notebookActiveTab === 'companion';
+  const isCompanionTab = activeTab === 'companion';
   const effectivePinned = isNotebookPinned && !isCompanionTab;
   const currentUserId = useMyBooksStatusStore((state) => state.currentUserId);
   const isOwnNote = useCallback(
@@ -225,11 +236,11 @@ const Notebook: React.FC = ({}) => {
     const pending = useMyNexusStore.getState().pendingSelection;
     if (!pending) return;
     const active =
-      isNotebookVisible && notebookActiveTab === 'companion' && pending.bookKey === sideBarBookKey;
+      isNotebookVisible && activeTab === 'companion' && pending.bookKey === sideBarBookKey;
     if (active) return;
     removeAiSelectionMarker(getView(pending.bookKey), pending.bookKey);
     useMyNexusStore.getState().clearPendingSelection();
-  }, [isNotebookVisible, notebookActiveTab, sideBarBookKey, getView]);
+  }, [isNotebookVisible, activeTab, sideBarBookKey, getView]);
 
   const handleClickOverlay = () => {
     setNotebookVisible(false);
@@ -464,15 +475,15 @@ const Notebook: React.FC = ({}) => {
           )}
           <NotebookHeader
             isPinned={effectivePinned}
-            isSearchBarVisible={isSearchBarVisible && notebookActiveTab === 'notes'}
+            isSearchBarVisible={isSearchBarVisible && activeTab === 'notes'}
             handleClose={() => setNotebookVisible(false)}
             handleTogglePin={handleTogglePin}
             handleToggleSearchBar={handleToggleSearchBar}
-            showSearchButton={notebookActiveTab === 'notes'}
+            showSearchButton={activeTab === 'notes'}
             showPinButton={!isCompanionTab}
             isCompanionTab={isCompanionTab}
           />
-          {notebookActiveTab === 'notes' && (
+          {activeTab === 'notes' && (
             <div
               className={clsx('search-bar', {
                 'search-bar-visible': isSearchBarVisible,
@@ -487,11 +498,11 @@ const Notebook: React.FC = ({}) => {
             </div>
           )}
         </div>
-        {notebookActiveTab === 'ai' ? (
+        {activeTab === 'ai' ? (
           <div className='flex min-h-0 flex-1 flex-col'>
             <AIAssistant key={activeConversationId ?? 'new'} bookKey={sideBarBookKey} />
           </div>
-        ) : notebookActiveTab === 'companion' ? (
+        ) : activeTab === 'companion' ? (
           <div className='flex min-h-0 flex-1 flex-col'>
             <MyNexusChatPanel bookKey={sideBarBookKey} />
           </div>
@@ -614,7 +625,7 @@ const Notebook: React.FC = ({}) => {
           }}
         >
           <NotebookTabNavigation
-            activeTab={notebookActiveTab}
+            activeTab={activeTab}
             onTabChange={handleTabChange}
             bookKey={sideBarBookKey}
           />
