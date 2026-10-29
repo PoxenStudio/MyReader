@@ -60,29 +60,31 @@ const PULL_COOLDOWN_MS = 60_000;
 // when `#view-moved` below aborts it; a reader who keeps turning pages while
 // waiting is never yanked, because their turn changes `lastLocation`.
 const RENDER_QUIET_MS = 800;
-const VIEW_READY_TIMEOUT_MS = 30_000;
 
-/** Resolves with the view once it has finished `init()`; null on timeout. */
+/**
+ * Resolves with the view once it has finished `init()`; null when the book was
+ * closed or failed to open while waiting. No time limit: opening a large book
+ * on a slow device can take far longer than any timeout worth guessing, and
+ * closing the book or an open failure are observable, so neither needs one.
+ */
 const waitForViewInited = (bookKey: string): Promise<FoliateView | null> => {
-  const readyView = (): FoliateView | null => {
-    const { getViewState, getView } = useReaderStore.getState();
-    return getViewState(bookKey)?.inited ? getView(bookKey) : null;
-  };
+  const viewState = () => useReaderStore.getState().getViewState(bookKey);
+  const readyView = (): FoliateView | null =>
+    viewState()?.inited ? useReaderStore.getState().getView(bookKey) : null;
   const immediate = readyView();
   if (immediate) return Promise.resolve(immediate);
   return new Promise((resolve) => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
     let unsubscribe: (() => void) | undefined;
     function finish(view: FoliateView | null) {
-      if (timer !== undefined) clearTimeout(timer);
       unsubscribe?.();
       resolve(view);
     }
     unsubscribe = useReaderStore.subscribe(() => {
       const view = readyView();
-      if (view) finish(view);
+      if (view) return finish(view);
+      const state = viewState();
+      if (!state || state.error) finish(null);
     });
-    timer = setTimeout(() => finish(readyView()), VIEW_READY_TIMEOUT_MS);
   });
 };
 

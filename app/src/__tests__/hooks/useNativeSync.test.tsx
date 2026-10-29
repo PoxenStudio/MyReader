@@ -30,6 +30,7 @@ const h = vi.hoisted(() => {
     progress: { location: 'local-loc' } as { location: string } | null,
     previewMode: false,
     inited: true,
+    error: null as string | null,
     view: null as null | {
       goTo: (target: string) => Promise<void> | void;
       renderer?: EventTarget & { getContents?: () => { index?: number; doc?: unknown }[] };
@@ -39,7 +40,11 @@ const h = vi.hoisted(() => {
   };
   const readerStore = makeStore({
     getProgress: () => state.progress,
-    getViewState: () => ({ previewMode: state.previewMode, inited: state.inited }),
+    getViewState: () => ({
+      previewMode: state.previewMode,
+      inited: state.inited,
+      error: state.error,
+    }),
     getView: () => state.view,
   });
 
@@ -128,6 +133,7 @@ beforeEach(() => {
   h.state.progress = { location: 'local-loc' };
   h.state.previewMode = false;
   h.state.inited = true;
+  h.state.error = null;
   h.state.view = {
     goTo: h.goToMock,
     renderer: new EventTarget(),
@@ -310,6 +316,48 @@ describe('useNativeSync', () => {
       for (let i = 0; i < 10; i++) await Promise.resolve();
     });
     expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('keeps waiting out a slow open and drops the jump when it fails', async () => {
+    // A slow open must keep the jump pending for as long as it takes — there
+    // is no timeout. Only closing the book or a failed open ends the wait.
+    h.state.inited = false;
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    await act(async () => {
+      vi.advanceTimersByTime(120_000);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
+
+    h.state.error = 'Failed to load book.';
+    await act(async () => {
+      h.readerStore.notify();
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    // A late init after the failure must not revive the dropped jump.
+    h.state.error = null;
+    h.state.inited = true;
+    await act(async () => {
+      h.readerStore.notify();
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
   });
 
   test('aborts the jump when the view moved while waiting', async () => {
