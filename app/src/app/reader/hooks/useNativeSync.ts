@@ -10,6 +10,7 @@ import { debounce } from '@/utils/debounce';
 import { eventDispatcher } from '@/utils/event';
 import { getBookHash } from '@/utils/book';
 import { BookConfig, BookNote } from '@/types/book';
+import type { FoliateView } from '@/types/view';
 import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
@@ -38,6 +39,63 @@ import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvent
 const PUSH_DEBOUNCE_MS = 15_000;
 const PUSH_MAX_WAIT_MS = 20_000;
 const PULL_COOLDOWN_MS = 60_000;
+// A pulled position is applied to the live view by jumping to its CFI. Doing
+// that while the paginator is still laying out a section resolves the CFI
+// against a document that is not settled: the anchor fails, the view lands on
+// the section's first page, and that page is saved as the reading position
+// (#44). Wait for a quiet gap in the renderer's own load/stabilized events so
+// the jump runs against a laid-out document. Those two events mark layout
+// work; page turns (`relocate`) are deliberately not watched.
+const RENDER_QUIET_MS = 800;
+const VIEW_READY_TIMEOUT_MS = 30_000;
+
+/** Resolves with the view once it has finished `init()`; null on timeout. */
+const waitForViewInited = (bookKey: string): Promise<FoliateView | null> => {
+  const readyView = (): FoliateView | null => {
+    const { getViewState, getView } = useReaderStore.getState();
+    return getViewState(bookKey)?.inited ? getView(bookKey) : null;
+  };
+  const immediate = readyView();
+  if (immediate) return Promise.resolve(immediate);
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe: (() => void) | undefined;
+    function finish(view: FoliateView | null) {
+      if (timer !== undefined) clearTimeout(timer);
+      unsubscribe?.();
+      resolve(view);
+    }
+    // Test doubles may not implement `subscribe`; the timeout below is then
+    // the only way out.
+    unsubscribe = useReaderStore.subscribe?.(() => {
+      const view = readyView();
+      if (view) finish(view);
+    });
+    timer = setTimeout(() => finish(readyView()), VIEW_READY_TIMEOUT_MS);
+  });
+};
+
+/** Resolves once the renderer has emitted no load/stabilized event for `quietMs`. */
+const waitForRendererIdle = (view: FoliateView, quietMs = RENDER_QUIET_MS): Promise<void> => {
+  const renderer = view.renderer as unknown as EventTarget | undefined;
+  if (!renderer?.addEventListener) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function finish() {
+      if (timer !== undefined) clearTimeout(timer);
+      renderer.removeEventListener('load', bump);
+      renderer.removeEventListener('stabilized', bump);
+      resolve();
+    }
+    function bump() {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = setTimeout(finish, quietMs);
+    }
+    renderer.addEventListener('load', bump);
+    renderer.addEventListener('stabilized', bump);
+    bump();
+  });
+};
 
 export const useNativeSync = (bookKey: string) => {
   const _ = useTranslation();
@@ -206,6 +264,37 @@ export const useNativeSync = (bookKey: string) => {
     ensureTracker,
   ]);
 
+  // Applies a pulled position to the live view. The jump itself is the same
+  // goTo(CFI) as before; what changed is when it runs. A section that is still
+  // being laid out (large sections on slow devices take tens of seconds) has
+  // no settled document, so the CFI is resolved against a half-built DOM, the
+  // paginator falls back to the section's first page and that fallback is then
+  // persisted as the reading position (#44). Waiting for `init()` and then for
+  // a quiet gap in the renderer's load/stabilized events makes the jump run
+  // against the document it was meant for.
+  const applyRemoteLocation = useCallback(
+    async (target: string) => {
+      const view = await waitForViewInited(bookKey);
+      if (!view) {
+        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-not-inited' });
+        return;
+      }
+      const startedAt = Date.now();
+      await waitForRendererIdle(view);
+      // The book can be closed (or reopened) while waiting.
+      if (useReaderStore.getState().getView(bookKey) !== view) {
+        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-replaced' });
+        return;
+      }
+      syncLog(bookKey, 'pull:goTo-applied', {
+        to: target,
+        waitedMs: Date.now() - startedAt,
+      });
+      void view.goTo(target);
+    },
+    [bookKey],
+  );
+
   const pullNow = useCallback(async (): Promise<boolean> => {
     if (!isReady) return false;
     const book = getBookData(bookKey)?.book;
@@ -349,7 +438,7 @@ export const useNativeSync = (bookKey: string) => {
       // so without this the pulled position is silently ignored on screen.
       if (remoteWins && mergedConfig.location && mergedConfig.location !== config.location) {
         syncLog(bookKey, 'pull:goTo', { from: config.location, to: mergedConfig.location });
-        useReaderStore.getState().getView(bookKey)?.goTo(mergedConfig.location);
+        void applyRemoteLocation(mergedConfig.location);
       } else if (remoteWins) {
         syncLog(bookKey, 'pull:goTo-skipped', {
           reason: !mergedConfig.location ? 'no-location' : 'same-as-local',
@@ -369,7 +458,18 @@ export const useNativeSync = (bookKey: string) => {
       }
       return false;
     }
-  }, [isReady, bookKey, getConfig, getBookData, setConfig, saveConfig, envConfig, settings, _]);
+  }, [
+    isReady,
+    bookKey,
+    getConfig,
+    getBookData,
+    setConfig,
+    saveConfig,
+    envConfig,
+    settings,
+    _,
+    applyRemoteLocation,
+  ]);
 
   const syncRefs = useRef({ pushNow, pullNow });
   useEffect(() => {

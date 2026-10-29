@@ -20,6 +20,11 @@ const h = vi.hoisted(() => {
       },
       progress: { location: 'local-loc' } as { location: string } | null,
       previewMode: false,
+      inited: true,
+      view: null as null | {
+        goTo: (target: string) => Promise<void> | void;
+        renderer?: EventTarget;
+      },
     },
     // `configs`/`notes` are intentionally loose: tests below resolve both a
     // `null` payload and a populated one.
@@ -62,8 +67,8 @@ vi.mock('@/store/mybooksStatusStore', () => ({
 vi.mock('@/store/readerStore', () => ({
   useReaderStore: h.makeStore({
     getProgress: () => h.state.progress,
-    getViewState: () => ({ previewMode: h.state.previewMode }),
-    getView: () => ({ goTo: h.goToMock }),
+    getViewState: () => ({ previewMode: h.state.previewMode, inited: h.state.inited }),
+    getView: () => h.state.view,
   }),
 }));
 
@@ -105,6 +110,8 @@ beforeEach(() => {
   h.state.config = { location: 'local-loc', updatedAt: 1000 };
   h.state.progress = { location: 'local-loc' };
   h.state.previewMode = false;
+  h.state.inited = true;
+  h.state.view = { goTo: h.goToMock, renderer: new EventTarget() };
   h.mybooksStatus.currentUserId = 1;
   h.mybooksStatus.showOtherAnnotations = true;
 });
@@ -167,7 +174,84 @@ describe('useNativeSync', () => {
       'book-key',
       expect.objectContaining({ location: 'remote-loc' }),
     );
+    // The jump itself waits for a quiet gap in the renderer (see #44).
+    expect(h.goToMock).not.toHaveBeenCalled();
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
     expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('waits for the renderer to settle before jumping to the pulled position', async () => {
+    // Bug #44: applying a pulled CFI while the section is still being laid out
+    // resolves it against an unsettled document. The paginator then falls back
+    // to the section's first page, and that fallback is saved as the reading
+    // position. The jump must wait until the renderer stops emitting
+    // load/stabilized events.
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const renderer = h.state.view!.renderer!;
+    // A layout burst keeps postponing the jump.
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+      renderer.dispatchEvent(new Event('stabilized'));
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
+
+    // Still inside the quiet window that the event above restarted.
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
+
+    // Quiet window elapsed: the jump runs.
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('drops the jump when the book was closed while waiting for the renderer', async () => {
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    h.state.view = null;
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
   });
 
   test('records lastSyncedAtConfig/lastSyncedAtNotes after a successful pull', async () => {
