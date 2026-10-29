@@ -3,29 +3,49 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import type { BookNote } from '@/types/book';
 
 const h = vi.hoisted(() => {
-  const makeStore = <T,>(state: T) => {
-    const fn = () => state;
-    (fn as unknown as { getState: () => T }).getState = () => state;
-    return fn as (() => T) & { getState: () => T };
+  type MockStore<T> = (() => T) & {
+    getState: () => T;
+    subscribe: (listener: () => void) => () => void;
+    notify: () => void;
   };
+  const makeStore = <T,>(state: T): MockStore<T> => {
+    const listeners = new Set<() => void>();
+    const store = (() => state) as MockStore<T>;
+    store.getState = () => state;
+    store.subscribe = (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    };
+    store.notify = () => listeners.forEach((listener) => listener());
+    return store;
+  };
+
+  const state = {
+    config: { location: 'local-loc', updatedAt: 1000 } as {
+      location: string;
+      updatedAt: number;
+      booknotes?: BookNote[];
+      pendingReadingSeconds?: Record<string, number>;
+    },
+    progress: { location: 'local-loc' } as { location: string } | null,
+    previewMode: false,
+    inited: true,
+    view: null as null | {
+      goTo: (target: string) => Promise<void> | void;
+      renderer?: EventTarget;
+      lastLocation?: { cfi?: string };
+    },
+  };
+  const readerStore = makeStore({
+    getProgress: () => state.progress,
+    getViewState: () => ({ previewMode: state.previewMode, inited: state.inited }),
+    getView: () => state.view,
+  });
 
   return {
     makeStore,
-    state: {
-      config: { location: 'local-loc', updatedAt: 1000 } as {
-        location: string;
-        updatedAt: number;
-        booknotes?: BookNote[];
-        pendingReadingSeconds?: Record<string, number>;
-      },
-      progress: { location: 'local-loc' } as { location: string } | null,
-      previewMode: false,
-      inited: true,
-      view: null as null | {
-        goTo: (target: string) => Promise<void> | void;
-        renderer?: EventTarget;
-      },
-    },
+    state,
+    readerStore,
     // `configs`/`notes` are intentionally loose: tests below resolve both a
     // `null` payload and a populated one.
     pullSyncMock: vi.fn(
@@ -65,11 +85,7 @@ vi.mock('@/store/mybooksStatusStore', () => ({
 }));
 
 vi.mock('@/store/readerStore', () => ({
-  useReaderStore: h.makeStore({
-    getProgress: () => h.state.progress,
-    getViewState: () => ({ previewMode: h.state.previewMode, inited: h.state.inited }),
-    getView: () => h.state.view,
-  }),
+  useReaderStore: h.readerStore,
 }));
 
 vi.mock('@/store/settingsStore', () => ({
@@ -111,7 +127,11 @@ beforeEach(() => {
   h.state.progress = { location: 'local-loc' };
   h.state.previewMode = false;
   h.state.inited = true;
-  h.state.view = { goTo: h.goToMock, renderer: new EventTarget() };
+  h.state.view = {
+    goTo: h.goToMock,
+    renderer: new EventTarget(),
+    lastLocation: { cfi: 'local-loc' },
+  };
   h.mybooksStatus.currentUserId = 1;
   h.mybooksStatus.showOtherAnnotations = true;
 });
@@ -250,6 +270,100 @@ describe('useNativeSync', () => {
     await act(async () => {
       vi.advanceTimersByTime(800);
       for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
+  });
+
+  test('waits for the view to finish initializing before jumping', async () => {
+    // Bug #44: the view is registered in the store before view.init() runs,
+    // so a pull that lands during init used to goTo a half-built renderer.
+    h.state.inited = false;
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
+
+    h.state.inited = true;
+    await act(async () => {
+      h.readerStore.notify();
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('aborts the jump when the view moved while waiting', async () => {
+    // A page turn during the wait changes lastLocation; jumping anyway would
+    // yank the reader away from the page they just turned to.
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    h.state.view!.lastLocation = { cfi: 'user-loc' };
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
+  });
+
+  test('gives up when the renderer never goes quiet', async () => {
+    // The wait is bounded: a renderer that keeps emitting layout events would
+    // otherwise postpone the jump forever and then fire it mid-read.
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const renderer = h.state.view!.renderer!;
+    await act(async () => {
+      for (let elapsed = 0; elapsed < 12_000; elapsed += 500) {
+        vi.advanceTimersByTime(500);
+        renderer.dispatchEvent(new Event('stabilized'));
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+      }
     });
     expect(h.goToMock).not.toHaveBeenCalled();
   });

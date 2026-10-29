@@ -11,6 +11,7 @@ import { eventDispatcher } from '@/utils/event';
 import { getBookHash } from '@/utils/book';
 import { BookConfig, BookNote } from '@/types/book';
 import type { FoliateView } from '@/types/view';
+import * as CFI from 'foliate-js/epubcfi.js';
 import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
@@ -46,7 +47,16 @@ const PULL_COOLDOWN_MS = 60_000;
 // (#44). Wait for a quiet gap in the renderer's own load/stabilized events so
 // the jump runs against a laid-out document. Those two events mark layout
 // work; page turns (`relocate`) are deliberately not watched.
+//
+// The gap is a heuristic: a background preload of an adjacent section emits
+// nothing until it finishes, so a load longer than the quiet window can still
+// slip through. It should be replaced by a renderer-reported "layout settled"
+// signal once packages/foliate-js (a submodule) exposes one.
 const RENDER_QUIET_MS = 800;
+// Upper bound on the quiet-gap wait. Past it the layout is still churning on
+// this device; jumping then risks persisting the very section-start fallback
+// this wait exists to avoid, so the pull gives up instead.
+const RENDER_SETTLE_TIMEOUT_MS = 10_000;
 const VIEW_READY_TIMEOUT_MS = 30_000;
 
 /** Resolves with the view once it has finished `init()`; null on timeout. */
@@ -65,9 +75,7 @@ const waitForViewInited = (bookKey: string): Promise<FoliateView | null> => {
       unsubscribe?.();
       resolve(view);
     }
-    // Test doubles may not implement `subscribe`; the timeout below is then
-    // the only way out.
-    unsubscribe = useReaderStore.subscribe?.(() => {
+    unsubscribe = useReaderStore.subscribe(() => {
       const view = readyView();
       if (view) finish(view);
     });
@@ -75,26 +83,41 @@ const waitForViewInited = (bookKey: string): Promise<FoliateView | null> => {
   });
 };
 
-/** Resolves once the renderer has emitted no load/stabilized event for `quietMs`. */
-const waitForRendererIdle = (view: FoliateView, quietMs = RENDER_QUIET_MS): Promise<void> => {
-  const renderer = view.renderer as unknown as EventTarget | undefined;
-  if (!renderer?.addEventListener) return Promise.resolve();
+/**
+ * Resolves true once the renderer has emitted no load/stabilized event for
+ * `RENDER_QUIET_MS`, or false when `RENDER_SETTLE_TIMEOUT_MS` is hit first.
+ */
+const waitForLayoutSettled = (view: FoliateView): Promise<boolean> => {
+  const renderer = view.renderer;
   return new Promise((resolve) => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    function finish() {
-      if (timer !== undefined) clearTimeout(timer);
+    let quietTimer: ReturnType<typeof setTimeout> | undefined;
+    const hardTimer = setTimeout(() => finish(false), RENDER_SETTLE_TIMEOUT_MS);
+    function finish(settled: boolean) {
+      if (quietTimer !== undefined) clearTimeout(quietTimer);
+      clearTimeout(hardTimer);
       renderer.removeEventListener('load', bump);
       renderer.removeEventListener('stabilized', bump);
-      resolve();
+      resolve(settled);
     }
     function bump() {
-      if (timer !== undefined) clearTimeout(timer);
-      timer = setTimeout(finish, quietMs);
+      if (quietTimer !== undefined) clearTimeout(quietTimer);
+      quietTimer = setTimeout(() => finish(true), RENDER_QUIET_MS);
     }
     renderer.addEventListener('load', bump);
     renderer.addEventListener('stabilized', bump);
     bump();
   });
+};
+
+/** Compares two CFIs; malformed values only match verbatim. */
+const isSameLocation = (a?: string, b?: string): boolean => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  try {
+    return CFI.compare(a, b) === 0;
+  } catch {
+    return false;
+  }
 };
 
 export const useNativeSync = (bookKey: string) => {
@@ -280,17 +303,36 @@ export const useNativeSync = (bookKey: string) => {
         return;
       }
       const startedAt = Date.now();
-      await waitForRendererIdle(view);
+      const from = view.lastLocation?.cfi;
+      const settled = await waitForLayoutSettled(view);
       // The book can be closed (or reopened) while waiting.
       if (useReaderStore.getState().getView(bookKey) !== view) {
         syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-replaced' });
         return;
       }
+      if (!settled) {
+        syncWarn(bookKey, 'pull:goTo-aborted', {
+          reason: 'layout-not-settled',
+          waitedMs: Date.now() - startedAt,
+        });
+        return;
+      }
+      // A page turn (or another navigation) moved the view while we waited;
+      // jumping now would yank the reader away from what is on screen.
+      const movedTo = view.lastLocation?.cfi;
+      if (!isSameLocation(from, movedTo)) {
+        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-moved', from, to: movedTo });
+        return;
+      }
+      await view.goTo(target);
+      const waitedMs = Date.now() - startedAt;
+      // Logged after the jump so `landed` shows where the view actually went;
+      // the renderer drops a goTo issued mid-turn, leaving `landed` unchanged.
       syncLog(bookKey, 'pull:goTo-applied', {
         to: target,
-        waitedMs: Date.now() - startedAt,
+        landed: view.lastLocation?.cfi,
+        waitedMs,
       });
-      void view.goTo(target);
     },
     [bookKey],
   );
