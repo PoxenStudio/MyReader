@@ -57,7 +57,7 @@ const PULL_COOLDOWN_MS = 60_000;
 // for tens of seconds (the #44 logs show the first page at 15.6s), and giving
 // up on a still-busy renderer would mean those devices never jump at all. The
 // wait ends when layout does, when the book is closed (no more events), or
-// when `#view-moved` below aborts it; a reader who keeps turning pages while
+// when `view-moved` below aborts it; a reader who keeps turning pages while
 // waiting is never yanked, because their turn changes `lastLocation`.
 const RENDER_QUIET_MS = 800;
 
@@ -79,12 +79,16 @@ const waitForViewInited = (bookKey: string): Promise<FoliateView | null> => {
       unsubscribe?.();
       resolve(view);
     }
-    unsubscribe = useReaderStore.subscribe(() => {
+    const check = () => {
       const view = readyView();
       if (view) return finish(view);
       const state = viewState();
       if (!state || state.error) finish(null);
-    });
+    };
+    unsubscribe = useReaderStore.subscribe(check);
+    // The book can already be closed or failed by the time we get here; the
+    // subscription only fires on future updates, so check once immediately.
+    check();
   });
 };
 
@@ -112,38 +116,68 @@ const waitForLayoutSettled = (view: FoliateView): Promise<void> => {
 /**
  * Whether `target` resolves to a range with real geometry in the section that
  * is already on screen. null means "cannot tell": the section is not loaded
- * (goTo loads and renders it itself) or the anchor cannot be measured here.
+ * (goTo loads and renders it itself), the CFI does not resolve in any of the
+ * rendered chunks (fixed layout, section-level or stale CFI), or the range is
+ * collapsed and cannot be measured here.
  *
  * The paginator scrolls to the section's first page whenever the resolved
  * range has no client rects — a section that is still being laid into a
  * zero-width iframe — which is how a pulled position turned into "chapter
  * start" in #44. This is that exact precondition, checked from the outside,
  * so the jump waits for the layout instead of guessing.
+ *
+ * A section larger than the chunk threshold renders as several documents that
+ * all report the same spine index; only the chunk that actually holds the
+ * target resolves it, so every chunk has to be tried.
  */
 const isTargetLaidOut = (view: FoliateView, target: string): boolean | null => {
   let index: number;
-  let anchor: (doc: Document) => Range;
+  let anchor: (doc: Document) => Range | null;
   try {
     ({ index, anchor } = view.resolveCFI(target));
   } catch {
     return null;
   }
-  const doc = view.renderer.getContents().find((content) => content.index === index)?.doc;
-  if (!doc) return null;
+  let docs: Document[];
   try {
-    const rects = Array.from(anchor(doc)?.getClientRects?.() ?? []);
-    return rects.some((rect) => rect.width > 0 && rect.height > 0);
+    docs = view.renderer
+      .getContents()
+      .filter((content) => content.index === index)
+      .map((content) => content.doc);
   } catch {
     return null;
   }
+  if (docs.length === 0) return null;
+  let measurable = false;
+  for (const doc of docs) {
+    let range: Range | null = null;
+    try {
+      range = anchor(doc);
+    } catch {
+      continue;
+    }
+    if (!range || range.collapsed) continue;
+    const rects = Array.from(range.getClientRects?.() ?? []);
+    if (rects.some((rect) => rect.width > 0 && rect.height > 0)) return true;
+    measurable = true;
+  }
+  // A resolved range with no geometry is a positive "still laying out" signal;
+  // anything we could not resolve is left to goTo, which handles chunk
+  // mapping, section loads and fixed layout itself.
+  return measurable ? false : null;
 };
 
-/** Compares two CFIs; malformed values only match verbatim. */
-const isSameLocation = (a?: string, b?: string): boolean => {
+/**
+ * Compares the start of two locations and ignores their end. `CFI.compare`
+ * also compares range ends, and a background re-anchor can move a page's end
+ * without the reader going anywhere; only a changed start means the view was
+ * navigated. Malformed values only match verbatim.
+ */
+const isSameStart = (a?: string, b?: string): boolean => {
   if (a === b) return true;
   if (!a || !b) return false;
   try {
-    return CFI.compare(a, b) === 0;
+    return CFI.compare(CFI.collapse(a), CFI.collapse(b)) === 0;
   } catch {
     return false;
   }
@@ -355,17 +389,20 @@ export const useNativeSync = (bookKey: string) => {
       // A page turn (or another navigation) moved the view while we waited;
       // jumping now would yank the reader away from what is on screen.
       const movedTo = view.lastLocation?.cfi;
-      if (!isSameLocation(from, movedTo)) {
+      if (!isSameStart(from, movedTo)) {
         syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-moved', from, to: movedTo });
         return;
       }
       await view.goTo(target);
       const waitedMs = Date.now() - startedAt;
-      // Logged after the jump so `landed` shows where the view actually went;
-      // the renderer drops a goTo issued mid-turn, leaving `landed` unchanged.
+      // Logged after the jump so `landed` shows where the view actually went.
+      // `dropped` marks the renderer ignoring the goTo (it drops one issued
+      // mid-turn), which leaves the view where it was.
+      const landed = view.lastLocation?.cfi;
       syncLog(bookKey, 'pull:goTo-applied', {
         to: target,
-        landed: view.lastLocation?.cfi,
+        landed,
+        dropped: isSameStart(landed, from) && !isSameStart(landed, target),
         waitedForLayout,
         waitedMs,
       });
@@ -516,7 +553,9 @@ export const useNativeSync = (bookKey: string) => {
       // so without this the pulled position is silently ignored on screen.
       if (remoteWins && mergedConfig.location && mergedConfig.location !== config.location) {
         syncLog(bookKey, 'pull:goTo', { from: config.location, to: mergedConfig.location });
-        void applyRemoteLocation(mergedConfig.location);
+        void applyRemoteLocation(mergedConfig.location).catch((e) =>
+          syncWarn(bookKey, 'pull:goTo-error', { error: String(e) }),
+        );
       } else if (remoteWins) {
         syncLog(bookKey, 'pull:goTo-skipped', {
           reason: !mergedConfig.location ? 'no-location' : 'same-as-local',

@@ -31,6 +31,7 @@ const h = vi.hoisted(() => {
     previewMode: false,
     inited: true,
     error: null as string | null,
+    closed: false,
     view: null as null | {
       goTo: (target: string) => Promise<void> | void;
       renderer?: EventTarget & { getContents?: () => { index?: number; doc?: unknown }[] };
@@ -40,11 +41,10 @@ const h = vi.hoisted(() => {
   };
   const readerStore = makeStore({
     getProgress: () => state.progress,
-    getViewState: () => ({
-      previewMode: state.previewMode,
-      inited: state.inited,
-      error: state.error,
-    }),
+    getViewState: () =>
+      state.closed
+        ? null
+        : { previewMode: state.previewMode, inited: state.inited, error: state.error },
     getView: () => state.view,
   });
 
@@ -134,6 +134,7 @@ beforeEach(() => {
   h.state.previewMode = false;
   h.state.inited = true;
   h.state.error = null;
+  h.state.closed = false;
   h.state.view = {
     goTo: h.goToMock,
     renderer: new EventTarget(),
@@ -426,6 +427,109 @@ describe('useNativeSync', () => {
     // The section finished laying out: the range now has real client rects.
     range.getClientRects = () => [{ width: 10, height: 10 }];
     renderer.dispatchEvent(new Event('stabilized'));
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('lets goTo handle a section whose chunks cannot resolve the target', async () => {
+    // Sections above the chunk threshold render as several documents under
+    // the same index. Only the chunk that holds the target resolves it; the
+    // others must be skipped instead of being read as "not laid out yet".
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    const targetDoc = { name: 'target-chunk' };
+    const range = { collapsed: false, getClientRects: () => [{ width: 10, height: 10 }] };
+    h.state.view = {
+      goTo: h.goToMock,
+      renderer: Object.assign(new EventTarget(), {
+        getContents: () => [
+          { index: 0, doc: { name: 'placeholder-chunk' } },
+          { index: 0, doc: targetDoc },
+        ],
+      }),
+      lastLocation: { cfi: 'local-loc' },
+      resolveCFI: () => ({
+        index: 0,
+        anchor: (doc: unknown) => (doc === targetDoc ? range : null),
+      }),
+    };
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('drops the jump when the book was already closed before the pull landed', async () => {
+    // The pull resolves after the reader left the book; the wait must notice
+    // that immediately instead of hanging until some later store update (and
+    // then applying the stale target to a reopened book).
+    h.state.closed = true;
+    h.state.inited = false;
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    h.state.closed = false;
+    h.state.inited = true;
+    await act(async () => {
+      h.readerStore.notify();
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
+  });
+
+  test('an end-only relocation does not count as the view moving', async () => {
+    // A background re-anchor can change the visible range's end offset while
+    // the reader stays put; only a changed start means real navigation.
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+    h.state.view!.lastLocation = { cfi: 'epubcfi(/6/96!/4/2,/570,/586/1:45)' };
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    h.state.view!.lastLocation = { cfi: 'epubcfi(/6/96!/4/2,/570,/700/1:2)' };
     await act(async () => {
       vi.advanceTimersByTime(800);
       for (let i = 0; i < 10; i++) await Promise.resolve();
