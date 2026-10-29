@@ -338,9 +338,10 @@ describe('useNativeSync', () => {
     expect(h.goToMock).not.toHaveBeenCalled();
   });
 
-  test('gives up when the renderer never goes quiet', async () => {
-    // The wait is bounded: a renderer that keeps emitting layout events would
-    // otherwise postpone the jump forever and then fire it mid-read.
+  test('keeps waiting through a long layout burst and still jumps once it settles', async () => {
+    // Slow devices lay a large section out for tens of seconds (#44: first
+    // page at 15.6s). Giving up mid-burst would mean those devices never
+    // jump; the wait must survive the burst and apply the position afterwards.
     h.pullSyncMock.mockResolvedValue({
       configs: [
         {
@@ -366,6 +367,12 @@ describe('useNativeSync', () => {
       }
     });
     expect(h.goToMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
   });
 
   test('records lastSyncedAtConfig/lastSyncedAtNotes after a successful pull', async () => {
