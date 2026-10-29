@@ -107,6 +107,35 @@ const waitForLayoutSettled = (view: FoliateView): Promise<void> => {
   });
 };
 
+/**
+ * Whether `target` resolves to a range with real geometry in the section that
+ * is already on screen. null means "cannot tell": the section is not loaded
+ * (goTo loads and renders it itself) or the anchor cannot be measured here.
+ *
+ * The paginator scrolls to the section's first page whenever the resolved
+ * range has no client rects — a section that is still being laid into a
+ * zero-width iframe — which is how a pulled position turned into "chapter
+ * start" in #44. This is that exact precondition, checked from the outside,
+ * so the jump waits for the layout instead of guessing.
+ */
+const isTargetLaidOut = (view: FoliateView, target: string): boolean | null => {
+  let index: number;
+  let anchor: (doc: Document) => Range;
+  try {
+    ({ index, anchor } = view.resolveCFI(target));
+  } catch {
+    return null;
+  }
+  const doc = view.renderer.getContents().find((content) => content.index === index)?.doc;
+  if (!doc) return null;
+  try {
+    const rects = Array.from(anchor(doc)?.getClientRects?.() ?? []);
+    return rects.some((rect) => rect.width > 0 && rect.height > 0);
+  } catch {
+    return null;
+  }
+};
+
 /** Compares two CFIs; malformed values only match verbatim. */
 const isSameLocation = (a?: string, b?: string): boolean => {
   if (a === b) return true;
@@ -290,9 +319,10 @@ export const useNativeSync = (bookKey: string) => {
   // being laid out (large sections on slow devices take tens of seconds) has
   // no settled document, so the CFI is resolved against a half-built DOM, the
   // paginator falls back to the section's first page and that fallback is then
-  // persisted as the reading position (#44). Waiting for `init()` and then for
-  // a quiet gap in the renderer's load/stabilized events makes the jump run
-  // against the document it was meant for.
+  // persisted as the reading position (#44). The jump therefore waits for the
+  // view to be inited, for a quiet gap in the renderer's load/stabilized
+  // events, and — the deterministic part — for the target range to actually
+  // have layout geometry.
   const applyRemoteLocation = useCallback(
     async (target: string) => {
       const view = await waitForViewInited(bookKey);
@@ -308,6 +338,18 @@ export const useNativeSync = (bookKey: string) => {
         syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-replaced' });
         return;
       }
+      // No geometry means the section is still being laid out and the
+      // paginator would fall back to its first page. Wait for the next layout
+      // event and re-check, however long the device needs.
+      let waitedForLayout = false;
+      while (isTargetLaidOut(view, target) === false) {
+        waitedForLayout = true;
+        await waitForLayoutSettled(view);
+        if (useReaderStore.getState().getView(bookKey) !== view) {
+          syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-replaced' });
+          return;
+        }
+      }
       // A page turn (or another navigation) moved the view while we waited;
       // jumping now would yank the reader away from what is on screen.
       const movedTo = view.lastLocation?.cfi;
@@ -322,6 +364,7 @@ export const useNativeSync = (bookKey: string) => {
       syncLog(bookKey, 'pull:goTo-applied', {
         to: target,
         landed: view.lastLocation?.cfi,
+        waitedForLayout,
         waitedMs,
       });
     },

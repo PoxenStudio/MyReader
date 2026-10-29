@@ -32,8 +32,9 @@ const h = vi.hoisted(() => {
     inited: true,
     view: null as null | {
       goTo: (target: string) => Promise<void> | void;
-      renderer?: EventTarget;
+      renderer?: EventTarget & { getContents?: () => { index?: number; doc?: unknown }[] };
       lastLocation?: { cfi?: string };
+      resolveCFI?: (cfi: string) => { index: number; anchor: (doc: unknown) => unknown };
     },
   };
   const readerStore = makeStore({
@@ -336,6 +337,52 @@ describe('useNativeSync', () => {
       for (let i = 0; i < 10; i++) await Promise.resolve();
     });
     expect(h.goToMock).not.toHaveBeenCalled();
+  });
+
+  test('waits for the target range to have geometry before jumping', async () => {
+    // #44: the paginator scrolls to the section start when the resolved range
+    // has no client rects (the section is still being laid into a zero-width
+    // iframe). The jump must wait for real geometry, not just a quiet gap.
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'remote-loc',
+        },
+      ],
+      notes: null,
+    });
+
+    const range = { getClientRects: (): unknown[] => [] };
+    const renderer = Object.assign(new EventTarget(), {
+      getContents: () => [{ index: 0, doc: {} }],
+    });
+    h.state.view = {
+      goTo: h.goToMock,
+      renderer,
+      lastLocation: { cfi: 'local-loc' },
+      resolveCFI: () => ({ index: 0, anchor: () => range }),
+    };
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).not.toHaveBeenCalled();
+
+    // The section finished laying out: the range now has real client rects.
+    range.getClientRects = () => [{ width: 10, height: 10 }];
+    renderer.dispatchEvent(new Event('stabilized'));
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
   });
 
   test('keeps waiting through a long layout burst and still jumps once it settles', async () => {
