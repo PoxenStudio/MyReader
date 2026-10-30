@@ -10,6 +10,8 @@ import { debounce } from '@/utils/debounce';
 import { eventDispatcher } from '@/utils/event';
 import { getBookHash } from '@/utils/book';
 import { BookConfig, BookNote } from '@/types/book';
+import type { FoliateView } from '@/types/view';
+import * as CFI from 'foliate-js/epubcfi.js';
 import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
@@ -38,6 +40,148 @@ import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvent
 const PUSH_DEBOUNCE_MS = 15_000;
 const PUSH_MAX_WAIT_MS = 20_000;
 const PULL_COOLDOWN_MS = 60_000;
+// A pulled position is applied to the live view by jumping to its CFI. Doing
+// that while the paginator is still laying out a section resolves the CFI
+// against a document that is not settled: the anchor fails, the view lands on
+// the section's first page, and that page is saved as the reading position
+// (#44). Wait for a quiet gap in the renderer's own load/stabilized events so
+// the jump runs against a laid-out document. Those two events mark layout
+// work; page turns (`relocate`) are deliberately not watched.
+//
+// The gap is a heuristic: a background preload of an adjacent section emits
+// nothing until it finishes, so a load longer than the quiet window can still
+// slip through. It should be replaced by a renderer-reported "layout settled"
+// signal once packages/foliate-js (a submodule) exposes one.
+//
+// There is deliberately no upper bound. Slow devices lay a large section out
+// for tens of seconds (the #44 logs show the first page at 15.6s), and giving
+// up on a still-busy renderer would mean those devices never jump at all. The
+// wait ends when layout does, when the book is closed (no more events), or
+// when `view-moved` below aborts it; a reader who keeps turning pages while
+// waiting is never yanked, because their turn changes `lastLocation`.
+const RENDER_QUIET_MS = 800;
+
+/**
+ * Resolves with the view once it has finished `init()`; null when the book was
+ * closed or failed to open while waiting. No time limit: opening a large book
+ * on a slow device can take far longer than any timeout worth guessing, and
+ * closing the book or an open failure are observable, so neither needs one.
+ */
+const waitForViewInited = (bookKey: string): Promise<FoliateView | null> => {
+  const viewState = () => useReaderStore.getState().getViewState(bookKey);
+  const readyView = (): FoliateView | null =>
+    viewState()?.inited ? useReaderStore.getState().getView(bookKey) : null;
+  const immediate = readyView();
+  if (immediate) return Promise.resolve(immediate);
+  return new Promise((resolve) => {
+    let unsubscribe: (() => void) | undefined;
+    function finish(view: FoliateView | null) {
+      unsubscribe?.();
+      resolve(view);
+    }
+    const check = () => {
+      const view = readyView();
+      if (view) return finish(view);
+      const state = viewState();
+      if (!state || state.error) finish(null);
+    };
+    unsubscribe = useReaderStore.subscribe(check);
+    // The book can already be closed or failed by the time we get here; the
+    // subscription only fires on future updates, so check once immediately.
+    check();
+  });
+};
+
+/** Resolves once the renderer has emitted no load/stabilized event for `RENDER_QUIET_MS`. */
+const waitForLayoutSettled = (view: FoliateView): Promise<void> => {
+  const renderer = view.renderer;
+  return new Promise((resolve) => {
+    let quietTimer: ReturnType<typeof setTimeout> | undefined;
+    function finish() {
+      if (quietTimer !== undefined) clearTimeout(quietTimer);
+      renderer.removeEventListener('load', bump);
+      renderer.removeEventListener('stabilized', bump);
+      resolve();
+    }
+    function bump() {
+      if (quietTimer !== undefined) clearTimeout(quietTimer);
+      quietTimer = setTimeout(finish, RENDER_QUIET_MS);
+    }
+    renderer.addEventListener('load', bump);
+    renderer.addEventListener('stabilized', bump);
+    bump();
+  });
+};
+
+/**
+ * Whether `target` resolves to a range with real geometry in the section that
+ * is already on screen. null means "cannot tell": the section is not loaded
+ * (goTo loads and renders it itself), the CFI does not resolve in any of the
+ * rendered chunks (fixed layout, section-level or stale CFI), or the range is
+ * collapsed and cannot be measured here.
+ *
+ * The paginator scrolls to the section's first page whenever the resolved
+ * range has no client rects — a section that is still being laid into a
+ * zero-width iframe — which is how a pulled position turned into "chapter
+ * start" in #44. This is that exact precondition, checked from the outside,
+ * so the jump waits for the layout instead of guessing.
+ *
+ * A section larger than the chunk threshold renders as several documents that
+ * all report the same spine index; only the chunk that actually holds the
+ * target resolves it, so every chunk has to be tried.
+ */
+const isTargetLaidOut = (view: FoliateView, target: string): boolean | null => {
+  let index: number;
+  let anchor: (doc: Document) => Range | null;
+  try {
+    ({ index, anchor } = view.resolveCFI(target));
+  } catch {
+    return null;
+  }
+  let docs: Document[];
+  try {
+    docs = view.renderer
+      .getContents()
+      .filter((content) => content.index === index)
+      .map((content) => content.doc);
+  } catch {
+    return null;
+  }
+  if (docs.length === 0) return null;
+  let measurable = false;
+  for (const doc of docs) {
+    let range: Range | null = null;
+    try {
+      range = anchor(doc);
+    } catch {
+      continue;
+    }
+    if (!range || range.collapsed) continue;
+    const rects = Array.from(range.getClientRects?.() ?? []);
+    if (rects.some((rect) => rect.width > 0 && rect.height > 0)) return true;
+    measurable = true;
+  }
+  // A resolved range with no geometry is a positive "still laying out" signal;
+  // anything we could not resolve is left to goTo, which handles chunk
+  // mapping, section loads and fixed layout itself.
+  return measurable ? false : null;
+};
+
+/**
+ * Compares the start of two locations and ignores their end. `CFI.compare`
+ * also compares range ends, and a background re-anchor can move a page's end
+ * without the reader going anywhere; only a changed start means the view was
+ * navigated. Malformed values only match verbatim.
+ */
+const isSameStart = (a?: string, b?: string): boolean => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  try {
+    return CFI.compare(CFI.collapse(a), CFI.collapse(b)) === 0;
+  } catch {
+    return false;
+  }
+};
 
 export const useNativeSync = (bookKey: string) => {
   const _ = useTranslation();
@@ -206,6 +350,66 @@ export const useNativeSync = (bookKey: string) => {
     ensureTracker,
   ]);
 
+  // Applies a pulled position to the live view. The jump itself is the same
+  // goTo(CFI) as before; what changed is when it runs. A section that is still
+  // being laid out (large sections on slow devices take tens of seconds) has
+  // no settled document, so the CFI is resolved against a half-built DOM, the
+  // paginator falls back to the section's first page and that fallback is then
+  // persisted as the reading position (#44). The jump therefore waits for the
+  // view to be inited, for a quiet gap in the renderer's load/stabilized
+  // events, and — the deterministic part — for the target range to actually
+  // have layout geometry.
+  const applyRemoteLocation = useCallback(
+    async (target: string) => {
+      const view = await waitForViewInited(bookKey);
+      if (!view) {
+        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-not-inited' });
+        return;
+      }
+      const startedAt = Date.now();
+      const from = view.lastLocation?.cfi;
+      await waitForLayoutSettled(view);
+      // The book can be closed (or reopened) while waiting.
+      if (useReaderStore.getState().getView(bookKey) !== view) {
+        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-replaced' });
+        return;
+      }
+      // No geometry means the section is still being laid out and the
+      // paginator would fall back to its first page. Wait for the next layout
+      // event and re-check, however long the device needs.
+      let waitedForLayout = false;
+      while (isTargetLaidOut(view, target) === false) {
+        waitedForLayout = true;
+        await waitForLayoutSettled(view);
+        if (useReaderStore.getState().getView(bookKey) !== view) {
+          syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-replaced' });
+          return;
+        }
+      }
+      // A page turn (or another navigation) moved the view while we waited;
+      // jumping now would yank the reader away from what is on screen.
+      const movedTo = view.lastLocation?.cfi;
+      if (!isSameStart(from, movedTo)) {
+        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-moved', from, to: movedTo });
+        return;
+      }
+      await view.goTo(target);
+      const waitedMs = Date.now() - startedAt;
+      // Logged after the jump so `landed` shows where the view actually went.
+      // `dropped` marks the renderer ignoring the goTo (it drops one issued
+      // mid-turn), which leaves the view where it was.
+      const landed = view.lastLocation?.cfi;
+      syncLog(bookKey, 'pull:goTo-applied', {
+        to: target,
+        landed,
+        dropped: isSameStart(landed, from) && !isSameStart(landed, target),
+        waitedForLayout,
+        waitedMs,
+      });
+    },
+    [bookKey],
+  );
+
   const pullNow = useCallback(async (): Promise<boolean> => {
     if (!isReady) return false;
     const book = getBookData(bookKey)?.book;
@@ -349,7 +553,9 @@ export const useNativeSync = (bookKey: string) => {
       // so without this the pulled position is silently ignored on screen.
       if (remoteWins && mergedConfig.location && mergedConfig.location !== config.location) {
         syncLog(bookKey, 'pull:goTo', { from: config.location, to: mergedConfig.location });
-        useReaderStore.getState().getView(bookKey)?.goTo(mergedConfig.location);
+        void applyRemoteLocation(mergedConfig.location).catch((e) =>
+          syncWarn(bookKey, 'pull:goTo-error', { error: String(e) }),
+        );
       } else if (remoteWins) {
         syncLog(bookKey, 'pull:goTo-skipped', {
           reason: !mergedConfig.location ? 'no-location' : 'same-as-local',
@@ -369,7 +575,18 @@ export const useNativeSync = (bookKey: string) => {
       }
       return false;
     }
-  }, [isReady, bookKey, getConfig, getBookData, setConfig, saveConfig, envConfig, settings, _]);
+  }, [
+    isReady,
+    bookKey,
+    getConfig,
+    getBookData,
+    setConfig,
+    saveConfig,
+    envConfig,
+    settings,
+    _,
+    applyRemoteLocation,
+  ]);
 
   const syncRefs = useRef({ pushNow, pullNow });
   useEffect(() => {
