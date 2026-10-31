@@ -172,6 +172,11 @@ export interface MyBooksSysInfo {
     book_review?: boolean;
     folder?: boolean;
   };
+  // 站点时区（IANA 名，如 Asia/Shanghai），新版服务端按它切"一天"做阅读统计
+  // （webserver/site_time.py）。客户端上报离线阅读时长时必须用同一个日界，
+  // 见 activeReadingTracker.ts。字段缺失 ⇒ 老服务端（按 UTC 日统计）；
+  // 显式 null ⇒ 服务端未配置，同样按 UTC 处理。
+  timezone?: string | null;
   // Sidebar whitelist (SIDEBAR_ITEMS); empty means show all.
   sidebar_items?: string[];
 }
