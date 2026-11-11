@@ -352,7 +352,10 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       // without this they'd stay stuck on the placeholder even after the
       // file opens and its real metadata is known.
       if (book.storageType === 'cloud' && !book.downloadedAt) {
-        book.title = book.sourceTitle;
+        // MyBooks' title is user-curated; the embedded entry point passes it
+        // in and it also lands in metadata via the book-detail endpoint.
+        const cloudTitle = book.metadata?.title;
+        book.title = cloudTitle ? formatTitle(cloudTitle) : book.sourceTitle;
         if (bookDoc.metadata.author) {
           book.author = formatAuthors(bookDoc.metadata.author, bookDoc.metadata.language);
         }

@@ -248,6 +248,51 @@ describe('ensureMyBooksBookLocal', () => {
       expect(useLibraryStore.getState().getBookByHash(result.hash)).toBe(result);
     });
 
+    test('title passed by MyBooks wins over the placeholder and the detail title', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+      getBookDetail.mockResolvedValue(makeCloudBook({ title: 'Detail Title' }));
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(false) });
+
+      const result = await ensureMyBooksBookLocal({
+        bookId: 42,
+        format: 'pdf',
+        title: '用户设置的书名',
+        appService,
+      });
+
+      expect(result.title).toBe('用户设置的书名');
+      expect(result.metadata?.title).toBe('用户设置的书名');
+    });
+
+    test('title passed by MyBooks also refreshes an existing streamed entry', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+      getBookDetail.mockResolvedValue(makeCloudBook({ title: 'Detail Title' }));
+      const hash = buildCloudBookHash(42, 'PDF');
+      const localBook: Book = {
+        hash,
+        format: 'PDF',
+        title: 'Book 42',
+        author: '',
+        createdAt: 1000,
+        updatedAt: 1000,
+      };
+      useLibraryStore.getState().setLibrary([localBook]);
+
+      const appService = makeAppService({ isBookAvailable: vi.fn().mockResolvedValue(false) });
+
+      const result = await ensureMyBooksBookLocal({
+        bookId: 42,
+        format: 'pdf',
+        title: '用户设置的书名',
+        appService,
+      });
+
+      expect(result).toBe(localBook);
+      expect(result.title).toBe('用户设置的书名');
+      expect(result.metadata?.title).toBe('用户设置的书名');
+      expect(appService.saveLibraryBooks).toHaveBeenCalled();
+    });
+
     test('fb2 streams like epub/pdf: EMBED_FORMATS resolves it and the local-file url carries format=fb2', async () => {
       const fetchSpy = vi
         .spyOn(global, 'fetch')

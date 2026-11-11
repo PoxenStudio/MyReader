@@ -21,6 +21,7 @@ export const resolveEmbedFormat = (format?: string | null): BookFormat | undefin
 interface EnsureMyBooksBookLocalArgs {
   bookId: number;
   format?: string | null;
+  title?: string | null;
   appService: AppService;
   onProgress?: ProgressHandler;
 }
@@ -80,6 +81,16 @@ const applyCloudMetadata = async (book: Book, bookId: number): Promise<void> => 
   }
 };
 
+// MyBooks' title is user-curated and authoritative; Apply the title passed by MyBooks after
+// applyCloudMetadata so it wins over both the placeholder and the detail
+// endpoint's title, and mirror it into metadata.title for the reader's own
+// "prefer cloud title" rule (readerStore).
+const applyTitleOverride = (book: Book, title?: string | null): void => {
+  if (!title) return;
+  book.title = title;
+  book.metadata = book.metadata ? { ...book.metadata, title } : { title, author: '', language: '' };
+};
+
 /**
  * Same three-branch shape as ensureSharedBookLocal (shareImport.ts), adapted for
  * MyBooks cloud books opened via the embedded reader entry point instead of a
@@ -90,6 +101,7 @@ const applyCloudMetadata = async (book: Book, bookId: number): Promise<void> => 
 export const ensureMyBooksBookLocal = async ({
   bookId,
   format,
+  title,
   appService,
   onProgress,
 }: EnsureMyBooksBookLocalArgs): Promise<Book> => {
@@ -126,6 +138,13 @@ export const ensureMyBooksBookLocal = async ({
     // A fully-downloaded local copy (from a prior bookId-flow open) is
     // strictly better than streaming over Range — prefer it when present.
     if (existing?.downloadedAt && (await appService.isBookAvailable(existing))) {
+      // Still refresh the title: it may have been renamed in MyBooks since
+      // the bytes were downloaded.
+      if (title && existing.title !== title) {
+        applyTitleOverride(existing, title);
+        existing.updatedAt = Date.now();
+        await persistLibrary();
+      }
       return existing;
     }
 
@@ -142,6 +161,7 @@ export const ensureMyBooksBookLocal = async ({
         existing.coverImageUrl = buildCoverUrl(bookId);
         existing.originCoverUrl = existing.coverImageUrl;
         await applyCloudMetadata(existing, bookId);
+        applyTitleOverride(existing, title);
         existing.updatedAt = Date.now();
         useLibraryStore.getState().setLibrary(library);
         // Also persist (metadata only — saveLibraryBooks never writes the
@@ -163,7 +183,7 @@ export const ensureMyBooksBookLocal = async ({
         bookId,
         format: resolvedFormat,
         sourceFormat: resolvedFormat,
-        title: `Book ${bookId}`,
+        title: title || `Book ${bookId}`,
         author: '',
         storageType: 'cloud',
         createdAt: now,
@@ -177,6 +197,7 @@ export const ensureMyBooksBookLocal = async ({
         originCoverUrl: buildCoverUrl(bookId),
       };
       await applyCloudMetadata(book, bookId);
+      applyTitleOverride(book, title);
       library.push(book);
       useLibraryStore.getState().setLibrary(library);
       // Persisted for the same reason as the `existing` branch above — the
@@ -195,6 +216,7 @@ export const ensureMyBooksBookLocal = async ({
   }
 
   const stub = convertMyBooksToLocalBook(cloudBook);
+  applyTitleOverride(stub, title);
   const finalFormat = resolvedFormat ?? stub.format;
   const hash = buildCloudBookHash(bookId, finalFormat);
 

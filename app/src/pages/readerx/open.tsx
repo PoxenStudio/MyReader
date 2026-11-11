@@ -76,6 +76,9 @@ const ReaderEmbedOpen = () => {
     const cfi = (
       Array.isArray(router.query['cfi']) ? router.query['cfi'][0] : router.query['cfi']
     ) as string | undefined;
+    const title = (
+      Array.isArray(router.query['title']) ? router.query['title'][0] : router.query['title']
+    ) as string | undefined;
     const returnUrl =
       ((Array.isArray(router.query['returnUrl'])
         ? router.query['returnUrl'][0]
@@ -121,7 +124,7 @@ const ReaderEmbedOpen = () => {
           login(sessionToken, mockUser, host);
         }
 
-        const book = await ensureMyBooksBookLocal({ bookId, format, appService });
+        const book = await ensureMyBooksBookLocal({ bookId, format, title, appService });
         setEmbedReturnUrl(book.hash, returnUrl);
 
         const queryParams = cfi ? `cfi=${encodeURIComponent(cfi)}` : undefined;
