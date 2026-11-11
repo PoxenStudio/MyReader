@@ -25,11 +25,15 @@ cd "$APP_DIR"
 
 DIST_DIR="myreader-dist"
 
+# Remove the previous output *before* building: if it still exists while Next
+# traces server dependencies, a stray whole-project trace would pick it up and
+# copy the old bundle into the new one (myreader-dist/app/myreader-dist/).
+rm -rf "$DIST_DIR"
+
 echo "Building standalone Next.js bundle (pnpm build-web-standalone)..."
 pnpm build-web-standalone
 
 echo "Assembling $DIST_DIR/ ..."
-rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 # outputFileTracingRoot points at the pnpm workspace root (see next.config.mjs),

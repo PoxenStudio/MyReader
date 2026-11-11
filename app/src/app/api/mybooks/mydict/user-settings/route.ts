@@ -94,7 +94,9 @@ export async function GET(request: NextRequest) {
   const userId = await resolveUser(request);
   if (userId === null || userId === NOT_CONFIGURED) return authError(userId);
   try {
-    const text = await fsp.readFile(path.join(SETTINGS_DIR, `${userId}.json`), 'utf8');
+    // The path is runtime-computed (env-configurable dir + user id)
+    const settingsPath = path.join(SETTINGS_DIR, `${userId}.json`);
+    const text = await fsp.readFile(/* turbopackIgnore: true */ settingsPath, 'utf8');
     return NextResponse.json(JSON.parse(text), {
       headers: { 'Cache-Control': 'no-store' },
     });
