@@ -18,7 +18,13 @@ const rect = (left: number, top: number, right: number, bottom: number) => ({
 const makeDoc = (frameRect: ReturnType<typeof rect> | null): Document =>
   ({
     defaultView: {
-      frameElement: frameRect ? { getBoundingClientRect: () => frameRect } : null,
+      frameElement: frameRect
+        ? {
+            getBoundingClientRect: () => frameRect,
+            clientWidth: frameRect.width,
+            clientHeight: frameRect.height,
+          }
+        : null,
     },
   }) as unknown as Document;
 
@@ -56,15 +62,18 @@ describe('ttsContent', () => {
     ).toBe(false);
   });
 
-  test('checks the spoken range against the iframe viewport, not just the frame', () => {
-    const content = { doc: makeDoc(rect(0, 0, 100, 100)), index: 0 };
+  test('maps range rects into the reader viewport when the section iframe is wider than the page', () => {
+    // The paginator expands the iframe to the section's full width (400px),
+    // while the reader only shows a 200px viewport.
+    const content = { doc: makeDoc(rect(0, 0, 400, 100)), index: 0 };
+    const renderer = makeRenderer(rect(0, 0, 200, 100));
     const visibleRange = {
-      getClientRects: () => [rect(10, 10, 40, 20)],
+      getClientRects: () => [rect(120, 10, 140, 20)],
     } as unknown as Range;
     const offPageRange = {
-      getClientRects: () => [rect(200, 10, 240, 20)],
+      getClientRects: () => [rect(300, 10, 340, 20)],
     } as unknown as Range;
-    expect(isRangeVisibleInContent(content, visibleRange)).toBe(true);
-    expect(isRangeVisibleInContent(content, offPageRange)).toBe(false);
+    expect(isRangeVisibleInContent(renderer, content, visibleRange)).toBe(true);
+    expect(isRangeVisibleInContent(renderer, content, offPageRange)).toBe(false);
   });
 });

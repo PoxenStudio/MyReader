@@ -62,8 +62,10 @@ export class TTSDocumentProvider {
     }
 
     const signature = this.#getTransformSignature();
-    const cached = this.#cache.get(index);
-    if (cached?.signature === signature) return cached.doc;
+    if (cache) {
+      const cached = this.#cache.get(index);
+      if (cached?.signature === signature) return cached.doc;
+    }
 
     const section = this.#view.book.sections?.[index] as SectionItem | undefined;
     if (!section) return null;
