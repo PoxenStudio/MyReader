@@ -16,6 +16,8 @@ import { EdgeTTSClient } from './EdgeTTSClient';
 import { SectionTimeline, TimelineSentence } from './SectionTimeline';
 import { hydrateProvisionalDurations } from './ttsDuration';
 import { DownloadableSentence, SectionEnumerator, TTSDownloader } from './TTSDownloader';
+import { TTSDocumentProvider } from './ttsDocumentProvider';
+import { findContentByIndex } from './ttsContent';
 import { TTSUtils } from './TTSUtils';
 import { TTSClient } from './TTSClient';
 import { startAudioKeepAlive, stopAudioKeepAlive } from './WebAudioPlayer';
@@ -71,6 +73,7 @@ export interface TTSViewBindings {
   bookKey: string;
   preprocessCallback?: (ssml: string) => Promise<string>;
   onSectionChange?: (sectionIndex: number) => Promise<void>;
+  documentProvider?: TTSDocumentProvider;
 }
 
 // Node filter shared by the live TTS instance and the timeline enumeration —
@@ -133,6 +136,7 @@ export class TTSController extends EventTarget {
   #timelineSectionIndex: number = -1;
   #currentSentenceIndex: number = -1;
   #ttsDoc: Document | null = null;
+  #documentProvider: TTSDocumentProvider | null = null;
   #ttsGranularity: TTSGranularity = 'sentence';
 
   // Word-level highlight state for the currently spoken chunk. Armed by a
@@ -288,13 +292,16 @@ export class TTSController extends EventTarget {
     const sectionIndex = Math.max(this.#ttsSectionIndex, 0);
 
     // Prep (no controller state mutated): resolve the section document from
-    // the new view, preferring its rendered primary content.
+    // the new view, preferring any rendered view of that section rather than
+    // only the primary one — a dual-page spread can keep the TTS section in
+    // the non-primary column.
     const contents = view.renderer.getContents();
-    const primary = contents.find((x) => x.index === view.renderer.primaryIndex) ?? contents[0];
-    let doc = primary && (primary.index ?? 0) === sectionIndex ? primary.doc : undefined;
+    let doc = findContentByIndex(contents, sectionIndex)?.doc;
     if (!doc) {
       const section = view.book.sections?.[sectionIndex];
-      doc = section?.createDocument ? await section.createDocument() : undefined;
+      doc =
+        (await bindings.documentProvider?.createSectionDocument(sectionIndex)) ??
+        (section?.createDocument ? await section.createDocument() : undefined);
     }
     if (!doc) {
       console.warn('[TTS] attachView: no document for section', sectionIndex);
@@ -318,6 +325,7 @@ export class TTSController extends EventTarget {
     this.bookKey = bindings.bookKey;
     this.preprocessCallback = bindings.preprocessCallback;
     this.onSectionChange = bindings.onSectionChange;
+    this.#documentProvider = bindings.documentProvider ?? null;
     this.#attached = true;
     const lastRange = oldTts?.getLastRange?.();
     if (lastRange) {
@@ -341,6 +349,10 @@ export class TTSController extends EventTarget {
     this.#currentSentenceIndex = -1;
     this.reapplyCurrentHighlight();
     this.redispatchPosition();
+  }
+
+  setDocumentProvider(provider: TTSDocumentProvider | null): void {
+    this.#documentProvider = provider;
   }
 
   async init() {
@@ -382,6 +394,20 @@ export class TTSController extends EventTarget {
       | undefined;
   }
 
+  #getContentByIndex(index: number) {
+    if (!this.#attached || index < 0) return undefined;
+    return findContentByIndex(this.view.renderer.getContents(), index);
+  }
+
+  #ensureSectionLang(doc: Document): void {
+    const html = doc.querySelector('html');
+    const lang = html?.getAttribute('lang') || html?.getAttribute('xml:lang') || '';
+    if (html && !isValidLang(lang) && this.ttsLang) {
+      html.setAttribute('lang', this.ttsLang);
+      html.setAttribute('xml:lang', this.ttsLang);
+    }
+  }
+
   #getHighlighter() {
     return (range: Range) => {
       // Suppress the sentence highlight that foliate's setMark draws when the
@@ -389,9 +415,10 @@ export class TTSController extends EventTarget {
       // synchronous setMark call, so word draws (dispatchSpeakWord) and paused
       // navigation still highlight normally.
       if (this.#suppressMarkHighlight) return;
-      const content = this.#getPrimaryContent();
+      const content = this.#getContentByIndex(this.#ttsSectionIndex);
       if (!content) return;
-      const { doc, index, overlayer } = content;
+      const { doc, index } = content;
+      const overlayer = content.overlayer as Overlayer | undefined;
       if (!doc || index === undefined || index !== this.#ttsSectionIndex) {
         return;
       }
@@ -457,23 +484,25 @@ export class TTSController extends EventTarget {
 
     this.#ttsSectionIndex = sectionIndex;
 
-    const currentSection = this.#getPrimaryContent();
-    if (currentSection?.index !== sectionIndex) {
+    const primary = this.#getPrimaryContent();
+    if (primary?.index !== sectionIndex) {
       await this.onSectionChange?.(sectionIndex);
     }
 
-    let doc: Document;
-    if (currentSection?.index === sectionIndex && currentSection?.doc) {
-      doc = currentSection.doc;
-    } else {
-      doc = await section.createDocument();
-      const html = doc.querySelector('html');
-      const lang = html?.getAttribute('lang') || html?.getAttribute('xml:lang') || '';
-      if (html && !isValidLang(lang) && this.ttsLang) {
-        html.setAttribute('lang', this.ttsLang);
-        html.setAttribute('xml:lang', this.ttsLang);
-      }
-    }
+    // Re-read AFTER navigation: the old code captured the primary section
+    // before `onSectionChange` and then always fell back to the raw
+    // `createDocument()` document for the new section, which bypasses the
+    // app's content transformers and makes every chapter transition diverge
+    // from the rendered text.
+    const rendered = this.#getContentByIndex(sectionIndex);
+    const liveDoc = rendered?.doc;
+    const doc =
+      liveDoc ??
+      (await this.#documentProvider?.createSectionDocument(sectionIndex)) ??
+      (await section.createDocument());
+    // Don't mutate a live rendered document; only documents built for TTS
+    // need the language fallback.
+    if (!liveDoc) this.#ensureSectionLang(doc);
 
     // The section changed (or is initializing): any previous timeline maps a
     // dead document.
@@ -596,7 +625,11 @@ export class TTSController extends EventTarget {
         const section = sections?.[sectionIndex];
         if (!section?.createDocument) return null;
         try {
-          const doc = await section.createDocument();
+          const doc =
+            (await this.#documentProvider?.createSectionDocument(sectionIndex, {
+              preferLive: false,
+              cache: false,
+            })) ?? (await section.createDocument());
           const html = doc.querySelector('html');
           const lang = html?.getAttribute('lang') || html?.getAttribute('xml:lang') || '';
           if (html && !isValidLang(lang) && this.ttsLang) {
@@ -758,9 +791,10 @@ export class TTSController extends EventTarget {
   }
 
   #drawSeekPreview(range: Range) {
-    const content = this.#getPrimaryContent();
+    const content = this.#getContentByIndex(this.#ttsSectionIndex);
     if (!content) return;
-    const { doc, index, overlayer } = content;
+    const { doc, index } = content;
+    const overlayer = content.overlayer as Overlayer | undefined;
     if (!doc || index === undefined || index !== this.#ttsSectionIndex) return;
     try {
       const cfi = this.view.getCFI(index, range);

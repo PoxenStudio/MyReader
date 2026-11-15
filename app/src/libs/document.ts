@@ -44,6 +44,7 @@ export interface SectionItem {
   fragments?: Array<SectionFragment>;
 
   loadText?: () => Promise<string | null>;
+  loadContent?: () => Promise<string | undefined>;
   createDocument: () => Promise<Document>;
 }
 

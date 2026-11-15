@@ -1485,4 +1485,48 @@ describe('TTSController', () => {
       expect(content.overlayer.add).toHaveBeenCalled();
     });
   });
+
+  test('uses the newly rendered document after onSectionChange', async () => {
+    const doc0 = new DOMParser().parseFromString(
+      '<html><body><p>zero</p></body></html>',
+      'text/html',
+    );
+    const doc1 = new DOMParser().parseFromString(
+      '<html><body><p>one</p></body></html>',
+      'text/html',
+    );
+    const overlayer = { remove: vi.fn(), add: vi.fn() };
+    const contents: { doc: Document; index: number; overlayer: typeof overlayer }[] = [
+      { doc: doc0, index: 0, overlayer },
+    ];
+    const createDocument = vi.fn().mockResolvedValue(doc0);
+    const view = {
+      renderer: {
+        primaryIndex: 0,
+        getContents: vi.fn(() => contents),
+      },
+      book: {
+        sections: [{ createDocument: vi.fn().mockResolvedValue(doc0) }, { createDocument }],
+      },
+      language: { isCJK: false },
+      tts: null,
+      getCFI: vi.fn().mockReturnValue('cfi-string'),
+      resolveCFI: vi.fn().mockReturnValue({ anchor: vi.fn().mockReturnValue(new Range()) }),
+    } as unknown as FoliateView;
+    const onSectionChange = vi.fn(async (index: number) => {
+      expect(index).toBe(1);
+      contents.splice(0, contents.length, { doc: doc1, index: 1, overlayer });
+      (view.renderer as unknown as { primaryIndex: number }).primaryIndex = 1;
+    });
+    const c = new TTSController(mockAppService, view, false, undefined, onSectionChange);
+    await c.initViewTTS(0);
+    // Force forward() into the section-change path instead of an in-section
+    // next() result.
+    (view.tts as unknown as { next: () => string }).next = vi.fn().mockReturnValue('');
+
+    await c.forward();
+
+    expect(onSectionChange).toHaveBeenCalledWith(1);
+    expect(createDocument).not.toHaveBeenCalled();
+  });
 });

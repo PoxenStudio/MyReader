@@ -74,6 +74,9 @@ vi.mock('@/services/rss/feedReader', () => ({
 
 import { useReaderStore } from '@/store/readerStore';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { clearBookProgress, getBookProgress, setBookProgress } from '@/store/readerProgressStore';
+import { getBookHash } from '@/utils/book';
+import type { BookProgress } from '@/types/book';
 
 /**
  * Helper to seed a minimal ViewState in the store for a given key.
@@ -270,6 +273,40 @@ describe('readerStore', () => {
 
       useReaderStore.getState().setTTSEnabled('book-1', false);
       expect(useReaderStore.getState().viewStates['book-1']!.ttsEnabled).toBe(false);
+    });
+  });
+
+  describe('setProgressLocation', () => {
+    test('updates location and range without touching page info', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: {
+          [id]: { config: { location: 'old-cfi' } },
+        },
+      } as never);
+      const oldRange = new Range();
+      const range = new Range();
+      setBookProgress('book-1', {
+        location: 'old-cfi',
+        range: oldRange,
+        pageinfo: { current: 2, total: 10 },
+        section: { current: 0, total: 5 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'new-cfi', range);
+
+      expect(
+        (useBookDataStore.getState().booksData[id] as { config: { location: string } }).config
+          .location,
+      ).toBe('new-cfi');
+      expect(getBookProgress('book-1')).toMatchObject({
+        location: 'new-cfi',
+        range,
+        pageinfo: { current: 2, total: 10 },
+      });
+      clearBookProgress('book-1');
     });
   });
 
