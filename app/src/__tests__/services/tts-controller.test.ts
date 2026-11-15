@@ -1532,11 +1532,7 @@ describe('TTSController', () => {
 
   test('uses a full-section provider document when a section is split into chunks', async () => {
     const chunk0 = new DOMParser().parseFromString(
-      '<html><body><p>c0</p></body></html>',
-      'text/html',
-    );
-    const chunk1 = new DOMParser().parseFromString(
-      '<html><body><p>c1</p></body></html>',
+      '<html><body><div data-foliate-chunk="1"></div><p>c0</p></body></html>',
       'text/html',
     );
     const full = new DOMParser().parseFromString(
@@ -1548,10 +1544,7 @@ describe('TTSController', () => {
     const view = {
       renderer: {
         primaryIndex: 0,
-        getContents: () => [
-          { doc: chunk0, index: 0, overlayer },
-          { doc: chunk1, index: 0, overlayer },
-        ],
+        getContents: () => [{ doc: chunk0, index: 0, overlayer }],
       },
       book: { sections: [{ createDocument }] },
       language: { isCJK: false },

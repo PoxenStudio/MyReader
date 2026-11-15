@@ -17,6 +17,7 @@ import { SectionTimeline, TimelineSentence } from './SectionTimeline';
 import { hydrateProvisionalDurations } from './ttsDuration';
 import { DownloadableSentence, SectionEnumerator, TTSDownloader } from './TTSDownloader';
 import { TTSDocumentProvider } from './ttsDocumentProvider';
+import { isChunkDocument } from './ttsContent';
 import { TTSUtils } from './TTSUtils';
 import { TTSClient } from './TTSClient';
 import { startAudioKeepAlive, stopAudioKeepAlive } from './WebAudioPlayer';
@@ -295,10 +296,11 @@ export class TTSController extends EventTarget {
     // only the primary one — a dual-page spread can keep the TTS section in
     // the non-primary column.
     const contents = view.renderer.getContents();
-    // A large section is rendered as several chunk documents sharing one spine
-    // index; using a single chunk as the TTS text basis would truncate it.
+    // A large section is rendered as chunk documents sharing one spine index;
+    // using a chunk as the TTS text basis would truncate the section.
     const matches = contents.filter((content) => content.index === sectionIndex);
-    let doc = matches.length === 1 ? matches[0]?.doc : undefined;
+    let doc =
+      matches.length === 1 && !isChunkDocument(matches[0]!.doc) ? matches[0]!.doc : undefined;
     if (!doc) {
       const section = view.book.sections?.[sectionIndex];
       doc =
@@ -357,6 +359,20 @@ export class TTSController extends EventTarget {
     this.#documentProvider = provider;
   }
 
+  // Callers may hold a range from the rendered chunk / saved progress while
+  // TTS speaks a full-section provider document. Re-anchor it before from().
+  anchorRangeInTtsDoc(range: Range): Range | null {
+    const doc = this.#ttsDoc;
+    if (!doc) return null;
+    if (range.startContainer.ownerDocument === doc) return range;
+    try {
+      const cfi = this.view.getCFI(this.#ttsSectionIndex, range);
+      return this.view.resolveCFI(cfi).anchor(doc);
+    } catch {
+      return null;
+    }
+  }
+
   async init() {
     const availableClients = [];
     if (await this.ttsEdgeClient.init()) {
@@ -399,7 +415,8 @@ export class TTSController extends EventTarget {
   #getLiveContentForSection(index: number) {
     if (!this.#attached || index < 0) return undefined;
     const matches = this.view.renderer.getContents().filter((content) => content.index === index);
-    return matches.length === 1 ? matches[0] : undefined;
+    if (matches.length !== 1) return undefined;
+    return isChunkDocument(matches[0]!.doc) ? undefined : matches[0];
   }
 
   #getContentForRange(index: number, range: Range) {

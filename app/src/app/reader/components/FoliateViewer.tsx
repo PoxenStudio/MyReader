@@ -63,6 +63,7 @@ import { getMaxInlineSize } from '@/utils/config';
 import { getDirFromUILanguage } from '@/utils/rtl';
 import { isTauriAppPlatform } from '@/services/environment';
 import { transformBookContent } from '@/libs/bookContentTransform';
+import { consumeTtsNavigation } from '@/services/tts/ttsContent';
 import { lockScreenOrientation, setTextSelectionSuppressed } from '@/utils/bridge';
 import { useTextTranslation } from '../hooks/useTextTranslation';
 import { manageSyntaxHighlighting } from '@/utils/highlightjs';
@@ -203,6 +204,10 @@ const FoliateViewer: React.FC<{
     // event handler latches it before this rAF/microtask commit runs.
     const reason = rendererRelocateReasonRef.current;
     rendererRelocateReasonRef.current = undefined;
+    // TTS-driven goTo/section-change relocates must not overwrite the sentence
+    // CFI with the page-start position.
+    if (consumeTtsNavigation(bookKey)) return;
+    if (reason && reason !== 'anchor') skipNextAnchorRelocateRef.current = false;
     if (reason === 'anchor') {
       // Resizing / re-pagination re-anchors to the same text position; its
       // page-start CFI must not become the synced progress. While listening,
