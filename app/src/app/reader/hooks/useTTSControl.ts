@@ -25,11 +25,7 @@ import { getLocale } from '@/utils/misc';
 import { estimateTTSTime } from '@/utils/ttsTime';
 import { releaseUnblockAudio, ttsMediaBridge, unblockAudio } from '@/services/tts/ttsMediaBridge';
 import { getBookHashFromKey, ttsSessionManager } from '@/services/tts/TTSSessionManager';
-import {
-  findContentByIndex,
-  isContentVisible,
-  isRangeVisibleInContent,
-} from '@/services/tts/ttsContent';
+import { isContentVisible, isRangeVisibleInContent } from '@/services/tts/ttsContent';
 import { TTSDocumentProvider } from '@/services/tts/ttsDocumentProvider';
 import { createBookContentTransformContext } from '@/libs/bookContentTransform';
 import { FoliateView } from '@/types/view';
@@ -68,18 +64,34 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   const previousSectionLabelRef = useRef<string | undefined>(undefined);
   const ttsControllerRef = useRef<TTSController | null>(null);
   const isStartingTTSRef = useRef(false);
+  const ttsEpochRef = useRef(0);
 
   const waitForLayoutApplied = useCallback(
     (key: string, expected: boolean) =>
       new Promise<void>((resolve) => {
-        const onApplied = (event: Event) => {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        function cleanup() {
+          eventDispatcher.off('reader-layout-applied', onApplied);
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+        }
+        function onApplied(event: Event) {
           const detail = (event as CustomEvent<{ bookKey?: string; ttsEnabled?: boolean }>).detail;
           if (detail?.bookKey !== key || !!detail?.ttsEnabled !== expected) return;
-          eventDispatcher.off('reader-layout-applied', onApplied);
+          cleanup();
           resolve();
-        };
+        }
         // FoliateViewer dispatches this on the async bus.
         eventDispatcher.on('reader-layout-applied', onApplied);
+        // Safety net: never leave the start/stop path waiting forever if the
+        // layout effect never runs (no view / missing settings).
+        timer = setTimeout(() => {
+          console.warn('[TTS] reader-layout-applied timed out; continuing');
+          cleanup();
+          resolve();
+        }, 30_000);
       }),
     [],
   );
@@ -405,9 +417,12 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         ({ doc }) => (doc.getSelection()?.toString().length ?? 0) > 0,
       );
       const { anchor, index: ttsSectionIndex } = view.resolveCFI(cfi);
-      // A dual-page spread can keep the TTS section in a non-primary column;
-      // locate it by section index and only navigate when it is not visible.
-      const content = findContentByIndex(hlContents, ttsSectionIndex);
+      // A large section can be split across several chunk documents; pick the
+      // chunk in which the CFI actually resolves. A dual-page spread can also
+      // keep the TTS section in a non-primary column.
+      const content = hlContents
+        .filter((item) => item.index === ttsSectionIndex)
+        .find((item) => anchor(item.doc));
 
       if (!content || !isContentVisible(view.renderer, content)) {
         // TTS crossed into a new section before the view caught up. The
@@ -442,7 +457,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       // section; navigate when the range itself is not visible. Scrolling a
       // non-primary iframe would mix iframe-local rects with paginator coords.
       if (content.index !== view.renderer.primaryIndex) {
-        if (!isRangeVisibleInContent(content, range)) view.goTo?.(cfi);
+        if (!isRangeVisibleInContent(view.renderer, content, range)) view.goTo?.(cfi);
         return;
       }
       if (!view.renderer.scrolled) {
@@ -478,7 +493,9 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
 
       const hlContents = view.renderer.getContents();
       const { anchor, index: ttsSectionIndex } = view.resolveCFI(cfi);
-      const content = findContentByIndex(hlContents, ttsSectionIndex);
+      const content = hlContents
+        .filter((item) => item.index === ttsSectionIndex)
+        .find((item) => anchor(item.doc));
       // Cross-section navigation is driven by the sentence-level mark handler.
       if (!content || !isContentVisible(view.renderer, content)) return;
       if (hlContents.some(({ doc }) => (doc.getSelection()?.toString().length ?? 0) > 0)) return;
@@ -489,7 +506,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       // A visible non-primary column may still be on a later page of that
       // section; let the word drive navigation only when it is off-page.
       if (content.index !== view.renderer.primaryIndex) {
-        if (!isRangeVisibleInContent(content, wordRange)) view.goTo?.(cfi);
+        if (!isRangeVisibleInContent(view.renderer, content, wordRange)) view.goTo?.(cfi);
         return;
       }
       if (wordRange.startContainer.ownerDocument !== visibleRange.startContainer.ownerDocument) {
@@ -681,10 +698,13 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       if (!sections || sectionIndex < 0 || sectionIndex >= sections.length) return;
       sectionChangingTimestampRef.current = Date.now();
       const resolved = view.resolveNavigation(sectionIndex);
-      const content = findContentByIndex(view.renderer.getContents(), sectionIndex);
-      // The next section may already be visible as a non-primary column;
-      // re-anchoring it to page 0 would jump backwards.
-      if (!content || !isContentVisible(view.renderer, content)) {
+      // The next section (or any of its chunks) may already be visible as a
+      // non-primary column; re-anchoring it to page 0 would jump backwards.
+      const sectionVisible = view.renderer
+        .getContents()
+        .filter((item) => item.index === sectionIndex)
+        .some((item) => isContentVisible(view.renderer, item));
+      if (!sectionVisible) {
         // Await so TTSController's `await onSectionChange` doesn't proceed to
         // speak the new section before the view has finished navigating to it.
         await view.renderer.goTo?.(resolved);
@@ -726,6 +746,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   const handleStop = useCallback(
     async (bookKey: string) => {
       const ttsController = ttsControllerRef.current;
+      const stopEpoch = ++ttsEpochRef.current;
       // Reset all UI/session state up front — including the TTS toggle
       // (ttsEnabled) and indicator that color the TTS icon — so disabling TTS
       // always takes effect immediately. The teardown below is best-effort and
@@ -750,6 +771,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       setTTSEnabled(bookKey, false);
       if (restoreAfterLayout && lastTtsLocation) {
         void restoreAfterLayout.then(() => {
+          if (ttsEpochRef.current !== stopEpoch) return;
           setProgressLocation(bookKey, lastTtsLocation, null);
         });
       }
@@ -787,6 +809,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
     // end up creating two TTSController instances that speak simultaneously.
     if (isStartingTTSRef.current) return;
     isStartingTTSRef.current = true;
+    const sessionEpoch = ++ttsEpochRef.current;
 
     try {
       const view = getView(bookKey);
@@ -890,7 +913,13 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         });
 
         await Promise.all([ttsController.init(), layoutApplied]);
+        if (sessionEpoch !== ttsEpochRef.current || ttsControllerRef.current !== ttsController) {
+          return;
+        }
         await ttsController.initViewTTS(ttsFromIndex);
+        if (sessionEpoch !== ttsEpochRef.current || ttsControllerRef.current !== ttsController) {
+          return;
+        }
         ttsController.updateHighlightOptions(
           getTTSHighlightOptions(viewSettings.ttsHighlightOptions, viewSettings.isEink),
         );

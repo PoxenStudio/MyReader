@@ -135,7 +135,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
     : '';
 
   const hasRemainingInfo =
-    viewSettings.showRemainingTime || (!ttsEnabled && viewSettings.showRemainingPages);
+    !ttsEnabled && (viewSettings.showRemainingTime || viewSettings.showRemainingPages);
   const hasTimeInfo = viewSettings.showCurrentTime;
   const hasBatteryInfo = viewSettings.showCurrentBatteryStatus;
 

@@ -17,7 +17,6 @@ import { SectionTimeline, TimelineSentence } from './SectionTimeline';
 import { hydrateProvisionalDurations } from './ttsDuration';
 import { DownloadableSentence, SectionEnumerator, TTSDownloader } from './TTSDownloader';
 import { TTSDocumentProvider } from './ttsDocumentProvider';
-import { findContentByIndex } from './ttsContent';
 import { TTSUtils } from './TTSUtils';
 import { TTSClient } from './TTSClient';
 import { startAudioKeepAlive, stopAudioKeepAlive } from './WebAudioPlayer';
@@ -296,7 +295,10 @@ export class TTSController extends EventTarget {
     // only the primary one — a dual-page spread can keep the TTS section in
     // the non-primary column.
     const contents = view.renderer.getContents();
-    let doc = findContentByIndex(contents, sectionIndex)?.doc;
+    // A large section is rendered as several chunk documents sharing one spine
+    // index; using a single chunk as the TTS text basis would truncate it.
+    const matches = contents.filter((content) => content.index === sectionIndex);
+    let doc = matches.length === 1 ? matches[0]?.doc : undefined;
     if (!doc) {
       const section = view.book.sections?.[sectionIndex];
       doc =
@@ -394,9 +396,21 @@ export class TTSController extends EventTarget {
       | undefined;
   }
 
-  #getContentByIndex(index: number) {
+  #getLiveContentForSection(index: number) {
     if (!this.#attached || index < 0) return undefined;
-    return findContentByIndex(this.view.renderer.getContents(), index);
+    const matches = this.view.renderer.getContents().filter((content) => content.index === index);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
+  #getContentForRange(index: number, range: Range) {
+    if (!this.#attached) return undefined;
+    try {
+      const cfi = this.view.getCFI(index, range);
+      const matches = this.view.renderer.getContents().filter((content) => content.index === index);
+      return matches.find((content) => this.view.resolveCFI(cfi).anchor(content.doc)) ?? matches[0];
+    } catch {
+      return undefined;
+    }
   }
 
   #ensureSectionLang(doc: Document): void {
@@ -415,7 +429,7 @@ export class TTSController extends EventTarget {
       // synchronous setMark call, so word draws (dispatchSpeakWord) and paused
       // navigation still highlight normally.
       if (this.#suppressMarkHighlight) return;
-      const content = this.#getContentByIndex(this.#ttsSectionIndex);
+      const content = this.#getContentForRange(this.#ttsSectionIndex, range);
       if (!content) return;
       const { doc, index } = content;
       const overlayer = content.overlayer as Overlayer | undefined;
@@ -494,7 +508,7 @@ export class TTSController extends EventTarget {
     // `createDocument()` document for the new section, which bypasses the
     // app's content transformers and makes every chapter transition diverge
     // from the rendered text.
-    const rendered = this.#getContentByIndex(sectionIndex);
+    const rendered = this.#getLiveContentForSection(sectionIndex);
     const liveDoc = rendered?.doc;
     const doc =
       liveDoc ??
@@ -791,7 +805,7 @@ export class TTSController extends EventTarget {
   }
 
   #drawSeekPreview(range: Range) {
-    const content = this.#getContentByIndex(this.#ttsSectionIndex);
+    const content = this.#getContentForRange(this.#ttsSectionIndex, range);
     if (!content) return;
     const { doc, index } = content;
     const overlayer = content.overlayer as Overlayer | undefined;
