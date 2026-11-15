@@ -2,7 +2,7 @@ import { SectionItem } from '@/libs/document';
 import { transformContent } from '@/services/transformService';
 import { TransformContext } from '@/services/transformers/types';
 import { FoliateView } from '@/types/view';
-import { findContentByIndex } from './ttsContent';
+import { findContentByIndex, isChunkDocument } from './ttsContent';
 
 export interface TTSDocumentProviderOptions {
   view: FoliateView;
@@ -46,7 +46,8 @@ export class TTSDocumentProvider {
     try {
       const renderer = this.#view.renderer;
       if (!renderer?.getContents) return null;
-      return findContentByIndex(renderer.getContents(), index)?.doc ?? null;
+      const doc = findContentByIndex(renderer.getContents(), index)?.doc;
+      return doc && !isChunkDocument(doc) ? doc : null;
     } catch {
       return null;
     }

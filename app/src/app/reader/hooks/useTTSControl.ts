@@ -25,7 +25,11 @@ import { getLocale } from '@/utils/misc';
 import { estimateTTSTime } from '@/utils/ttsTime';
 import { releaseUnblockAudio, ttsMediaBridge, unblockAudio } from '@/services/tts/ttsMediaBridge';
 import { getBookHashFromKey, ttsSessionManager } from '@/services/tts/TTSSessionManager';
-import { isContentVisible, isRangeVisibleInContent } from '@/services/tts/ttsContent';
+import {
+  isContentVisible,
+  isRangeVisibleInContent,
+  markTtsNavigation,
+} from '@/services/tts/ttsContent';
 import { TTSDocumentProvider } from '@/services/tts/ttsDocumentProvider';
 import { createBookContentTransformContext } from '@/libs/bookContentTransform';
 import { FoliateView } from '@/types/view';
@@ -65,13 +69,15 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   const ttsControllerRef = useRef<TTSController | null>(null);
   const isStartingTTSRef = useRef(false);
   const ttsEpochRef = useRef(0);
+  const startAbortRef = useRef<AbortController | null>(null);
 
   const waitForLayoutApplied = useCallback(
-    (key: string, expected: boolean) =>
+    (key: string, expected: boolean, signal?: AbortSignal) =>
       new Promise<void>((resolve) => {
         let timer: ReturnType<typeof setTimeout> | null = null;
         function cleanup() {
           eventDispatcher.off('reader-layout-applied', onApplied);
+          if (signal) signal.removeEventListener('abort', onAbort);
           if (timer) {
             clearTimeout(timer);
             timer = null;
@@ -83,8 +89,17 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           cleanup();
           resolve();
         }
+        function onAbort() {
+          cleanup();
+          resolve();
+        }
+        if (signal?.aborted) {
+          resolve();
+          return;
+        }
         // FoliateViewer dispatches this on the async bus.
         eventDispatcher.on('reader-layout-applied', onApplied);
+        signal?.addEventListener('abort', onAbort, { once: true });
         // Safety net: never leave the start/stop path waiting forever if the
         // layout effect never runs (no view / missing settings).
         timer = setTimeout(() => {
@@ -453,11 +468,18 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       // range.startContainer) or getBoundingClientRect below (READEST-21).
       if (!range) return;
       if (!preview) setProgressLocation(bookKey, cfi, range);
+      const primaryContent = hlContents.find((item) => item.index === view.renderer.primaryIndex);
+      const isPrimary = primaryContent
+        ? content.doc === primaryContent.doc
+        : content.index === view.renderer.primaryIndex;
       // A visible non-primary column may still be on a later page of that
       // section; navigate when the range itself is not visible. Scrolling a
       // non-primary iframe would mix iframe-local rects with paginator coords.
-      if (content.index !== view.renderer.primaryIndex) {
-        if (!isRangeVisibleInContent(view.renderer, content, range)) view.goTo?.(cfi);
+      if (!isPrimary) {
+        if (!isRangeVisibleInContent(view.renderer, content, range)) {
+          markTtsNavigation(bookKey);
+          view.goTo?.(cfi);
+        }
         return;
       }
       if (!view.renderer.scrolled) {
@@ -501,27 +523,19 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       if (hlContents.some(({ doc }) => (doc.getSelection()?.toString().length ?? 0) > 0)) return;
 
       const wordRange = anchor(content.doc);
-      const visibleRange = getProgress(bookKey)?.range as Range | undefined;
-      if (!wordRange || !visibleRange) return;
+      if (!wordRange) return;
+      const primaryContent = hlContents.find((item) => item.index === view.renderer.primaryIndex);
+      const isPrimary = primaryContent
+        ? content.doc === primaryContent.doc
+        : content.index === view.renderer.primaryIndex;
+      if (isRangeVisibleInContent(view.renderer, content, wordRange)) return;
       // A visible non-primary column may still be on a later page of that
-      // section; let the word drive navigation only when it is off-page.
-      if (content.index !== view.renderer.primaryIndex) {
-        if (!isRangeVisibleInContent(view.renderer, content, wordRange)) view.goTo?.(cfi);
-        return;
-      }
-      if (wordRange.startContainer.ownerDocument !== visibleRange.startContainer.ownerDocument) {
-        return;
-      }
-
-      try {
-        const ahead = wordRange.compareBoundaryPoints(Range.END_TO_START, visibleRange) > 0;
-        const behind = wordRange.compareBoundaryPoints(Range.START_TO_END, visibleRange) < 0;
-        if (ahead || behind) {
-          view.renderer.scrollToAnchor?.(wordRange);
-        }
-      } catch {
-        // Ranges may briefly belong to different documents during a section
-        // change; the mark handler takes over in that case.
+      // section; navigate when the word is off-page.
+      if (isPrimary) {
+        view.renderer.scrollToAnchor?.(wordRange);
+      } else {
+        markTtsNavigation(bookKey);
+        view.goTo?.(cfi);
       }
     };
 
@@ -620,6 +634,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
     if (!view || !ttsLocation) return;
 
     const resolved = view.resolveNavigation(ttsLocation);
+    markTtsNavigation(bookKey);
     view.renderer.goTo?.(resolved);
   };
 
@@ -707,6 +722,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       if (!sectionVisible) {
         // Await so TTSController's `await onSectionChange` doesn't proceed to
         // speak the new section before the view has finished navigating to it.
+        markTtsNavigation(bookKey);
         await view.renderer.goTo?.(resolved);
       }
     },
@@ -747,6 +763,8 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
     async (bookKey: string) => {
       const ttsController = ttsControllerRef.current;
       const stopEpoch = ++ttsEpochRef.current;
+      startAbortRef.current?.abort();
+      startAbortRef.current = null;
       // Reset all UI/session state up front — including the TTS toggle
       // (ttsEnabled) and indicator that color the TTS icon — so disabling TTS
       // always takes effect immediately. The teardown below is best-effort and
@@ -885,9 +903,12 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         if (!ttsAlreadyEnabled) setTTSEnabled(bookKey, true);
         // Tests / non-mounted readers can leave the store flag unchanged; only
         // wait for the layout event when enabling actually took effect.
+        const layoutAbort = new AbortController();
+        startAbortRef.current?.abort();
+        startAbortRef.current = layoutAbort;
         const layoutApplied =
           !ttsAlreadyEnabled && getViewState(bookKey)?.ttsEnabled
-            ? waitForLayoutApplied(bookKey, true)
+            ? waitForLayoutApplied(bookKey, true, layoutAbort.signal)
             : Promise.resolve();
         const ttsController = new TTSController(
           appService,
@@ -924,11 +945,14 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           getTTSHighlightOptions(viewSettings.ttsHighlightOptions, viewSettings.isEink),
         );
         ttsController.setHighlightGranularity(viewSettings.ttsHighlightGranularity ?? 'word');
+        const anchoredFromRange = ttsFromRange
+          ? ttsController.anchorRangeInTtsDoc(ttsFromRange)
+          : null;
         const ssml =
           oneTime && ttsSpeakRange
             ? genSSMLRaw(ttsSpeakRange.toString().trim())
-            : ttsFromRange
-              ? view.tts?.from(ttsFromRange)
+            : anchoredFromRange
+              ? view.tts?.from(anchoredFromRange)
               : view.tts?.start();
         if (ssml) {
           const lang = parseSSMLLang(ssml, primaryLang) || 'en';

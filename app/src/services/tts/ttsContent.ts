@@ -4,6 +4,26 @@ export interface TTSContent {
   overlayer?: unknown;
 }
 
+// foliate-js marks the hidden stand-ins of a chunked section; a chunk document
+// is only part of the section and must not be used as the TTS text basis.
+export const isChunkDocument = (doc: Document): boolean =>
+  !!doc.querySelector('[data-foliate-chunk]');
+
+const ttsNavigationGuards = new Map<string, number>();
+
+export const markTtsNavigation = (bookKey: string): void => {
+  ttsNavigationGuards.set(bookKey, Date.now());
+};
+
+// TTS-driven goTo/section-change relocates must not write page-start CFIs into
+// progress. Expire the guard so a no-op navigation cannot swallow a later
+// user page turn indefinitely.
+export const consumeTtsNavigation = (bookKey: string): boolean => {
+  const at = ttsNavigationGuards.get(bookKey);
+  ttsNavigationGuards.delete(bookKey);
+  return at != null && Date.now() - at < 5000;
+};
+
 export const findContentByIndex = (
   contents: readonly TTSContent[],
   index: number,

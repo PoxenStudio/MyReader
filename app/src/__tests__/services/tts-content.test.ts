@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   findContentByIndex,
+  isChunkDocument,
   isContentVisible,
   isRangeVisibleInContent,
   TTSContent,
@@ -32,6 +33,19 @@ const makeRenderer = (r: ReturnType<typeof rect>) =>
   ({ getBoundingClientRect: () => r }) as unknown as Element;
 
 describe('ttsContent', () => {
+  test('detects chunk documents by the foliate placeholder marker', () => {
+    const chunk = new DOMParser().parseFromString(
+      '<html><body><div data-foliate-chunk="1"></div><p>tail</p></body></html>',
+      'text/html',
+    );
+    const full = new DOMParser().parseFromString(
+      '<html><body><p>full</p></body></html>',
+      'text/html',
+    );
+    expect(isChunkDocument(chunk)).toBe(true);
+    expect(isChunkDocument(full)).toBe(false);
+  });
+
   test('finds the TTS section in a non-primary column', () => {
     const contents = [
       { doc: makeDoc(null), index: 0 },
