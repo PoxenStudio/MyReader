@@ -123,6 +123,7 @@ interface ReaderStore {
     range: Range,
     fraction: number,
   ) => void;
+  setProgressLocation: (key: string, location: string, range?: Range | null) => void;
   getProgress: (key: string) => BookProgress | null;
   setView: (key: string, view: FoliateView) => void;
   getView: (key: string | null) => FoliateView | null;
@@ -561,6 +562,39 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       range,
       page: pageInfo.current + 1,
     } as BookProgress);
+  },
+  // TTS sentence marks are the progress authority while listening; layout
+  // reflows must not overwrite the synced location with a page-start CFI.
+  setProgressLocation: (key: string, location: string, range?: Range | null) => {
+    const id = getBookHash(key);
+    const viewState = get().viewStates[key];
+    if (!viewState) return;
+    if (viewState.isPrimary) {
+      useBookDataStore.setState((state) => {
+        const existing = state.booksData[id];
+        if (!existing) return state;
+        return {
+          booksData: {
+            ...state.booksData,
+            [id]: {
+              ...existing,
+              config: {
+                ...existing.config,
+                location,
+              } as BookConfig,
+            },
+          },
+        };
+      });
+    }
+    const progress = getBookProgress(key);
+    if (progress) {
+      setBookProgress(key, {
+        ...progress,
+        location,
+        range: range ?? progress.range,
+      } as BookProgress);
+    }
   },
   setBookmarkRibbonVisibility: (key: string, visible: boolean) =>
     set((state) => ({

@@ -25,6 +25,7 @@ const PageNavigationButtons: React.FC<PageNavigationButtonsProps> = ({
   const getViewSettings = useReaderStore((s) => s.getViewSettings);
   // hoveredBookKey is reactive state — drives button visibility.
   const hoveredBookKey = useReaderStore((s) => s.hoveredBookKey);
+  const ttsEnabled = useReaderStore((s) => s.viewStates?.[bookKey]?.ttsEnabled ?? false);
   const bookData = getBookData(bookKey);
   const view = getView(bookKey);
   const viewSettings = getViewSettings(bookKey);
@@ -56,7 +57,7 @@ const PageNavigationButtons: React.FC<PageNavigationButtonsProps> = ({
 
   const getLeftPageLabel = () => {
     const baseLabel = viewSettings?.rtl ? _('Next Page') : _('Previous Page');
-    if (currentPage !== undefined) {
+    if (!ttsEnabled && currentPage !== undefined) {
       return `${baseLabel}, ${_('Page {{number}}', { number: currentPage + 1 })}`;
     }
     return baseLabel;
@@ -68,7 +69,7 @@ const PageNavigationButtons: React.FC<PageNavigationButtonsProps> = ({
 
   const getRightPageLabel = () => {
     const baseLabel = viewSettings?.rtl ? _('Previous Page') : _('Next Page');
-    if (currentPage !== undefined) {
+    if (!ttsEnabled && currentPage !== undefined) {
       return `${baseLabel}, ${_('Page {{number}}', { number: currentPage + 1 })}`;
     }
     return baseLabel;
@@ -80,7 +81,7 @@ const PageNavigationButtons: React.FC<PageNavigationButtonsProps> = ({
 
   return (
     <>
-      {currentPage !== undefined && (
+      {currentPage !== undefined && !ttsEnabled && (
         <div className='sr-only' role='status' aria-live='polite' aria-atomic='true'>
           {_('Page {{number}}', { number: currentPage + 1 })}
         </div>

@@ -25,6 +25,14 @@ import { getLocale } from '@/utils/misc';
 import { estimateTTSTime } from '@/utils/ttsTime';
 import { releaseUnblockAudio, ttsMediaBridge, unblockAudio } from '@/services/tts/ttsMediaBridge';
 import { getBookHashFromKey, ttsSessionManager } from '@/services/tts/TTSSessionManager';
+import {
+  findContentByIndex,
+  isContentVisible,
+  isRangeVisibleInContent,
+} from '@/services/tts/ttsContent';
+import { TTSDocumentProvider } from '@/services/tts/ttsDocumentProvider';
+import { createBookContentTransformContext } from '@/libs/bookContentTransform';
+import { FoliateView } from '@/types/view';
 
 interface UseTTSControlProps {
   bookKey: string;
@@ -38,9 +46,11 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   const { isDarkMode } = useThemeStore();
   const getBookData = useBookDataStore((s) => s.getBookData);
   const getView = useReaderStore((s) => s.getView);
+  const getViewState = useReaderStore((s) => s.getViewState);
   const getProgress = useReaderStore((s) => s.getProgress);
   const getViewSettings = useReaderStore((s) => s.getViewSettings);
   const setViewSettings = useReaderStore((s) => s.setViewSettings);
+  const setProgressLocation = useReaderStore((s) => s.setProgressLocation);
   const setTTSEnabled = useReaderStore((s) => s.setTTSEnabled);
   const { getMergedRules } = useProofreadStore();
 
@@ -58,6 +68,64 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   const previousSectionLabelRef = useRef<string | undefined>(undefined);
   const ttsControllerRef = useRef<TTSController | null>(null);
   const isStartingTTSRef = useRef(false);
+
+  const waitForLayoutApplied = useCallback(
+    (key: string, expected: boolean) =>
+      new Promise<void>((resolve) => {
+        const onApplied = (event: Event) => {
+          const detail = (event as CustomEvent<{ bookKey?: string; ttsEnabled?: boolean }>).detail;
+          if (detail?.bookKey !== key || !!detail?.ttsEnabled !== expected) return;
+          eventDispatcher.off('reader-layout-applied', onApplied);
+          resolve();
+        };
+        // FoliateViewer dispatches this on the async bus.
+        eventDispatcher.on('reader-layout-applied', onApplied);
+      }),
+    [],
+  );
+
+  const createDocumentProvider = useCallback(
+    (view: FoliateView) =>
+      new TTSDocumentProvider({
+        view,
+        createTransformContext: (content, sectionHref) => {
+          const viewSettings = getViewSettings(bookKey);
+          const bookData = getBookData(bookKey);
+          if (!viewSettings || !bookData) return null;
+          const rect = view.renderer?.getBoundingClientRect?.();
+          return createBookContentTransformContext(
+            {
+              bookKey,
+              viewSettings,
+              width: rect?.width,
+              height: rect?.height,
+              isFixedLayout: bookData.isFixedLayout,
+              primaryLanguage: bookData.book?.primaryLanguage,
+              userLocale: getLocale(),
+            },
+            content,
+            sectionHref,
+          );
+        },
+        getTransformSignature: () => {
+          const viewSettings = getViewSettings(bookKey);
+          const bookData = getBookData(bookKey);
+          if (!viewSettings) return '';
+          return JSON.stringify({
+            overrideLayout: viewSettings.overrideLayout,
+            convertChineseVariant: viewSettings.convertChineseVariant,
+            replaceQuotationMarks: viewSettings.replaceQuotationMarks,
+            proofreadRules: viewSettings.proofreadRules,
+            allowScript: viewSettings.allowScript,
+            vertical: viewSettings.vertical,
+            primaryLanguage: bookData?.book?.primaryLanguage,
+            userLocale: getLocale(),
+            globalProofreadRules: getMergedRules(bookKey),
+          });
+        },
+      }),
+    [bookKey, getViewSettings, getBookData, getMergedRules],
+  );
   // Last broadcast playback state, so a follower engaging mid-session can be
   // replayed the current state on demand (see handleTTSSyncRequest).
   const playbackStateRef = useRef<'playing' | 'paused' | 'stopped'>('stopped');
@@ -278,6 +346,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           bookKey,
           preprocessCallback: preprocessSSMLForTTS,
           onSectionChange: handleSectionChange,
+          documentProvider: createDocumentProvider(view),
         });
         const speakingLang = controller.getSpeakingLang();
         if (speakingLang) setTtsLang(speakingLang);
@@ -332,19 +401,15 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       }
 
       const hlContents = view.renderer.getContents();
-      const hlPrimaryIdx = view.renderer.primaryIndex;
-      // getContents() is empty when the mark fires mid-relocate (the section is
-      // still loading, or the view was torn down). Bail instead of destructuring
-      // `doc` off undefined (READEST-19).
-      const hlContent = hlContents.find((x) => x.index === hlPrimaryIdx) ?? hlContents[0];
-      if (!hlContent) return;
-      const { doc, index: viewSectionIndex } = hlContent as {
-        doc: Document;
-        index?: number;
-      };
-
+      const selectionActive = hlContents.some(
+        ({ doc }) => (doc.getSelection()?.toString().length ?? 0) > 0,
+      );
       const { anchor, index: ttsSectionIndex } = view.resolveCFI(cfi);
-      if (viewSectionIndex !== ttsSectionIndex) {
+      // A dual-page spread can keep the TTS section in a non-primary column;
+      // locate it by section index and only navigate when it is not visible.
+      const content = findContentByIndex(hlContents, ttsSectionIndex);
+
+      if (!content || !isContentVisible(view.renderer, content)) {
         // TTS crossed into a new section before the view caught up. The
         // `await onSectionChange` path in TTSController fires renderer.goTo
         // via handleSectionChange, but the new paginator's #goTo can resolve
@@ -354,11 +419,10 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         // navigation from the highlight cfi directly, stamping the timestamp
         // so the "back-to-TTS" button stays suppressed while progress.location
         // catches up. Skip only when the user is actively selecting text.
-        if (hlContents.some(({ doc }) => (doc.getSelection()?.toString().length ?? 0) > 0)) {
-          return;
-        }
+        if (selectionActive) return;
         sectionChangingTimestampRef.current = Date.now();
         followingTTSLocationRef.current = true;
+        if (!preview) setProgressLocation(bookKey, cfi, null);
         view.goTo?.(cfi);
         return;
       }
@@ -366,16 +430,21 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       // A drag preview is an explicit "show me there" gesture: it navigates
       // even when auto-follow was suppressed by the user paging away.
       if (!preview && !followingTTSLocationRef.current) return;
+      if (selectionActive) return;
 
-      if (hlContents.some(({ doc }) => (doc.getSelection()?.toString().length ?? 0) > 0)) {
-        return;
-      }
-
-      const range = anchor(doc);
+      const range = anchor(content.doc);
       // The cfi may not resolve to a range in this doc (stale/cross-realm doc,
       // detached node). A null range would crash scrollToAnchor (foliate reads
       // range.startContainer) or getBoundingClientRect below (READEST-21).
       if (!range) return;
+      if (!preview) setProgressLocation(bookKey, cfi, range);
+      // A visible non-primary column may still be on a later page of that
+      // section; navigate when the range itself is not visible. Scrolling a
+      // non-primary iframe would mix iframe-local rects with paginator coords.
+      if (content.index !== view.renderer.primaryIndex) {
+        if (!isRangeVisibleInContent(content, range)) view.goTo?.(cfi);
+        return;
+      }
       if (!view.renderer.scrolled) {
         view.renderer.scrollToAnchor?.(range);
       } else {
@@ -408,18 +477,24 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       if (!cfi || !view || !followingTTSLocationRef.current) return;
 
       const hlContents = view.renderer.getContents();
-      const hlPrimaryIdx = view.renderer.primaryIndex;
-      const { doc, index: viewSectionIndex } = (hlContents.find((x) => x.index === hlPrimaryIdx) ??
-        hlContents[0]) as { doc: Document; index?: number };
-
       const { anchor, index: ttsSectionIndex } = view.resolveCFI(cfi);
+      const content = findContentByIndex(hlContents, ttsSectionIndex);
       // Cross-section navigation is driven by the sentence-level mark handler.
-      if (viewSectionIndex !== ttsSectionIndex) return;
+      if (!content || !isContentVisible(view.renderer, content)) return;
       if (hlContents.some(({ doc }) => (doc.getSelection()?.toString().length ?? 0) > 0)) return;
 
-      const wordRange = anchor(doc);
+      const wordRange = anchor(content.doc);
       const visibleRange = getProgress(bookKey)?.range as Range | undefined;
       if (!wordRange || !visibleRange) return;
+      // A visible non-primary column may still be on a later page of that
+      // section; let the word drive navigation only when it is off-page.
+      if (content.index !== view.renderer.primaryIndex) {
+        if (!isRangeVisibleInContent(content, wordRange)) view.goTo?.(cfi);
+        return;
+      }
+      if (wordRange.startContainer.ownerDocument !== visibleRange.startContainer.ownerDocument) {
+        return;
+      }
 
       try {
         const ahead = wordRange.compareBoundaryPoints(Range.END_TO_START, visibleRange) > 0;
@@ -606,9 +681,14 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       if (!sections || sectionIndex < 0 || sectionIndex >= sections.length) return;
       sectionChangingTimestampRef.current = Date.now();
       const resolved = view.resolveNavigation(sectionIndex);
-      // Await so TTSController's `await onSectionChange` doesn't proceed to
-      // speak the new section before the view has finished navigating to it.
-      await view.renderer.goTo?.(resolved);
+      const content = findContentByIndex(view.renderer.getContents(), sectionIndex);
+      // The next section may already be visible as a non-primary column;
+      // re-anchoring it to page 0 would jump backwards.
+      if (!content || !isContentVisible(view.renderer, content)) {
+        // Await so TTSController's `await onSectionChange` doesn't proceed to
+        // speak the new section before the view has finished navigating to it.
+        await view.renderer.goTo?.(resolved);
+      }
     },
     [bookKey, getView],
   );
@@ -659,7 +739,20 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       setShowIndicator(false);
       setShowBackToCurrentTTSLocation(false);
       previousSectionLabelRef.current = undefined;
+      const lastTtsLocation = getViewSettings(bookKey)?.ttsLocation;
+      // Removing the mini-player clearance reflows once; restore the last
+      // spoken CFI after that layout settles so the stop transition cannot
+      // leave a page-start position in progress.
+      const restoreAfterLayout =
+        lastTtsLocation && followingTTSLocationRef.current && getViewState(bookKey)?.ttsEnabled
+          ? waitForLayoutApplied(bookKey, false)
+          : null;
       setTTSEnabled(bookKey, false);
+      if (restoreAfterLayout && lastTtsLocation) {
+        void restoreAfterLayout.then(() => {
+          setProgressLocation(bookKey, lastTtsLocation, null);
+        });
+      }
       getView(bookKey)?.deselect();
       releaseUnblockAudio();
 
@@ -762,6 +855,17 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         // starting. The catch handler rolls both back if the start fails.
         setShowIndicator(true);
         setIsPlaying(true);
+        // Reserve the mini-player clearance and let pagination settle BEFORE
+        // the first mark, otherwise TTS starts scrolling against a layout that
+        // is still reflowing.
+        const ttsAlreadyEnabled = getViewState(bookKey)?.ttsEnabled ?? false;
+        if (!ttsAlreadyEnabled) setTTSEnabled(bookKey, true);
+        // Tests / non-mounted readers can leave the store flag unchanged; only
+        // wait for the layout event when enabling actually took effect.
+        const layoutApplied =
+          !ttsAlreadyEnabled && getViewState(bookKey)?.ttsEnabled
+            ? waitForLayoutApplied(bookKey, true)
+            : Promise.resolve();
         const ttsController = new TTSController(
           appService,
           view,
@@ -773,6 +877,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         // this, only runs on the background-session reattach path), so set the
         // book key here or the per-book audio cache never gets a hash to open.
         ttsController.bookKey = bookKey;
+        ttsController.setDocumentProvider(createDocumentProvider(view));
         ttsControllerRef.current = ttsController;
         setTtsController(ttsController);
         ttsSessionManager.claim(bookKey, ttsController, {
@@ -784,7 +889,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           getSectionLabel: () => getProgress(bookKey)?.sectionLabel,
         });
 
-        await ttsController.init();
+        await Promise.all([ttsController.init(), layoutApplied]);
         await ttsController.initViewTTS(ttsFromIndex);
         ttsController.updateHighlightOptions(
           getTTSHighlightOptions(viewSettings.ttsHighlightOptions, viewSettings.isEink),
@@ -813,10 +918,10 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           setIsPlaying(false);
         }
         setTtsClientsInitialized(true);
-        setTTSEnabled(bookKey, true);
       } catch (error) {
         setShowIndicator(false);
         setIsPlaying(false);
+        setTTSEnabled(bookKey, false);
         eventDispatcher.dispatch('toast', {
           message: _('TTS not supported for this document'),
           type: 'error',
