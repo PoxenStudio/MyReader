@@ -306,6 +306,10 @@ export class TTSController extends EventTarget {
       doc =
         (await bindings.documentProvider?.createSectionDocument(sectionIndex)) ??
         (section?.createDocument ? await section.createDocument() : undefined);
+      // Documents built for TTS need the language fallback the live rendered
+      // document already carries; otherwise non-English chapters lose lang
+      // and voice selection degrades.
+      if (doc) this.#ensureSectionLang(doc);
     }
     if (!doc) {
       console.warn('[TTS] attachView: no document for section', sectionIndex);
@@ -499,6 +503,7 @@ export class TTSController extends EventTarget {
   }
 
   async #initTTSForSection(sectionIndex: number): Promise<boolean> {
+    const epoch = this.#attachEpoch;
     const sections = this.view.book.sections;
     if (!sections || sectionIndex < 0 || sectionIndex >= sections.length) {
       return false;
@@ -518,6 +523,9 @@ export class TTSController extends EventTarget {
     const primary = this.#getPrimaryContent();
     if (primary?.index !== sectionIndex) {
       await this.onSectionChange?.(sectionIndex);
+      // The view detached (book closed) or a newer attach superseded this one
+      // while navigation was in flight: never write TTS state into a dead view.
+      if (epoch !== this.#attachEpoch) return false;
     }
 
     // Re-read AFTER navigation: the old code captured the primary section
@@ -534,6 +542,7 @@ export class TTSController extends EventTarget {
     // Don't mutate a live rendered document; only documents built for TTS
     // need the language fallback.
     if (!liveDoc) this.#ensureSectionLang(doc);
+    if (epoch !== this.#attachEpoch) return false;
 
     // The section changed (or is initializing): any previous timeline maps a
     // dead document.
@@ -551,6 +560,7 @@ export class TTSController extends EventTarget {
 
     const { TTS } = await import('foliate-js/tts.js');
     const { textWalker } = await import('foliate-js/text-walker.js');
+    if (epoch !== this.#attachEpoch) return false;
     let granularity: TTSGranularity = this.view.language.isCJK ? 'sentence' : 'word';
     const supportedGranularities = this.ttsClient.getGranularities();
     if (!supportedGranularities.includes(granularity)) {
@@ -1490,6 +1500,8 @@ export class TTSController extends EventTarget {
     this.#currentSentenceIndex = -1;
     this.#ttsDoc = null;
     this.#tts = null;
+    this.#documentProvider?.clear();
+    this.#documentProvider = null;
     this.view.tts = null;
     if (this.ttsWebClient.initialized) {
       await this.ttsWebClient.shutdown();

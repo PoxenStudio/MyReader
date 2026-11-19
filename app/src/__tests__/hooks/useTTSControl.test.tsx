@@ -242,6 +242,7 @@ vi.mock('@/utils/ttsTime', () => ({
 
 // Imports must come AFTER vi.mock calls so they pick up the mocked modules.
 import { useTTSControl } from '@/app/reader/hooks/useTTSControl';
+import { consumeTtsNavigation } from '@/services/tts/ttsContent';
 import { ttsMediaBridge } from '@/services/tts/ttsMediaBridge';
 import { eventDispatcher } from '@/utils/event';
 import { useReaderStore } from '@/store/readerStore';
@@ -292,6 +293,49 @@ describe('useTTSControl concurrent tts-speak events', () => {
       while (pendingInitResolvers.length > 0) pendingInitResolvers.shift()!();
       await Promise.all([p1, p2]);
     });
+  });
+});
+
+describe('useTTSControl stop during start', () => {
+  beforeEach(() => {
+    ttsControllerInstances.length = 0;
+    pendingInitResolvers.length = 0;
+    mockSessionManager.release.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('tears down the interrupted controller and never speaks', async () => {
+    render(<Harness />);
+
+    let speakDone: Promise<unknown> | undefined;
+    await act(async () => {
+      speakDone = eventDispatcher.dispatch('tts-speak', { bookKey: 'book-1' });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(ttsControllerInstances.length).toBe(1);
+    });
+
+    await act(async () => {
+      await eventDispatcher.dispatch('tts-stop', { bookKey: 'book-1' });
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+
+    await act(async () => {
+      while (pendingInitResolvers.length > 0) pendingInitResolvers.shift()!();
+      await speakDone;
+    });
+
+    const controller = ttsControllerInstances[0] as {
+      shutdown: ReturnType<typeof vi.fn>;
+      speak: ReturnType<typeof vi.fn>;
+    };
+    // The stop owns the shutdown; the interrupted start must not resurrect
+    // the session or tear the controller down a second time.
+    expect(controller.shutdown).toHaveBeenCalledTimes(1);
+    expect(controller.speak).not.toHaveBeenCalled();
+    expect(mockSessionManager.release).toHaveBeenCalled();
   });
 });
 
@@ -497,6 +541,9 @@ describe('useTTSControl handleHighlightMark cross-section navigation', () => {
 
     expect(mockView.goTo).toHaveBeenCalledWith('epubcfi(/6/8!/4/2)');
     expect(mockView.renderer.scrollToAnchor).not.toHaveBeenCalled();
+    // The relocate this goTo triggers must be treated as TTS-driven so the
+    // page-start CFI does not overwrite the spoken location.
+    expect(consumeTtsNavigation('book-1', { index: 1, cfi: 'epubcfi(/6/8!/4/2)' })).toBe(true);
   });
 
   it('keeps in-section behaviour: scrolls via renderer without navigating', async () => {

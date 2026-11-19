@@ -40,7 +40,7 @@ vi.mock('@/utils/misc', () => ({
 }));
 
 // These are transitive imports needed by readerStore
-vi.mock('@/services/nav', () => ({ updateToc: vi.fn() }));
+vi.mock('@/services/nav', () => ({ updateToc: vi.fn(), findTocItemBS: vi.fn(() => null) }));
 vi.mock('@/utils/book', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/utils/book')>();
   return {
@@ -75,6 +75,7 @@ vi.mock('@/services/rss/feedReader', () => ({
 import { useReaderStore } from '@/store/readerStore';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { clearBookProgress, getBookProgress, setBookProgress } from '@/store/readerProgressStore';
+import { findTocItemBS } from '@/services/nav';
 import { getBookHash } from '@/utils/book';
 import type { BookProgress } from '@/types/book';
 
@@ -306,6 +307,48 @@ describe('readerStore', () => {
         range,
         pageinfo: { current: 2, total: 10 },
       });
+      clearBookProgress('book-1');
+    });
+
+    test('refreshes the section index and label from the spoken CFI', () => {
+      seedViewState('book-1');
+      useReaderStore.getState().setView('book-1', {
+        resolveCFI: vi.fn(() => ({ index: 4 })),
+      } as unknown as FoliateView);
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: {
+          [id]: {
+            config: { location: 'old-cfi' },
+            bookDoc: { toc: [{ id: 0, label: 'Chapter 5', href: 'c5.xhtml', index: 4 }] },
+          },
+        },
+      } as never);
+      vi.mocked(findTocItemBS).mockReturnValue({
+        id: 0,
+        label: 'Chapter 5',
+        href: 'c5.xhtml',
+        index: 4,
+      });
+      setBookProgress('book-1', {
+        location: 'old-cfi',
+        section: { current: 0, total: 9 },
+        index: 0,
+        sectionLabel: 'Chapter 1',
+        sectionHref: 'c1.xhtml',
+        pageinfo: { current: 2, total: 10 },
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'epubcfi(/6/10!/4/2/2:5)', null);
+
+      expect(getBookProgress('book-1')).toMatchObject({
+        index: 4,
+        section: { current: 4, total: 9 },
+        sectionLabel: 'Chapter 5',
+        sectionHref: 'c5.xhtml',
+        pageinfo: { current: 2, total: 10 },
+      });
+      expect(findTocItemBS).toHaveBeenCalledWith(expect.any(Array), 'epubcfi(/6/10!/4/2/2:5)');
       clearBookProgress('book-1');
     });
   });

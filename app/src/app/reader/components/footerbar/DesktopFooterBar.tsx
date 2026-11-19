@@ -137,6 +137,7 @@ const DesktopFooterBar: React.FC<FooterBarChildProps> = ({
         max={100}
         aria-label={_('Jump to Location')}
         value={progressValue}
+        disabled={!!viewState?.ttsEnabled}
         onChange={(e) => handleProgressChange(parseInt(e.target.value, 10))}
       />
       <Button

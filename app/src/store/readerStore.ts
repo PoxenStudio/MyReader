@@ -21,7 +21,13 @@ import {
 import type { FileSystem } from '@/types/system';
 import { isFeedBookUrl, parseFeedBookUrl } from '@/services/rss/feedBookUrl';
 import { openFeedBookDoc } from '@/services/rss/feedReader';
-import { BOOK_NAV_VERSION, computeBookNav, hydrateBookNav, updateToc } from '@/services/nav';
+import {
+  BOOK_NAV_VERSION,
+  computeBookNav,
+  findTocItemBS,
+  hydrateBookNav,
+  updateToc,
+} from '@/services/nav';
 import {
   formatAuthors,
   formatTitle,
@@ -589,10 +595,28 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     }
     const progress = getBookProgress(key);
     if (progress) {
+      // Sentence CFIs are the location authority while listening, and the
+      // relocate path that normally refreshes the section fields is
+      // suppressed. Keep the chapter index/label in sync or the lock-screen
+      // title stays on the old chapter and the next TTS start pairs a
+      // new-chapter range with a stale section index.
+      const bookData = useBookDataStore.getState().booksData[id];
+      let index = progress.index;
+      try {
+        index = get().getView(key)?.resolveCFI(location)?.index ?? index;
+      } catch {
+        // Unresolvable CFI: keep the last known section index.
+      }
+      const tocItem = bookData?.bookDoc?.toc ? findTocItemBS(bookData.bookDoc.toc, location) : null;
       setBookProgress(key, {
         ...progress,
         location,
         range: range ?? progress.range,
+        index,
+        section:
+          progress.section != null ? { ...progress.section, current: index } : progress.section,
+        sectionLabel: tocItem?.label ?? progress.sectionLabel,
+        sectionHref: tocItem?.href ?? progress.sectionHref,
       } as BookProgress);
     }
   },
