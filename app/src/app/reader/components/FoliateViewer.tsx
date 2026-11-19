@@ -214,7 +214,13 @@ const FoliateViewer: React.FC<{
       // Resizing / re-pagination re-anchors to the same text position; its
       // page-start CFI must not become the synced progress. While listening,
       // sentence marks own progress; stopping TTS still produces one reflow.
-      if (getViewState(bookKey)?.ttsEnabled) return;
+      if (getViewState(bookKey)?.ttsEnabled) {
+        // A TTS goTo's navigation relocate can coalesce with this follow-up
+        // anchor reflow; drop the guard here or it would swallow the user's
+        // next page turn (progress is still not committed for this event).
+        consumeTtsNavigation(bookKey, relocateTargetOf(detail));
+        return;
+      }
       if (skipNextAnchorRelocateRef.current) {
         skipNextAnchorRelocateRef.current = false;
         return;

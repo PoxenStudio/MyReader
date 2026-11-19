@@ -529,6 +529,9 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     const viewState = get().viewStates[key];
     if (!viewState || !bookData) return;
 
+    // Any real relocate invalidates an in-flight TTS CFI derivation; it would
+    // otherwise write the previous position back over the user's page turn.
+    progressLocationTokens.set(key, (progressLocationTokens.get(key) ?? 0) + 1);
     const pageInfo = bookData.isFixedLayout ? section : pageinfo;
     const progress: [number, number] = [pageInfo.current + 1, pageInfo.total];
     updateLibraryReadingProgress(id, pageInfo);
@@ -642,6 +645,9 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
             if (progressLocationTokens.get(key) !== token) return;
             const current = getBookProgress(key);
             if (!current) return;
+            // A relocate (user page turn / stop restore) moved the location
+            // while this was in flight; its write wins.
+            if (current.location !== location) return;
             const isFixedLayout = bookData?.isFixedLayout ?? false;
             const pageInfo = isFixedLayout ? cfiProgress.section : cfiProgress.location;
             updateLibraryReadingProgress(id, pageInfo);
