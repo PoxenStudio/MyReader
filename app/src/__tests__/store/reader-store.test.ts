@@ -446,6 +446,10 @@ describe('readerStore', () => {
         pageinfo: { current: 3, total: 10 },
         index: 1,
       });
+      expect(
+        (useBookDataStore.getState().booksData[id] as { config: { location: string } }).config
+          .location,
+      ).toBe('cfi-user');
       clearBookProgress('book-1');
     });
   });

@@ -165,6 +165,9 @@ export class TTSController extends EventTarget {
   // newer attach) supersedes them.
   #attached = true;
   #attachEpoch = 0;
+  // Terminal latch: section transitions/retries must not resurrect a session
+  // after the user stopped it (shutdown).
+  #shuttingDown = false;
   // Controller-owned foliate TTS text instance. view.close() nulls view.tts,
   // so the controller keeps its own handle (mirrored to view.tts while a view
   // is attached, for external consumers).
@@ -350,8 +353,14 @@ export class TTSController extends EventTarget {
       this.#ttsGranularity,
     );
 
-    // A detach (new view closed) or a newer attach superseded this one.
+    // A detach (new view closed), shutdown, or a newer attach superseded this
+    // one. Also re-check the section: headless playback can commit a new
+    // index during the dynamic import.
     if (epoch !== this.#attachEpoch) return;
+    if (this.#ttsSectionIndex >= 0 && this.#ttsSectionIndex !== sectionIndex) {
+      console.warn('[TTS] attachView: section advanced during import; skipping swap');
+      return;
+    }
 
     // Captured at swap time: forward() may have advanced the old instance
     // during prep, and a seed captured earlier would replay the previous one.
@@ -533,6 +542,7 @@ export class TTSController extends EventTarget {
   }
 
   async #initTTSForSection(sectionIndex: number): Promise<'ok' | 'empty' | 'superseded'> {
+    if (this.#shuttingDown) return 'superseded';
     const epoch = this.#attachEpoch;
     const sections = this.view.book.sections;
     if (!sections || sectionIndex < 0 || sectionIndex >= sections.length) {
@@ -948,6 +958,7 @@ export class TTSController extends EventTarget {
     // it. Returning silently would leave the session stopped at the chapter
     // boundary even though the UI still shows playback.
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (this.#shuttingDown) return;
       const result = await initSection();
       if (result === 'superseded') continue;
       if (result === 'ok') {
@@ -968,6 +979,7 @@ export class TTSController extends EventTarget {
 
   async #resumeNextSectionAfterAttach(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (this.#shuttingDown) return;
       const result = await this.#initTTSForNextSection();
       if (result === 'superseded') continue;
       if (result === 'ok') {
@@ -1553,6 +1565,10 @@ export class TTSController extends EventTarget {
   }
 
   async shutdown() {
+    this.#shuttingDown = true;
+    // Invalidate any attachView/init that is still in flight: revive after
+    // shutdown must be impossible.
+    this.#attachEpoch++;
     stopAudioKeepAlive();
     await this.stop();
     this.#clearAllHighlights();

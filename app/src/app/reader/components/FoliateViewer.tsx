@@ -144,6 +144,9 @@ const FoliateViewer: React.FC<{
   const ttsClearanceRef = useRef(0);
   const skipNextAnchorRelocateRef = useRef(false);
   const rendererRelocateReasonRef = useRef<string | undefined>(undefined);
+  // Set when a navigation-ish renderer relocate arrives before the rAF commit;
+  // an anchor commit that swallowed it may then drop a leftover TTS guard.
+  const sawNavRelocateRef = useRef(false);
 
   const autoScroll = useAutoScroll(bookKey, viewRef);
   const { registerSpeedListeners, overlayVisible: speedOverlayVisible } =
@@ -204,6 +207,8 @@ const FoliateViewer: React.FC<{
     // event handler latches it before this rAF/microtask commit runs.
     const reason = rendererRelocateReasonRef.current;
     rendererRelocateReasonRef.current = undefined;
+    const sawNavRelocate = sawNavRelocateRef.current;
+    sawNavRelocateRef.current = false;
     if (reason && reason !== 'anchor') skipNextAnchorRelocateRef.current = false;
     // TTS-driven goTo/section-change relocates must not overwrite the sentence
     // CFI with the page-start position. Only the relocate that matches the
@@ -216,9 +221,10 @@ const FoliateViewer: React.FC<{
       // sentence marks own progress; stopping TTS still produces one reflow.
       if (getViewState(bookKey)?.ttsEnabled) {
         // A TTS goTo's navigation relocate can coalesce with this follow-up
-        // anchor reflow; drop the guard here or it would swallow the user's
-        // next page turn (progress is still not committed for this event).
-        consumeTtsNavigation(bookKey, relocateTargetOf(detail));
+        // anchor reflow; drop the guard only when a navigation relocate was
+        // seen first — an anchor that arrives before it must leave the guard
+        // for the pending navigation commit.
+        if (sawNavRelocate) consumeTtsNavigation(bookKey, relocateTargetOf(detail));
         return;
       }
       if (skipNextAnchorRelocateRef.current) {
@@ -541,6 +547,13 @@ const FoliateViewer: React.FC<{
     // The view-level relocate re-emitted by foliate has no `reason`; latch it
     // from the renderer event before the rAF/microtask progress commit reads it.
     rendererRelocateReasonRef.current = detail.reason;
+    if (
+      detail.reason === 'navigation' ||
+      detail.reason === 'scroll' ||
+      detail.reason === 'container-scroll'
+    ) {
+      sawNavRelocateRef.current = true;
+    }
     if (detail.reason !== 'scroll' && detail.reason !== 'page') return;
 
     // First user-initiated navigation after a deep-link landing — promote
