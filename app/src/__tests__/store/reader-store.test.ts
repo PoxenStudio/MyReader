@@ -393,6 +393,61 @@ describe('readerStore', () => {
       });
       clearBookProgress('book-1');
     });
+
+    test('drops a stale CFI derivation when the user turns the page', async () => {
+      seedViewState('book-1');
+      let resolveCfi!: (value: unknown) => void;
+      const cfiProgress = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveCfi = resolve;
+          }),
+      );
+      useReaderStore.getState().setView('book-1', {
+        resolveCFI: vi.fn(() => ({ index: 4 })),
+        getCFIProgress: cfiProgress,
+      } as unknown as FoliateView);
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({ booksData: { [id]: { config: {} } } } as never);
+      setBookProgress('book-1', {
+        location: 'old',
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 0, total: 9 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'cfi-spoken', null);
+      // The user turns a page before the async derivation resolves.
+      useReaderStore
+        .getState()
+        .setProgress(
+          'book-1',
+          'cfi-user',
+          { id: 0, label: 'Ch', href: 'c.xhtml', index: 0 } as never,
+          null,
+          { current: 1, total: 9 },
+          { current: 3, total: 10 },
+          { section: 1, total: 2 } as never,
+          null as never,
+          0.3,
+        );
+
+      resolveCfi({
+        fraction: 0.9,
+        section: { current: 8, total: 9 },
+        location: { current: 90, next: 91, total: 100 },
+        time: { section: 1, total: 2 },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(getBookProgress('book-1')).toMatchObject({
+        location: 'cfi-user',
+        pageinfo: { current: 3, total: 10 },
+        index: 1,
+      });
+      clearBookProgress('book-1');
+    });
   });
 
   describe('setIsLoading', () => {

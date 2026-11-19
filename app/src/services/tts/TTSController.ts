@@ -322,12 +322,13 @@ export class TTSController extends EventTarget {
 
     // Headless playback may advance a section while this prep is in flight.
     // Re-resolve instead of pairing a stale document with the controller's
-    // current section index.
-    let sectionIndex = Math.max(this.#ttsSectionIndex, 0);
+    // current section index. A not-yet-initialized controller (-1) adopts the
+    // first section instead of failing the equality check.
+    let sectionIndex = this.#ttsSectionIndex >= 0 ? this.#ttsSectionIndex : 0;
     let doc = await buildDoc(sectionIndex);
     for (let attempt = 0; attempt < 2 && epoch === this.#attachEpoch; attempt++) {
-      if (this.#ttsSectionIndex === sectionIndex) break;
-      sectionIndex = Math.max(this.#ttsSectionIndex, 0);
+      if (this.#ttsSectionIndex < 0 || this.#ttsSectionIndex === sectionIndex) break;
+      sectionIndex = this.#ttsSectionIndex;
       doc = await buildDoc(sectionIndex);
     }
     if (epoch !== this.#attachEpoch) return;
@@ -335,7 +336,7 @@ export class TTSController extends EventTarget {
       console.warn('[TTS] attachView: no document for section', sectionIndex);
       return;
     }
-    if (this.#ttsSectionIndex !== sectionIndex) {
+    if (this.#ttsSectionIndex >= 0 && this.#ttsSectionIndex !== sectionIndex) {
       console.warn('[TTS] attachView: section kept advancing during prep; skipping swap');
       return;
     }
@@ -362,6 +363,7 @@ export class TTSController extends EventTarget {
     this.onSectionChange = bindings.onSectionChange;
     this.#documentProvider = bindings.documentProvider ?? null;
     this.#attached = true;
+    this.#ttsSectionIndex = sectionIndex;
     const lastRange = oldTts?.getLastRange?.();
     if (lastRange) {
       try {
@@ -942,24 +944,39 @@ export class TTSController extends EventTarget {
     initSection: () => Promise<'ok' | 'empty' | 'superseded'>,
     isPlaying: boolean,
   ) {
-    const result = await initSection();
-    if (result === 'superseded') {
-      // A newer view attachment took over mid-transition; the session stays
-      // alive and resumes from the adopted section. Treating this as
-      // "end of book" would stop playback right after the user reopens.
+    // 'superseded' means a newer view attachment is live now; retry against
+    // it. Returning silently would leave the session stopped at the chapter
+    // boundary even though the UI still shows playback.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await initSection();
+      if (result === 'superseded') continue;
+      if (result === 'ok') {
+        if (isPlaying) {
+          this.#speak(this.#getTts()?.start());
+        } else {
+          this.#getTts()?.start();
+        }
+      } else {
+        // No adjacent section in this direction: the session has run out of
+        // content (end of book on forward, start of book on backward).
+        this.#terminate('ended');
+        await this.stop();
+      }
       return;
     }
-    if (result === 'ok') {
-      if (isPlaying) {
-        this.#speak(this.#getTts()?.start());
+  }
+
+  async #resumeNextSectionAfterAttach(): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await this.#initTTSForNextSection();
+      if (result === 'superseded') continue;
+      if (result === 'ok') {
+        await this.forward();
       } else {
-        this.#getTts()?.start();
+        this.#terminate('ended');
+        await this.stop();
       }
-    } else {
-      // No adjacent section in this direction: the session has run out of
-      // content (end of book on forward, start of book on backward).
-      this.#terminate('ended');
-      await this.stop();
+      return;
     }
   }
 
@@ -1048,8 +1065,11 @@ export class TTSController extends EventTarget {
               // End of book: nothing left to speak.
               this.#terminate('ended');
               await this.stop();
+            } else {
+              // A fresh attachment superseded the transition; retry on it so
+              // playback does not go silent at the chapter boundary.
+              await this.#resumeNextSectionAfterAttach();
             }
-            // 'superseded': a fresh attachment owns the session now.
           }
           console.log('[TTS] no SSML, skipping for', this.#nossmlCnt);
           return;
