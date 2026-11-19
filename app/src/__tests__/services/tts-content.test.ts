@@ -1,9 +1,11 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  consumeTtsNavigation,
   findContentByIndex,
   isChunkDocument,
   isContentVisible,
   isRangeVisibleInContent,
+  markTtsNavigation,
   TTSContent,
 } from '@/services/tts/ttsContent';
 
@@ -33,6 +35,10 @@ const makeRenderer = (r: ReturnType<typeof rect>) =>
   ({ getBoundingClientRect: () => r }) as unknown as Element;
 
 describe('ttsContent', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   test('detects chunk documents by the foliate placeholder marker', () => {
     const chunk = new DOMParser().parseFromString(
       '<html><body><div data-foliate-chunk="1"></div><p>tail</p></body></html>',
@@ -89,5 +95,33 @@ describe('ttsContent', () => {
     } as unknown as Range;
     expect(isRangeVisibleInContent(renderer, content, visibleRange)).toBe(true);
     expect(isRangeVisibleInContent(renderer, content, offPageRange)).toBe(false);
+  });
+
+  test('only consumes the relocate that matches the TTS navigation target', () => {
+    markTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:10)' });
+    // A user page turn inside the time window must keep writing progress:
+    // different section, or a start position past the requested target.
+    expect(consumeTtsNavigation('book-guard', { index: 5, cfi: 'epubcfi(/6/12!/4/2:0)' })).toBe(
+      false,
+    );
+    expect(consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:40)' })).toBe(
+      false,
+    );
+    // The TTS relocate lands on the page that contains the target.
+    expect(consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:2)' })).toBe(
+      true,
+    );
+    // One-shot: the guard must not swallow the next user relocate.
+    expect(consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:2)' })).toBe(
+      false,
+    );
+  });
+
+  test('expires a guard whose navigation never produced a relocate', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(0));
+    markTtsNavigation('book-expired', { index: 2 });
+    vi.setSystemTime(new Date(6000));
+    expect(consumeTtsNavigation('book-expired', { index: 2 })).toBe(false);
   });
 });

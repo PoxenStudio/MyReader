@@ -172,7 +172,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
               total: total,
             })
           : '',
-        timeLeftStr,
+        ttsEnabled ? '' : timeLeftStr,
         ttsEnabled ? '' : pagesLeftStr,
       ]
         .filter(Boolean)
@@ -223,7 +223,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
           >
             {viewSettings.showRemainingTime ? (
               <span className={clsx('time-left-label text-start', pillClass)}>{timeLeftStr}</span>
-            ) : !ttsEnabled && viewSettings.showRemainingPages && showPagesLeft ? (
+            ) : viewSettings.showRemainingPages && showPagesLeft ? (
               <span className={clsx('text-start', pillClass)}>
                 {localize ? (
                   remainingInBook ? (

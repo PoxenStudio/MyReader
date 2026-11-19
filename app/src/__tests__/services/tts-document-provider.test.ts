@@ -76,6 +76,35 @@ describe('TTSDocumentProvider', () => {
     expect(transformContent).not.toHaveBeenCalled();
   });
 
+  test('holds and releases a loader reference around loadContent', async () => {
+    const load = vi.fn().mockResolvedValue('blob:one');
+    const unload = vi.fn();
+    const view = {
+      renderer: { getContents: () => [] },
+      book: {
+        transformTarget: new EventTarget(),
+        sections: [
+          {
+            href: 's1.xhtml',
+            load,
+            unload,
+            loadContent: vi.fn().mockResolvedValue('<html><body><p>loaded</p></body></html>'),
+          },
+        ],
+      },
+    } as unknown as FoliateView;
+    const loaderProvider = new TTSDocumentProvider({
+      view,
+      createTransformContext: makeContext,
+      getTransformSignature: () => signature,
+    });
+
+    await loaderProvider.createSectionDocument(0, { preferLive: false, cache: false });
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(unload).toHaveBeenCalledTimes(1);
+  });
+
   test('transforms raw text through the shared pipeline', async () => {
     transformContent.mockResolvedValue('<html><body><p>transformed two</p></body></html>');
     const result = await provider.createSectionDocument(2, { preferLive: false });

@@ -72,11 +72,27 @@ export class TTSDocumentProvider {
     if (!section) return null;
 
     let doc: Document | null = null;
+    // loadContent() has no matching unload of its own; when it had to load an
+    // uncached section it pins that section's HTML + blob URLs until unload().
+    // Hold a loader reference across it and release it below, so enumerating
+    // every section for a whole-book download does not keep the whole book in
+    // memory (and never upsets the view's own reference counting).
+    let loadHeld = false;
     try {
       // The live view renders `loadContent()` (the loader's serialized XHTML
       // after href replacement and the data-event transforms), so this is the
       // exact text basis a CFI from the rendered document expects.
-      const html = await section.loadContent?.();
+      if (section.load) {
+        try {
+          await section.load();
+          loadHeld = true;
+        } catch {
+          loadHeld = false;
+        }
+      }
+      // A section with load() but a failed load must not fall through to
+      // loadContent(), which would take an unbalanced loader reference.
+      const html = section.load && !loadHeld ? undefined : await section.loadContent?.();
       if (html) doc = parseBookDocument(html);
 
       // Formats without a loader path: raw text + the shared transform
@@ -97,6 +113,8 @@ export class TTSDocumentProvider {
       }
     } catch (err) {
       console.warn('[TTS] failed to build a transformed section document', index, err);
+    } finally {
+      if (loadHeld) section.unload?.();
     }
 
     if (doc && cache) this.#cache.set(index, { signature, doc });

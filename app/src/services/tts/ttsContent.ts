@@ -1,7 +1,14 @@
+import { compare as compareCFI } from 'foliate-js/epubcfi.js';
+
 export interface TTSContent {
   doc: Document;
   index?: number;
   overlayer?: unknown;
+}
+
+export interface TtsNavigationTarget {
+  index?: number;
+  cfi?: string;
 }
 
 // foliate-js marks the hidden stand-ins of a chunked section; a chunk document
@@ -9,19 +16,39 @@ export interface TTSContent {
 export const isChunkDocument = (doc: Document): boolean =>
   !!doc.querySelector('[data-foliate-chunk]');
 
-const ttsNavigationGuards = new Map<string, number>();
+const ttsNavigationGuards = new Map<string, TtsNavigationTarget & { at: number }>();
 
-export const markTtsNavigation = (bookKey: string): void => {
-  ttsNavigationGuards.set(bookKey, Date.now());
+export const markTtsNavigation = (bookKey: string, target: TtsNavigationTarget = {}): void => {
+  ttsNavigationGuards.set(bookKey, { ...target, at: Date.now() });
 };
 
 // TTS-driven goTo/section-change relocates must not write page-start CFIs into
-// progress. Expire the guard so a no-op navigation cannot swallow a later
-// user page turn indefinitely.
-export const consumeTtsNavigation = (bookKey: string): boolean => {
-  const at = ttsNavigationGuards.get(bookKey);
+// progress. Match the requested target so a user page turn inside the same
+// time window still commits; expire the guard so a no-op navigation cannot
+// swallow a later user relocate indefinitely.
+export const consumeTtsNavigation = (
+  bookKey: string,
+  relocated: { index?: number; cfi?: string } = {},
+): boolean => {
+  const guard = ttsNavigationGuards.get(bookKey);
+  if (!guard) return false;
+  if (Date.now() - guard.at >= 5000) {
+    ttsNavigationGuards.delete(bookKey);
+    return false;
+  }
+  if (guard.index != null && relocated.index != null && guard.index !== relocated.index) {
+    return false;
+  }
+  if (guard.cfi && relocated.cfi) {
+    try {
+      // The page that contains the target starts at or before it.
+      if (compareCFI(relocated.cfi, guard.cfi) > 0) return false;
+    } catch {
+      // Unparseable CFI: fall back to the time window.
+    }
+  }
   ttsNavigationGuards.delete(bookKey);
-  return at != null && Date.now() - at < 5000;
+  return true;
 };
 
 export const findContentByIndex = (

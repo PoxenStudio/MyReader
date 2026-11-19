@@ -70,6 +70,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   const isStartingTTSRef = useRef(false);
   const ttsEpochRef = useRef(0);
   const startAbortRef = useRef<AbortController | null>(null);
+  const restoreAbortRef = useRef<AbortController | null>(null);
 
   const waitForLayoutApplied = useCallback(
     (key: string, expected: boolean, signal?: AbortSignal) =>
@@ -100,16 +101,27 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         // FoliateViewer dispatches this on the async bus.
         eventDispatcher.on('reader-layout-applied', onApplied);
         signal?.addEventListener('abort', onAbort, { once: true });
-        // Safety net: never leave the start/stop path waiting forever if the
-        // layout effect never runs (no view / missing settings).
+        // Safety net: the layout effect dispatches this synchronously from the
+        // margin update, so a short timeout covers "no view / missing
+        // settings" without leaving the mini player showing "playing" silently
+        // for half a minute.
         timer = setTimeout(() => {
           console.warn('[TTS] reader-layout-applied timed out; continuing');
           cleanup();
           resolve();
-        }, 30_000);
+        }, 2_000);
       }),
     [],
   );
+
+  // The stop-restore wait outlives the hook only long enough to settle the
+  // reflow; cutting it on unmount keeps the closed book from being written.
+  useEffect(() => {
+    return () => {
+      restoreAbortRef.current?.abort();
+      restoreAbortRef.current = null;
+    };
+  }, []);
 
   const createDocumentProvider = useCallback(
     (view: FoliateView) =>
@@ -138,6 +150,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           const viewSettings = getViewSettings(bookKey);
           const bookData = getBookData(bookKey);
           if (!viewSettings) return '';
+          const rect = view.renderer?.getBoundingClientRect?.();
           return JSON.stringify({
             overrideLayout: viewSettings.overrideLayout,
             convertChineseVariant: viewSettings.convertChineseVariant,
@@ -145,6 +158,8 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
             proofreadRules: viewSettings.proofreadRules,
             allowScript: viewSettings.allowScript,
             vertical: viewSettings.vertical,
+            width: rect?.width,
+            height: rect?.height,
             primaryLanguage: bookData?.book?.primaryLanguage,
             userLocale: getLocale(),
             globalProofreadRules: getMergedRules(bookKey),
@@ -448,11 +463,14 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         // the last page of the previous chapter while audio continues. Drive
         // navigation from the highlight cfi directly, stamping the timestamp
         // so the "back-to-TTS" button stays suppressed while progress.location
-        // catches up. Skip only when the user is actively selecting text.
+        // catches up. Skip when the user paged away (back-to-TTS owns the
+        // return) or is actively selecting text.
         if (selectionActive) return;
+        if (!preview && !followingTTSLocationRef.current) return;
         sectionChangingTimestampRef.current = Date.now();
         followingTTSLocationRef.current = true;
         if (!preview) setProgressLocation(bookKey, cfi, null);
+        markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
         view.goTo?.(cfi);
         return;
       }
@@ -477,7 +495,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       // non-primary iframe would mix iframe-local rects with paginator coords.
       if (!isPrimary) {
         if (!isRangeVisibleInContent(view.renderer, content, range)) {
-          markTtsNavigation(bookKey);
+          markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
           view.goTo?.(cfi);
         }
         return;
@@ -534,7 +552,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       if (isPrimary) {
         view.renderer.scrollToAnchor?.(wordRange);
       } else {
-        markTtsNavigation(bookKey);
+        markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
         view.goTo?.(cfi);
       }
     };
@@ -634,7 +652,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
     if (!view || !ttsLocation) return;
 
     const resolved = view.resolveNavigation(ttsLocation);
-    markTtsNavigation(bookKey);
+    markTtsNavigation(bookKey, { index: resolved.index, cfi: ttsLocation });
     view.renderer.goTo?.(resolved);
   };
 
@@ -722,7 +740,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       if (!sectionVisible) {
         // Await so TTSController's `await onSectionChange` doesn't proceed to
         // speak the new section before the view has finished navigating to it.
-        markTtsNavigation(bookKey);
+        markTtsNavigation(bookKey, { index: sectionIndex });
         await view.renderer.goTo?.(resolved);
       }
     },
@@ -782,14 +800,25 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       // Removing the mini-player clearance reflows once; restore the last
       // spoken CFI after that layout settles so the stop transition cannot
       // leave a page-start position in progress.
+      const wantsRestore =
+        !!lastTtsLocation && followingTTSLocationRef.current && getViewState(bookKey)?.ttsEnabled;
+      restoreAbortRef.current?.abort();
+      restoreAbortRef.current = null;
+      const restoreAbort = wantsRestore ? new AbortController() : null;
       const restoreAfterLayout =
-        lastTtsLocation && followingTTSLocationRef.current && getViewState(bookKey)?.ttsEnabled
-          ? waitForLayoutApplied(bookKey, false)
+        restoreAbort && lastTtsLocation
+          ? waitForLayoutApplied(bookKey, false, restoreAbort.signal)
           : null;
+      if (restoreAbort) restoreAbortRef.current = restoreAbort;
       setTTSEnabled(bookKey, false);
-      if (restoreAfterLayout && lastTtsLocation) {
+      if (restoreAfterLayout && lastTtsLocation && restoreAbort) {
         void restoreAfterLayout.then(() => {
+          if (restoreAbort.signal.aborted) return;
+          if (restoreAbortRef.current === restoreAbort) restoreAbortRef.current = null;
           if (ttsEpochRef.current !== stopEpoch) return;
+          // A page turn during the wait means the user picked a new position;
+          // restoring would drag them back to the last spoken sentence.
+          if (getProgress(bookKey)?.location !== lastTtsLocation) return;
           setProgressLocation(bookKey, lastTtsLocation, null);
         });
       }
@@ -828,6 +857,9 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
     if (isStartingTTSRef.current) return;
     isStartingTTSRef.current = true;
     const sessionEpoch = ++ttsEpochRef.current;
+    // A pending stop-restore would fight the new session for progress.
+    restoreAbortRef.current?.abort();
+    restoreAbortRef.current = null;
 
     try {
       const view = getView(bookKey);
@@ -876,6 +908,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         ttsControllerRef.current = null;
       }
 
+      let ttsController: TTSController | null = null;
       try {
         // Gesture-path audio unlocks, BEFORE any network/plugin await: WebKit
         // rejects AudioContext.resume() outside the user-gesture window, and
@@ -910,7 +943,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           !ttsAlreadyEnabled && getViewState(bookKey)?.ttsEnabled
             ? waitForLayoutApplied(bookKey, true, layoutAbort.signal)
             : Promise.resolve();
-        const ttsController = new TTSController(
+        ttsController = new TTSController(
           appService,
           view,
           !!user?.id,
@@ -932,21 +965,40 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           metadataMode: viewSettings.ttsMediaMetadata ?? 'sentence',
           getSectionLabel: () => getProgress(bookKey)?.sectionLabel,
         });
+        const startController = ttsController;
+        // A stop that lands during the awaits below may have captured the ref
+        // before this controller existed; if the ref still points at it, its
+        // init/session must be torn down here or clients leak while the UI
+        // already shows a stopped session.
+        const isStaleStart = () =>
+          sessionEpoch !== ttsEpochRef.current || ttsControllerRef.current !== startController;
+        const cleanupStaleStart = () => {
+          if (ttsControllerRef.current !== startController) return;
+          ttsControllerRef.current = null;
+          setTtsController(null);
+          void startController.shutdown().catch(() => {});
+          const bookHash = getBookHashFromKey(bookKey);
+          if (ttsSessionManager.getSessionByHash(bookHash)?.controller === startController) {
+            ttsSessionManager.release(bookHash);
+          }
+        };
 
-        await Promise.all([ttsController.init(), layoutApplied]);
-        if (sessionEpoch !== ttsEpochRef.current || ttsControllerRef.current !== ttsController) {
+        await Promise.all([startController.init(), layoutApplied]);
+        if (isStaleStart()) {
+          cleanupStaleStart();
           return;
         }
-        await ttsController.initViewTTS(ttsFromIndex);
-        if (sessionEpoch !== ttsEpochRef.current || ttsControllerRef.current !== ttsController) {
+        await startController.initViewTTS(ttsFromIndex);
+        if (isStaleStart()) {
+          cleanupStaleStart();
           return;
         }
-        ttsController.updateHighlightOptions(
+        startController.updateHighlightOptions(
           getTTSHighlightOptions(viewSettings.ttsHighlightOptions, viewSettings.isEink),
         );
-        ttsController.setHighlightGranularity(viewSettings.ttsHighlightGranularity ?? 'word');
+        startController.setHighlightGranularity(viewSettings.ttsHighlightGranularity ?? 'word');
         const anchoredFromRange = ttsFromRange
-          ? ttsController.anchorRangeInTtsDoc(ttsFromRange)
+          ? startController.anchorRangeInTtsDoc(ttsFromRange)
           : null;
         const ssml =
           oneTime && ttsSpeakRange
@@ -960,18 +1012,28 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           emitPlaybackState('playing');
           setTtsLang(lang);
 
-          ttsController.setLang(lang);
-          ttsController.setRate(viewSettings.ttsRate);
-          ttsController.setSentenceGap(viewSettings.ttsSentenceGap ?? DEFAULT_SENTENCE_GAP_SEC);
-          ttsController.setParagraphGap(viewSettings.ttsParagraphGap ?? DEFAULT_PARAGRAPH_GAP_SEC);
-          ttsController.speak(ssml, oneTime, () => handleStop(bookKey));
-          ttsController.setTargetLang(getTTSTargetLang() || '');
+          startController.setLang(lang);
+          startController.setRate(viewSettings.ttsRate);
+          startController.setSentenceGap(viewSettings.ttsSentenceGap ?? DEFAULT_SENTENCE_GAP_SEC);
+          startController.setParagraphGap(
+            viewSettings.ttsParagraphGap ?? DEFAULT_PARAGRAPH_GAP_SEC,
+          );
+          startController.speak(ssml, oneTime, () => handleStop(bookKey));
+          startController.setTargetLang(getTTSTargetLang() || '');
         } else {
           // Nothing to speak: roll back the optimistic playing state.
           setIsPlaying(false);
         }
         setTtsClientsInitialized(true);
       } catch (error) {
+        // A stop that landed mid-start already reset the UI; surfacing the
+        // init rejection as an error toast would contradict the user's stop.
+        if (
+          sessionEpoch !== ttsEpochRef.current ||
+          (ttsController !== null && ttsControllerRef.current !== ttsController)
+        ) {
+          return;
+        }
         setShowIndicator(false);
         setIsPlaying(false);
         setTTSEnabled(bookKey, false);
