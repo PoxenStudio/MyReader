@@ -208,7 +208,8 @@ const FoliateViewer: React.FC<{
     // TTS-driven goTo/section-change relocates must not overwrite the sentence
     // CFI with the page-start position. Only the relocate that matches the
     // requested target is consumed; a user page turn still commits progress.
-    if (consumeTtsNavigation(bookKey, relocateTargetOf(detail))) return;
+    // Anchor relocates are reflows and belong to the anchor/skip handling.
+    if (reason !== 'anchor' && consumeTtsNavigation(bookKey, relocateTargetOf(detail))) return;
     if (reason === 'anchor') {
       // Resizing / re-pagination re-anchors to the same text position; its
       // page-start CFI must not become the synced progress. While listening,
