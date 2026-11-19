@@ -8,6 +8,11 @@ export interface TTSDocumentProviderOptions {
   view: FoliateView;
   createTransformContext: (content: string, sectionHref?: string) => TransformContext | null;
   getTransformSignature: () => string;
+  // The loader's `loadContent()` is only the rendered text basis while the
+  // reader's data transformers are still bound (the store settings exist).
+  // After the book closes (headless playback) they emit raw XHTML, so the
+  // provider must fall back to raw + the snapshotted transform pipeline.
+  hasLiveTransforms?: () => boolean;
 }
 
 const parseBookDocument = (html: string): Document | null => {
@@ -34,12 +39,14 @@ export class TTSDocumentProvider {
   #view: FoliateView;
   #createTransformContext: TTSDocumentProviderOptions['createTransformContext'];
   #getTransformSignature: TTSDocumentProviderOptions['getTransformSignature'];
+  #hasLiveTransforms: () => boolean;
   #cache = new Map<number, { signature: string; doc: Document }>();
 
   constructor(options: TTSDocumentProviderOptions) {
     this.#view = options.view;
     this.#createTransformContext = options.createTransformContext;
     this.#getTransformSignature = options.getTransformSignature;
+    this.#hasLiveTransforms = options.hasLiveTransforms ?? (() => true);
   }
 
   getLiveDocument(index: number): Document | null {
@@ -78,13 +85,14 @@ export class TTSDocumentProvider {
     // every section for a whole-book download does not keep the whole book in
     // memory (and never upsets the view's own reference counting).
     let loadHeld = false;
+    const useLoaderPath = !!section.load && !!section.loadContent && this.#hasLiveTransforms();
     try {
       // The live view renders `loadContent()` (the loader's serialized XHTML
       // after href replacement and the data-event transforms), so this is the
       // exact text basis a CFI from the rendered document expects.
-      if (section.load) {
+      if (useLoaderPath) {
         try {
-          await section.load();
+          await section.load?.();
           loadHeld = true;
         } catch {
           loadHeld = false;
@@ -92,7 +100,7 @@ export class TTSDocumentProvider {
       }
       // A section with load() but a failed load must not fall through to
       // loadContent(), which would take an unbalanced loader reference.
-      const html = section.load && !loadHeld ? undefined : await section.loadContent?.();
+      const html = useLoaderPath && loadHeld ? await section.loadContent?.() : undefined;
       if (html) doc = parseBookDocument(html);
 
       // Formats without a loader path: raw text + the shared transform
@@ -117,7 +125,16 @@ export class TTSDocumentProvider {
       if (loadHeld) section.unload?.();
     }
 
-    if (doc && cache) this.#cache.set(index, { signature, doc });
+    if (doc && cache) {
+      this.#cache.set(index, { signature, doc });
+      // Keep only a small ring (current + adjacent sections): a long listen
+      // session otherwise retains one parsed DOM per chapter.
+      while (this.#cache.size > 2) {
+        const oldest = this.#cache.keys().next().value;
+        if (oldest === undefined || oldest === index) break;
+        this.#cache.delete(oldest);
+      }
+    }
     return doc;
   }
 

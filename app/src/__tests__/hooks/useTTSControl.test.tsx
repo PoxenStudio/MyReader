@@ -557,6 +557,9 @@ describe('useTTSControl handleHighlightMark cross-section navigation', () => {
 
     expect(mockView.renderer.scrollToAnchor).toHaveBeenCalledTimes(1);
     expect(mockView.goTo).not.toHaveBeenCalled();
+    // Follow-scrolling relocates as 'navigation'/'scroll', not 'anchor'; the
+    // guard is what keeps its page-start CFI from overwriting the sentence.
+    expect(consumeTtsNavigation('book-1', { index: 0, cfi: 'epubcfi(/6/4!/4/2)' })).toBe(true);
   });
 
   it('does not throw when the renderer has no loaded contents (READEST-19)', async () => {

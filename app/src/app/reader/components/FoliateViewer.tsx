@@ -63,7 +63,7 @@ import { getMaxInlineSize } from '@/utils/config';
 import { getDirFromUILanguage } from '@/utils/rtl';
 import { isTauriAppPlatform } from '@/services/environment';
 import { transformBookContent } from '@/libs/bookContentTransform';
-import { consumeTtsNavigation } from '@/services/tts/ttsContent';
+import { consumeTtsNavigation, relocateTargetOf } from '@/services/tts/ttsContent';
 import { lockScreenOrientation, setTextSelectionSuppressed } from '@/utils/bridge';
 import { useTextTranslation } from '../hooks/useTextTranslation';
 import { manageSyntaxHighlighting } from '@/utils/highlightjs';
@@ -208,7 +208,7 @@ const FoliateViewer: React.FC<{
     // TTS-driven goTo/section-change relocates must not overwrite the sentence
     // CFI with the page-start position. Only the relocate that matches the
     // requested target is consumed; a user page turn still commits progress.
-    if (consumeTtsNavigation(bookKey, { index: detail.index, cfi: detail.cfi })) return;
+    if (consumeTtsNavigation(bookKey, relocateTargetOf(detail))) return;
     if (reason === 'anchor') {
       // Resizing / re-pagination re-anchors to the same text position; its
       // page-start CFI must not become the synced progress. While listening,

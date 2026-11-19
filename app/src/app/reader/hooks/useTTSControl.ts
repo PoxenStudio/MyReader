@@ -124,22 +124,33 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   }, []);
 
   const createDocumentProvider = useCallback(
-    (view: FoliateView) =>
-      new TTSDocumentProvider({
+    (view: FoliateView) => {
+      // Headless playback outlives the reader's stores: snapshot the transform
+      // inputs now so section documents built after the book closes keep the
+      // same text basis as the rendered view.
+      const initialViewSettings = getViewSettings(bookKey);
+      const settingsSnapshot = initialViewSettings ? { ...initialViewSettings } : null;
+      const initialBookData = getBookData(bookKey);
+      const isFixedLayoutSnapshot = initialBookData?.isFixedLayout;
+      const primaryLanguageSnapshot = initialBookData?.book?.primaryLanguage;
+      const settingsForTransform = () => getViewSettings(bookKey) ?? settingsSnapshot;
+      const rectOf = () => view.renderer?.getBoundingClientRect?.();
+      return new TTSDocumentProvider({
         view,
+        hasLiveTransforms: () => !!getViewSettings(bookKey),
         createTransformContext: (content, sectionHref) => {
-          const viewSettings = getViewSettings(bookKey);
+          const viewSettings = settingsForTransform();
+          if (!viewSettings) return null;
           const bookData = getBookData(bookKey);
-          if (!viewSettings || !bookData) return null;
-          const rect = view.renderer?.getBoundingClientRect?.();
+          const rect = rectOf();
           return createBookContentTransformContext(
             {
               bookKey,
               viewSettings,
               width: rect?.width,
               height: rect?.height,
-              isFixedLayout: bookData.isFixedLayout,
-              primaryLanguage: bookData.book?.primaryLanguage,
+              isFixedLayout: bookData?.isFixedLayout ?? isFixedLayoutSnapshot ?? false,
+              primaryLanguage: bookData?.book?.primaryLanguage ?? primaryLanguageSnapshot,
               userLocale: getLocale(),
             },
             content,
@@ -147,10 +158,10 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           );
         },
         getTransformSignature: () => {
-          const viewSettings = getViewSettings(bookKey);
-          const bookData = getBookData(bookKey);
+          const viewSettings = settingsForTransform();
           if (!viewSettings) return '';
-          const rect = view.renderer?.getBoundingClientRect?.();
+          const bookData = getBookData(bookKey);
+          const rect = rectOf();
           return JSON.stringify({
             overrideLayout: viewSettings.overrideLayout,
             convertChineseVariant: viewSettings.convertChineseVariant,
@@ -160,12 +171,13 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
             vertical: viewSettings.vertical,
             width: rect?.width,
             height: rect?.height,
-            primaryLanguage: bookData?.book?.primaryLanguage,
+            primaryLanguage: bookData?.book?.primaryLanguage ?? primaryLanguageSnapshot,
             userLocale: getLocale(),
             globalProofreadRules: getMergedRules(bookKey),
           });
         },
-      }),
+      });
+    },
     [bookKey, getViewSettings, getBookData, getMergedRules],
   );
   // Last broadcast playback state, so a follower engaging mid-session can be
@@ -501,6 +513,9 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         return;
       }
       if (!view.renderer.scrolled) {
+        // scrollToAnchor relocates with reason 'navigation'/'scroll', which the
+        // anchor-only suppression in FoliateViewer does not cover.
+        markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
         view.renderer.scrollToAnchor?.(range);
       } else {
         const rect = range.getBoundingClientRect();
@@ -517,6 +532,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           rangeBottom > end - footerScrollOverlap - scrollingOverlap ||
           rangeTop < start + headerScrollOverlap + scrollingOverlap;
         if (outOfView) {
+          markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
           view.renderer.scrollToAnchor?.(range);
         }
       }
@@ -550,6 +566,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       // A visible non-primary column may still be on a later page of that
       // section; navigate when the word is off-page.
       if (isPrimary) {
+        markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
         view.renderer.scrollToAnchor?.(wordRange);
       } else {
         markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });

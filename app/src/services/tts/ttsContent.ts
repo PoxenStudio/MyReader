@@ -11,6 +11,16 @@ export interface TtsNavigationTarget {
   cfi?: string;
 }
 
+// view.js's relocate detail spreads the section progress (whose `current` is
+// the spine index) and drops the renderer's top-level `index`, so consumers
+// must read the target section from `section.current`.
+export const relocateTargetOf = (
+  detail: { cfi?: string; index?: number; section?: { current?: number } } | null | undefined,
+): TtsNavigationTarget => ({
+  index: detail?.index ?? detail?.section?.current,
+  cfi: detail?.cfi,
+});
+
 // foliate-js marks the hidden stand-ins of a chunked section; a chunk document
 // is only part of the section and must not be used as the TTS text basis.
 export const isChunkDocument = (doc: Document): boolean =>

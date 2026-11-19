@@ -34,6 +34,8 @@ describe('TTSDocumentProvider', () => {
     signature = 'sig-1';
     liveDoc = doc('live zero');
     section1 = {
+      load: vi.fn().mockResolvedValue('blob:one'),
+      unload: vi.fn(),
       loadContent: vi.fn().mockResolvedValue('<html><body><p>loaded one</p></body></html>'),
       createDocument: vi.fn().mockResolvedValue(doc('created one')),
     };
@@ -103,6 +105,44 @@ describe('TTSDocumentProvider', () => {
 
     expect(load).toHaveBeenCalledTimes(1);
     expect(unload).toHaveBeenCalledTimes(1);
+  });
+
+  test('skips the loader path when the reader transforms are detached', async () => {
+    const load = vi.fn();
+    const loadContent = vi.fn().mockResolvedValue('<html><body><p>raw one</p></body></html>');
+    const unload = vi.fn();
+    const view = {
+      renderer: { getContents: () => [] },
+      book: {
+        transformTarget: new EventTarget(),
+        sections: [
+          {
+            href: 's1.xhtml',
+            load,
+            unload,
+            loadContent,
+            loadText: vi.fn().mockResolvedValue('<html><body><p>raw one</p></body></html>'),
+            createDocument: vi.fn(),
+          },
+        ],
+      },
+    } as unknown as FoliateView;
+    const headlessProvider = new TTSDocumentProvider({
+      view,
+      createTransformContext: makeContext,
+      getTransformSignature: () => signature,
+      hasLiveTransforms: () => false,
+    });
+    transformContent.mockResolvedValue('<html><body><p>transformed one</p></body></html>');
+
+    const result = await headlessProvider.createSectionDocument(0, { preferLive: false });
+
+    // loadContent() would hand back untransformed XHTML once the view's data
+    // transformers are gone, so headless must use raw + the shared pipeline.
+    expect(result?.body.textContent).toBe('transformed one');
+    expect(load).not.toHaveBeenCalled();
+    expect(loadContent).not.toHaveBeenCalled();
+    expect(unload).not.toHaveBeenCalled();
   });
 
   test('transforms raw text through the shared pipeline', async () => {
