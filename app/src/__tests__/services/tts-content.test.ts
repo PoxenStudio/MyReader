@@ -6,6 +6,7 @@ import {
   isContentVisible,
   isRangeVisibleInContent,
   markTtsNavigation,
+  relocateTargetOf,
   TTSContent,
 } from '@/services/tts/ttsContent';
 
@@ -115,6 +116,20 @@ describe('ttsContent', () => {
     expect(consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:2)' })).toBe(
       false,
     );
+  });
+
+  test('reads the spine index from view-level relocate details', () => {
+    // view.js spreads the section progress and drops the renderer's top-level
+    // `index`; the guard must still see the target section.
+    expect(relocateTargetOf({ cfi: 'cfi-a', section: { current: 4 } })).toEqual({
+      index: 4,
+      cfi: 'cfi-a',
+    });
+    expect(relocateTargetOf({ cfi: 'cfi-a', index: 2, section: { current: 4 } })).toEqual({
+      index: 2,
+      cfi: 'cfi-a',
+    });
+    expect(relocateTargetOf(null)).toEqual({ index: undefined, cfi: undefined });
   });
 
   test('expires a guard whose navigation never produced a relocate', () => {

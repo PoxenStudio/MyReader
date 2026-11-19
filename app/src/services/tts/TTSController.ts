@@ -267,6 +267,14 @@ export class TTSController extends EventTarget {
     return this.#attached;
   }
 
+  // A newer attach supersedes in-flight section work; a plain detach must NOT,
+  // because headless playback keeps advancing through sections on the old view
+  // object (retained as a pure book handle). Treating a detach as an abort
+  // would end the background session as if the book had no next chapter.
+  #isSuperseded(epoch: number): boolean {
+    return epoch !== this.#attachEpoch && this.#attached;
+  }
+
   // Enter headless mode. Audio, the abort signal, and the in-flight speak
   // generator are untouched: only layout-dependent work stops. The old view
   // object is retained as a pure book handle (view.close() destroys the
@@ -523,9 +531,9 @@ export class TTSController extends EventTarget {
     const primary = this.#getPrimaryContent();
     if (primary?.index !== sectionIndex) {
       await this.onSectionChange?.(sectionIndex);
-      // The view detached (book closed) or a newer attach superseded this one
-      // while navigation was in flight: never write TTS state into a dead view.
-      if (epoch !== this.#attachEpoch) return false;
+      // A newer attach superseded this one while navigation was in flight:
+      // never write TTS state into a view that is no longer the active one.
+      if (this.#isSuperseded(epoch)) return false;
     }
 
     // Re-read AFTER navigation: the old code captured the primary section
@@ -542,7 +550,7 @@ export class TTSController extends EventTarget {
     // Don't mutate a live rendered document; only documents built for TTS
     // need the language fallback.
     if (!liveDoc) this.#ensureSectionLang(doc);
-    if (epoch !== this.#attachEpoch) return false;
+    if (this.#isSuperseded(epoch)) return false;
 
     // The section changed (or is initializing): any previous timeline maps a
     // dead document.
@@ -560,7 +568,7 @@ export class TTSController extends EventTarget {
 
     const { TTS } = await import('foliate-js/tts.js');
     const { textWalker } = await import('foliate-js/text-walker.js');
-    if (epoch !== this.#attachEpoch) return false;
+    if (this.#isSuperseded(epoch)) return false;
     let granularity: TTSGranularity = this.view.language.isCJK ? 'sentence' : 'word';
     const supportedGranularities = this.ttsClient.getGranularities();
     if (!supportedGranularities.includes(granularity)) {
