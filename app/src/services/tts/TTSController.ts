@@ -296,31 +296,47 @@ export class TTSController extends EventTarget {
   // would replay the previous paragraph.
   async attachView(view: FoliateView, bindings: TTSViewBindings): Promise<void> {
     const epoch = ++this.#attachEpoch;
-    const oldTts = this.#getTts();
-    const sectionIndex = Math.max(this.#ttsSectionIndex, 0);
 
     // Prep (no controller state mutated): resolve the section document from
     // the new view, preferring any rendered view of that section rather than
     // only the primary one — a dual-page spread can keep the TTS section in
     // the non-primary column.
-    const contents = view.renderer.getContents();
-    // A large section is rendered as chunk documents sharing one spine index;
-    // using a chunk as the TTS text basis would truncate the section.
-    const matches = contents.filter((content) => content.index === sectionIndex);
-    let doc =
-      matches.length === 1 && !isChunkDocument(matches[0]!.doc) ? matches[0]!.doc : undefined;
-    if (!doc) {
+    const buildDoc = async (sectionIndex: number) => {
+      const contents = view.renderer.getContents();
+      // A large section is rendered as chunk documents sharing one spine index;
+      // using a chunk as the TTS text basis would truncate the section.
+      const matches = contents.filter((content) => content.index === sectionIndex);
+      const liveDoc =
+        matches.length === 1 && !isChunkDocument(matches[0]!.doc) ? matches[0]!.doc : undefined;
+      if (liveDoc) return liveDoc;
       const section = view.book.sections?.[sectionIndex];
-      doc =
+      const doc =
         (await bindings.documentProvider?.createSectionDocument(sectionIndex)) ??
         (section?.createDocument ? await section.createDocument() : undefined);
       // Documents built for TTS need the language fallback the live rendered
       // document already carries; otherwise non-English chapters lose lang
       // and voice selection degrades.
       if (doc) this.#ensureSectionLang(doc);
+      return doc;
+    };
+
+    // Headless playback may advance a section while this prep is in flight.
+    // Re-resolve instead of pairing a stale document with the controller's
+    // current section index.
+    let sectionIndex = Math.max(this.#ttsSectionIndex, 0);
+    let doc = await buildDoc(sectionIndex);
+    for (let attempt = 0; attempt < 2 && epoch === this.#attachEpoch; attempt++) {
+      if (this.#ttsSectionIndex === sectionIndex) break;
+      sectionIndex = Math.max(this.#ttsSectionIndex, 0);
+      doc = await buildDoc(sectionIndex);
     }
+    if (epoch !== this.#attachEpoch) return;
     if (!doc) {
       console.warn('[TTS] attachView: no document for section', sectionIndex);
+      return;
+    }
+    if (this.#ttsSectionIndex !== sectionIndex) {
+      console.warn('[TTS] attachView: section kept advancing during prep; skipping swap');
       return;
     }
     const { TTS } = await import('foliate-js/tts.js');
@@ -336,6 +352,9 @@ export class TTSController extends EventTarget {
     // A detach (new view closed) or a newer attach superseded this one.
     if (epoch !== this.#attachEpoch) return;
 
+    // Captured at swap time: forward() may have advanced the old instance
+    // during prep, and a seed captured earlier would replay the previous one.
+    const oldTts = this.#getTts();
     // Synchronous swap.
     this.view = view;
     this.bookKey = bindings.bookKey;
@@ -380,7 +399,8 @@ export class TTSController extends EventTarget {
     try {
       const cfi = this.view.getCFI(this.#ttsSectionIndex, range);
       return this.view.resolveCFI(cfi).anchor(doc);
-    } catch {
+    } catch (err) {
+      console.warn('[TTS] failed to re-anchor the start range into the TTS document', err);
       return null;
     }
   }
@@ -510,30 +530,28 @@ export class TTSController extends EventTarget {
     }
   }
 
-  async #initTTSForSection(sectionIndex: number): Promise<boolean> {
+  async #initTTSForSection(sectionIndex: number): Promise<'ok' | 'empty' | 'superseded'> {
     const epoch = this.#attachEpoch;
     const sections = this.view.book.sections;
     if (!sections || sectionIndex < 0 || sectionIndex >= sections.length) {
-      return false;
+      return 'empty';
     }
 
     const section = sections[sectionIndex];
     if (!section?.createDocument) {
-      return false;
+      return 'empty';
     }
 
     // Entering a section: drop any highlight left behind in the views that
     // are still rendering the outgoing section.
     this.#clearAllHighlights();
 
-    this.#ttsSectionIndex = sectionIndex;
-
     const primary = this.#getPrimaryContent();
     if (primary?.index !== sectionIndex) {
       await this.onSectionChange?.(sectionIndex);
       // A newer attach superseded this one while navigation was in flight:
       // never write TTS state into a view that is no longer the active one.
-      if (this.#isSuperseded(epoch)) return false;
+      if (this.#isSuperseded(epoch)) return 'superseded';
     }
 
     // Re-read AFTER navigation: the old code captured the primary section
@@ -550,8 +568,15 @@ export class TTSController extends EventTarget {
     // Don't mutate a live rendered document; only documents built for TTS
     // need the language fallback.
     if (!liveDoc) this.#ensureSectionLang(doc);
-    if (this.#isSuperseded(epoch)) return false;
+    if (this.#isSuperseded(epoch)) return 'superseded';
 
+    const { TTS } = await import('foliate-js/tts.js');
+    const { textWalker } = await import('foliate-js/text-walker.js');
+    if (this.#isSuperseded(epoch)) return 'superseded';
+
+    // Commit the section only now: all awaits are done, so the index and the
+    // document can never describe different sections.
+    this.#ttsSectionIndex = sectionIndex;
     // The section changed (or is initializing): any previous timeline maps a
     // dead document.
     this.#sectionTimeline = null;
@@ -563,12 +588,9 @@ export class TTSController extends EventTarget {
     if (existing && existing.doc === doc) {
       this.#tts = existing;
       this.view.tts = existing;
-      return true;
+      return 'ok';
     }
 
-    const { TTS } = await import('foliate-js/tts.js');
-    const { textWalker } = await import('foliate-js/text-walker.js');
-    if (this.#isSuperseded(epoch)) return false;
     let granularity: TTSGranularity = this.view.language.isCJK ? 'sentence' : 'word';
     const supportedGranularities = this.ttsClient.getGranularities();
     if (!supportedGranularities.includes(granularity)) {
@@ -586,7 +608,7 @@ export class TTSController extends EventTarget {
     this.view.tts = this.#tts;
     console.log(`[TTS] Initialized TTS for section ${sectionIndex}`);
 
-    return true;
+    return 'ok';
   }
 
   // Build (or return) the virtual timeline for the current section. Edge-only:
@@ -882,22 +904,22 @@ export class TTSController extends EventTarget {
     if (!isPlaying) this.reapplyCurrentHighlight();
   }
 
-  async #initTTSForNextSection(): Promise<boolean> {
+  async #initTTSForNextSection(): Promise<'ok' | 'empty' | 'superseded'> {
     const nextIndex = this.#ttsSectionIndex + 1;
     const sections = this.view.book.sections;
 
     if (!sections || nextIndex >= sections.length) {
-      return false;
+      return 'empty';
     }
 
     return await this.#initTTSForSection(nextIndex);
   }
 
-  async #initTTSForPrevSection(): Promise<boolean> {
+  async #initTTSForPrevSection(): Promise<'ok' | 'empty' | 'superseded'> {
     const prevIndex = this.#ttsSectionIndex - 1;
 
     if (prevIndex < 0) {
-      return false;
+      return 'empty';
     }
 
     return await this.#initTTSForSection(prevIndex);
@@ -916,8 +938,18 @@ export class TTSController extends EventTarget {
     }
   }
 
-  async #handleNavigationWithoutSSML(initSection: () => Promise<boolean>, isPlaying: boolean) {
-    if (await initSection()) {
+  async #handleNavigationWithoutSSML(
+    initSection: () => Promise<'ok' | 'empty' | 'superseded'>,
+    isPlaying: boolean,
+  ) {
+    const result = await initSection();
+    if (result === 'superseded') {
+      // A newer view attachment took over mid-transition; the session stays
+      // alive and resumes from the adopted section. Treating this as
+      // "end of book" would stop playback right after the user reopens.
+      return;
+    }
+    if (result === 'ok') {
       if (isPlaying) {
         this.#speak(this.#getTts()?.start());
       } else {
@@ -1009,13 +1041,15 @@ export class TTSController extends EventTarget {
           // FIXME: in case we are at the end of the book, need a better way to handle this
           if (this.#nossmlCnt < 10 && this.state === 'playing' && !oneTime) {
             resolve();
-            if (await this.#initTTSForNextSection()) {
+            const initResult = await this.#initTTSForNextSection();
+            if (initResult === 'ok') {
               await this.forward();
-            } else {
+            } else if (initResult === 'empty') {
               // End of book: nothing left to speak.
               this.#terminate('ended');
               await this.stop();
             }
+            // 'superseded': a fresh attachment owns the session now.
           }
           console.log('[TTS] no SSML, skipping for', this.#nossmlCnt);
           return;

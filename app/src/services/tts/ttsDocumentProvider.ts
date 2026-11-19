@@ -126,12 +126,15 @@ export class TTSDocumentProvider {
     }
 
     if (doc && cache) {
+      // Re-insert so a refreshed entry moves to the newest slot; a plain set
+      // keeps the original insertion order and could evict the fresh doc.
+      this.#cache.delete(index);
       this.#cache.set(index, { signature, doc });
       // Keep only a small ring (current + adjacent sections): a long listen
       // session otherwise retains one parsed DOM per chapter.
       while (this.#cache.size > 2) {
         const oldest = this.#cache.keys().next().value;
-        if (oldest === undefined || oldest === index) break;
+        if (oldest === undefined) break;
         this.#cache.delete(oldest);
       }
     }

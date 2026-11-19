@@ -74,6 +74,7 @@ vi.mock('@/services/rss/feedReader', () => ({
 
 import { useReaderStore } from '@/store/readerStore';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { useLibraryStore } from '@/store/libraryStore';
 import { clearBookProgress, getBookProgress, setBookProgress } from '@/store/readerProgressStore';
 import { findTocItemBS } from '@/services/nav';
 import { getBookHash } from '@/utils/book';
@@ -349,6 +350,47 @@ describe('readerStore', () => {
         pageinfo: { current: 2, total: 10 },
       });
       expect(findTocItemBS).toHaveBeenCalledWith(expect.any(Array), 'epubcfi(/6/10!/4/2/2:5)');
+      clearBookProgress('book-1');
+    });
+
+    test('derives library progress from the spoken CFI', async () => {
+      seedViewState('book-1');
+      const cfiProgress = vi.fn().mockResolvedValue({
+        fraction: 0.51,
+        section: { current: 4, total: 9 },
+        location: { current: 50, next: 51, total: 100 },
+        time: { section: 60, total: 600 },
+      });
+      useReaderStore.getState().setView('book-1', {
+        resolveCFI: vi.fn(() => ({ index: 4 })),
+        getCFIProgress: cfiProgress,
+      } as unknown as FoliateView);
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: { [id]: { config: { location: 'old-cfi' } } },
+      } as never);
+      const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
+      vi.mocked(getBookByHash).mockReturnValue({ readingStatus: 'reading' } as never);
+      setBookProgress('book-1', {
+        location: 'old-cfi',
+        pageinfo: { current: 2, total: 10 },
+        section: { current: 0, total: 9 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'epubcfi(/6/10!/4/2/2:5)', null);
+
+      // The library percent must advance while listening even though the
+      // relocate path is suppressed.
+      await vi.waitFor(() => {
+        expect(updateBookProgress).toHaveBeenCalledWith(id, [51, 100], 'reading');
+      });
+      expect(getBookProgress('book-1')).toMatchObject({
+        fraction: 0.51,
+        pageinfo: { current: 50, next: 51, total: 100 },
+        section: { current: 4, total: 9 },
+        page: 51,
+      });
       clearBookProgress('book-1');
     });
   });
