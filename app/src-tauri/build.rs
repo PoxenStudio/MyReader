@@ -33,6 +33,7 @@ fn main() {
             "cancel_upload",
             "get_environment_variable",
             "get_executable_dir",
+            "get_dev_data_dir",
             "set_webview_info",
             "is_updater_disabled",
             "allow_paths_in_scopes",

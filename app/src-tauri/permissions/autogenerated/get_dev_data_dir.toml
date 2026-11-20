@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-dev-data-dir"
+description = "Enables the get_dev_data_dir command without any pre-configured scope."
+commands.allow = ["get_dev_data_dir"]
+
+[[permission]]
+identifier = "deny-get-dev-data-dir"
+description = "Denies the get_dev_data_dir command without any pre-configured scope."
+commands.deny = ["get_dev_data_dir"]

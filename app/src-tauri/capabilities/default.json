@@ -198,6 +198,7 @@
     "allow-cancel-upload",
     "allow-get-environment-variable",
     "allow-get-executable-dir",
+    "allow-get-dev-data-dir",
     "allow-set-webview-info",
     "allow-is-updater-disabled",
     "allow-allow-paths-in-scopes",

@@ -248,6 +248,50 @@ fn get_executable_dir() -> String {
         .unwrap_or_default()
 }
 
+// dev 构建在 macOS/Windows 上把应用数据放到仓库 workspace，release 返回空串；
+// 可用 MYREADER_DEV_DATA_DIR 覆盖（绝对路径或相对仓库根目录）。
+#[command]
+fn get_dev_data_dir(app: AppHandle) -> String {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        if !tauri::is_dev() {
+            return String::new();
+        }
+
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let dir = std::env::var("MYREADER_DEV_DATA_DIR")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    repo_root.join(path)
+                }
+            })
+            .unwrap_or_else(|| repo_root.join("workspace"));
+
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            log::error!("Failed to create dev data dir {dir:?}: {e}");
+            return String::new();
+        }
+        // 前端按绝对路径访问，需去掉 `..` 以免影响 scope 匹配
+        let dir = dir.canonicalize().unwrap_or(dir);
+
+        // 绝对路径不受默认 scope 覆盖，需同时放宽 fs 与 asset 协议
+        allow_dir_in_scopes(&app, &dir);
+        log::info!("Using dev data dir: {dir:?}");
+        dir.to_string_lossy().into_owned()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = app;
+        String::new()
+    }
+}
+
 // Pure decision for whether the in-app updater should be hidden. Kept
 // dependency-free so it can be unit tested for every platform combination.
 //
@@ -453,6 +497,7 @@ pub fn run() {
             cancel_upload,
             get_environment_variable,
             get_executable_dir,
+            get_dev_data_dir,
             set_webview_info,
             #[cfg(desktop)]
             is_updater_disabled,

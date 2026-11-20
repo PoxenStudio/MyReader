@@ -148,26 +148,30 @@ async function ensureDirExists(
 // 1. If custom root dir is set, use it as base dir (baseDir = 0)
 // 2. If portable mode is detected (Settings.json in executable dir), use executable dir as base dir (baseDir = 0)
 // 3. If both custom root dir and portable mode are set, use custom root dir as base dir (baseDir = 0)
+// 4. devRootDir（tauri dev）优先级最高，并连 Settings 一起重定向
 // Path Resolver Usage:
 //  - appService.resolvePath and use returned baseDir + fp, when baseDir is 0, fp will be absolute path
 //  - fileSystem.getPrefix and use prefix + path
 const getPathResolver = ({
   customRootDir,
+  devRootDir,
   isPortable,
   execDir,
 }: {
   customRootDir?: string;
+  devRootDir?: string;
   isPortable?: boolean;
   execDir?: string;
 } = {}) => {
-  const customBaseDir = customRootDir ? 0 : undefined;
-  const isCustomBaseDir = Boolean(customRootDir);
+  const rootDir = devRootDir || customRootDir;
+  const customBaseDir = rootDir ? 0 : undefined;
+  const isCustomBaseDir = Boolean(rootDir);
   const getCustomBasePrefixSync = isCustomBaseDir
     ? (baseDir: BaseDir) => {
         return () => {
           const dataDirs = ['Settings', 'Data', 'Books', 'Fonts', 'Images', 'Dictionaries'];
           const leafDir = dataDirs.includes(baseDir) ? '' : baseDir;
-          return leafDir ? `${customRootDir}/${leafDir}` : customRootDir!;
+          return leafDir ? `${rootDir}/${leafDir}` : rootDir!;
         };
       }
     : undefined;
@@ -181,6 +185,14 @@ const getPathResolver = ({
     const customBasePrefix = getCustomBasePrefix?.(base);
     switch (base) {
       case 'Settings':
+        if (devRootDir) {
+          return {
+            baseDir: 0,
+            basePrefix: async () => devRootDir,
+            fp: `${devRootDir}${path ? `/${path}` : ''}`,
+            base,
+          };
+        }
         return {
           baseDir: isPortable ? 0 : BaseDirectory.AppConfig,
           basePrefix: isPortable && execDir ? async () => execDir : appConfigDir,
@@ -621,7 +633,24 @@ export class NativeAppService extends BaseAppService {
         console.warn('[nativeAppService] is_updater_disabled failed:', err);
       }
     }
-    if (
+    // dev 构建把数据重定向到 workspace，避免污染正式版；显式传入的根目录优先
+    let devRootDir = '';
+    if (!this.customRootDir) {
+      try {
+        devRootDir = (await invoke<string>('get_dev_data_dir')).trim();
+      } catch (err) {
+        console.warn('[nativeAppService] get_dev_data_dir failed:', err);
+      }
+    }
+    if (devRootDir) {
+      this.fs.resolvePath = getPathResolver({
+        devRootDir,
+        isPortable: this.isPortableApp,
+        execDir,
+      });
+      // Turso 打开数据库时不会创建父目录，首次启动需先建 Data 目录
+      await this.fs.createDir('', 'Data', true);
+    } else if (
       process.env['NEXT_PUBLIC_PORTABLE_APP'] ||
       (await this.fs.exists(`${execDir}/${SETTINGS_FILENAME}`, 'None'))
     ) {
@@ -633,7 +662,7 @@ export class NativeAppService extends BaseAppService {
       });
     }
     const settings = await this.loadSettings();
-    if (this.customRootDir || settings.customRootDir) {
+    if (!devRootDir && (this.customRootDir || settings.customRootDir)) {
       this.fs.resolvePath = getPathResolver({
         customRootDir: this.customRootDir || settings.customRootDir,
         isPortable: this.isPortableApp,

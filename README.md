@@ -201,6 +201,13 @@ pnpm tauri ios dev
 pnpm tauri ios dev --host
 ```
 
+在桌面系统上， `pnpm tauri dev` 会把应用数据放到仓库 `workspace` 目录下。
+可以使用以下命令在开发模式下指定应用数据目录：
+```bash
+MYREADER_DEV_DATA_DIR=/tmp/myreader-dev pnpm tauri dev
+MYREADER_DEV_DATA_DIR=tmp-dev pnpm tauri dev
+```
+
 ### 5. 生产环境构建
 
 ```bash
