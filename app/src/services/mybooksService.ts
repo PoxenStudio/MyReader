@@ -16,6 +16,7 @@ import {
   extractCookieHeaderFromResponse,
 } from '@/services/mybooks/tauriCookieStore';
 import { shouldAutoPromptNasLogin } from '@/services/mybooks/nasSession';
+import { isSessionExpiredResponse, refreshMyBooksSession } from '@/services/mybooks/sessionRefresh';
 
 export interface MyBooksBook {
   id: number;
@@ -404,7 +405,11 @@ export async function fetchMyBooks<T>(
 
   let result: MyBooksResponse<T>;
   let attempt = 0;
+  // 每次调用最多续期一次，避免死循环。
+  let hasRefreshedSession = false;
   for (;;) {
+    // 续期后 mybooks_tauri_cookie 已更新，重试前重新拼 Cookie 头。
+    if (hasRefreshedSession) attachNasCookieHeaders(fetchOptions, url, host);
     const controller = new AbortController();
     // Merge the caller's signal into this attempt's controller by hand:
     // browserslist is chrome 92, so AbortSignal.any can't be relied on.
@@ -438,6 +443,11 @@ export async function fetchMyBooks<T>(
         }
       }
       result = await response.json();
+      // 会话过期时静默续期一次并重放；旧版本服务端无此接口，续期返回 false。
+      if (!hasRefreshedSession && isSessionExpiredResponse(endpoint, result)) {
+        hasRefreshedSession = true;
+        if (await refreshMyBooksSession()) continue;
+      }
       break;
     } catch (error) {
       attempt++;
