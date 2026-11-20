@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { convertBlobUrlToDataUrl, BookDoc, getDirection } from '@/libs/document';
 import { BOOK_IDS_SEPARATOR } from '@/services/constants';
-import { BookConfig, PageInfo } from '@/types/book';
+import { BookConfig, PageInfo, ProgressSource } from '@/types/book';
 import { FoliateView, wrappedFoliateView } from '@/types/view';
 import { Insets } from '@/types/misc';
 import { useEnv } from '@/context/EnvContext';
@@ -26,6 +26,13 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useEinkMode } from '@/hooks/useEinkMode';
 import { useWebDAVSync } from '../hooks/useWebDAVSync';
 import { useNativeSync } from '../hooks/useNativeSync';
+import {
+  buildRawAnchorForRange,
+  isCfiWithinRange,
+  resetLocationCaches,
+  resolveRawAnchorToCfi,
+} from '@/services/mybooks/rawLocation';
+import { userRelocateSource } from '../utils/progressSource';
 import {
   applyFixedlayoutStyles,
   applyImageStyle,
@@ -123,6 +130,8 @@ const FoliateViewer: React.FC<{
   const setViewSettings = useReaderStore((s) => s.setViewSettings);
   const getParallels = useParallelViewStore((s) => s.getParallels);
   const getBookData = useBookDataStore((s) => s.getBookData);
+  const setConfig = useBookDataStore((s) => s.setConfig);
+  const saveConfig = useBookDataStore((s) => s.saveConfig);
   const { applyBackgroundTexture } = useBackgroundTexture();
   const { applyEinkMode } = useEinkMode();
   const { registerBrightnessListeners, overlayVisible, overlayLevel } =
@@ -134,6 +143,9 @@ const FoliateViewer: React.FC<{
   const viewRef = useRef<FoliateView | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isViewCreated = useRef(false);
+  const disposedRef = useRef(false);
+  const initialRestoreDoneRef = useRef(false);
+  const programmaticNavigationRef = useRef(false);
   const doubleClickDisabled = useRef(!!viewSettings?.disableDoubleClick);
   const [toastMessage, setToastMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -161,6 +173,32 @@ const FoliateViewer: React.FC<{
   }, [toastMessage]);
 
   useUICSS(bookKey);
+
+  // Iframe input events do not bubble out, so docRelocateHandler is the
+  // primary source signal; these listeners cover controls rendered inside
+  // the reader container (TOC drawers, toolbars) and keyboard use.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const markUserInput = () => {
+      const state = useReaderStore.getState().getViewState(bookKey);
+      if (state?.progressSource === 'restore' || state?.progressSource === 'remote') {
+        useReaderStore.getState().setProgressSource(bookKey, 'user');
+      }
+    };
+    const options: AddEventListenerOptions = { capture: true, passive: true };
+    container.addEventListener('pointerdown', markUserInput, options);
+    container.addEventListener('touchstart', markUserInput, options);
+    container.addEventListener('wheel', markUserInput, options);
+    container.addEventListener('keydown', markUserInput, { capture: true });
+    return () => {
+      container.removeEventListener('pointerdown', markUserInput, { capture: true });
+      container.removeEventListener('touchstart', markUserInput, { capture: true });
+      container.removeEventListener('wheel', markUserInput, { capture: true });
+      container.removeEventListener('keydown', markUserInput, { capture: true });
+    };
+  }, [bookKey]);
+
   useProgressAutoSave(bookKey);
   useWebDAVSync(bookKey);
   useNativeSync(bookKey);
@@ -191,6 +229,24 @@ const FoliateViewer: React.FC<{
     relocateRafRef.current = null;
     cancelAnimationFrame(id);
   }, []);
+  const rawAnchorKey = (anchor?: BookConfig['rawAnchor']): string =>
+    anchor ? `${anchor.rawOffset}:${anchor.sectionHash}:${anchor.precision}` : '';
+  const scheduleIdle = (callback: () => void) => {
+    const requestIdle = (
+      globalThis as {
+        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      }
+    ).requestIdleCallback;
+    if (requestIdle) requestIdle(callback, { timeout: 2000 });
+    else setTimeout(callback, 0);
+  };
+  const sectionFractionFor = useCallback((index: number, bookFraction?: number): number => {
+    const fractions = viewRef.current?.getSectionFractions?.() ?? [];
+    const start = fractions[index] ?? 0;
+    const end = fractions[index + 1] ?? 1;
+    const span = end - start;
+    return span > 0 ? Math.max(0, Math.min(1, ((bookFraction ?? 0.5) - start) / span)) : 0.5;
+  }, []);
   const commitRelocate = useCallback(() => {
     relocateRafRef.current = null;
     const event = pendingRelocateRef.current;
@@ -201,6 +257,13 @@ const FoliateViewer: React.FC<{
     const { current, next, total } = detail.location as PageInfo;
     const currentPage = atEnd && total > 0 ? total - 1 : current;
     const pageInfo = { current: currentPage, next, total };
+    const viewState = useReaderStore.getState().getViewState(bookKey);
+    const baseSource: ProgressSource = viewState?.progressSource ?? 'user';
+    // TTS follow relocates otherwise stay `restore` until a pointer event that
+    // never comes; treat them as TTS progress while playback is enabled.
+    // Manual page turns remain `user`.
+    const source: ProgressSource =
+      baseSource === 'restore' && viewState?.ttsEnabled ? 'tts' : baseSource;
     setProgress(
       bookKey,
       detail.cfi,
@@ -211,8 +274,35 @@ const FoliateViewer: React.FC<{
       detail.time,
       detail.range,
       detail.fraction,
+      source,
     );
-  }, [bookKey, setProgress]);
+
+    if (source !== 'user' && source !== 'tts') return;
+    const view = viewRef.current;
+    const index = getIndexFromCfi(detail.cfi);
+    if (!view || index == null || !detail.range) return;
+    const fraction = sectionFractionFor(index, detail.fraction);
+    const capturedCfi = detail.cfi;
+    scheduleIdle(() => {
+      void buildRawAnchorForRange(
+        bookKey,
+        view,
+        index,
+        detail.range,
+        fraction,
+        getViewSettings(bookKey),
+      )
+        .then((anchor) => {
+          if (!anchor || disposedRef.current) return;
+          // A burst of page turns can finish this out of order; only keep the
+          // anchor for the position that is still current.
+          const current = useReaderStore.getState().getProgress(bookKey)?.location;
+          if (current !== capturedCfi) return;
+          setConfig(bookKey, { rawAnchor: anchor, rawAnchorCleared: false });
+        })
+        .catch((error) => console.warn('[sync] failed to build raw anchor', error));
+    });
+  }, [bookKey, setProgress, setConfig, getViewSettings, sectionFractionFor]);
 
   const progressRelocateHandler = (event: Event) => {
     // Always stash the latest detail; if another rAF is already pending
@@ -523,12 +613,22 @@ const FoliateViewer: React.FC<{
 
   const docRelocateHandler = (event: Event) => {
     const detail = (event as CustomEvent).detail;
-    if (detail.reason !== 'scroll' && detail.reason !== 'page') return;
+    const currentSource = useReaderStore.getState().getViewState(bookKey)?.progressSource;
+    const promoted = userRelocateSource({
+      reason: detail.reason,
+      currentSource,
+      initialRestoreDone: initialRestoreDoneRef.current,
+      programmaticNavigation: programmaticNavigationRef.current,
+    });
+    if (!promoted) return;
 
     // First user-initiated navigation after a deep-link landing — promote
     // the preview into the real reading position. Subsequent progress writes
     // can flow normally.
     setPreviewMode(bookKey, false);
+
+    // Real page turns and user navigation flip the source back to the reader.
+    useReaderStore.getState().setProgressSource(bookKey, promoted);
 
     const parallelViews = getParallels(bookKey);
     if (parallelViews && parallelViews.size > 0) {
@@ -658,6 +758,7 @@ const FoliateViewer: React.FC<{
   });
 
   useEffect(() => {
+    disposedRef.current = false;
     if (isViewCreated.current) return;
     isViewCreated.current = true;
 
@@ -787,13 +888,141 @@ const FoliateViewer: React.FC<{
       const thisId = getBookHash(bookKey);
       const overrideLocation = cfiParam && primaryId === thisId ? cfiParam : null;
 
-      const lastLocation = overrideLocation ?? config.location;
+      const savedConfig = { ...(useBookDataStore.getState().getConfig(bookKey) ?? config) };
+      // One-time in-memory migration: legacy configs only have `updatedAt`.
+      // Snapshot it as the location clock so later bookmark edits cannot
+      // masquerade as reading-position changes.
+      if (savedConfig.location && savedConfig.locationUpdatedAt == null) {
+        savedConfig.locationUpdatedAt = savedConfig.updatedAt;
+        setConfig(bookKey, { locationUpdatedAt: savedConfig.updatedAt });
+      }
+      const lastLocation = overrideLocation ?? savedConfig.location;
       if (lastLocation) {
         await view.init({ lastLocation });
       } else {
         await view.goToFraction(0);
       }
       setViewInited(bookKey, true);
+      // User TOC/search navigation may happen while the repair below awaits;
+      // from here on it must be persistable.
+      initialRestoreDoneRef.current = true;
+
+      // Migration/repair, after init: resolving the anchor here reuses the
+      // loader's already-transformed section instead of pre-transforming it
+      // and throwing the cache away. A failed landing is never written back.
+      if (!overrideLocation && savedConfig.location && !disposedRef.current) {
+        const landed = view.lastLocation as
+          | (typeof view.lastLocation & { fraction?: number })
+          | undefined;
+        const verified = landed?.cfi ? isCfiWithinRange(lastLocation!, landed.cfi) : false;
+        if (!verified) {
+          console.warn('[sync] initial location was not applied as requested', {
+            requested: lastLocation,
+            landed: landed?.cfi,
+          });
+        }
+        const current = useBookDataStore.getState().getConfig(bookKey) ?? savedConfig;
+        const changedMeanwhile =
+          current.location !== savedConfig.location ||
+          (current.locationUpdatedAt ?? 0) !== (savedConfig.locationUpdatedAt ?? 0);
+        if (!changedMeanwhile) {
+          // A fraction-only anchor is fine cross-device, but when this
+          // device's own CFI already landed correctly, prefer it over a
+          // proportional guess.
+          const anchorIsApprox = current.rawAnchor?.precision === 'approx';
+          if (current.rawAnchor && !(anchorIsApprox && verified)) {
+            const resolved = await resolveRawAnchorToCfi(
+              bookKey,
+              view,
+              current.rawAnchor,
+              viewSettings,
+            );
+            if (resolved && landed?.cfi && !isCfiWithinRange(resolved.cfi, landed.cfi)) {
+              useReaderStore.getState().setProgressSource(bookKey, 'restore');
+              programmaticNavigationRef.current = true;
+              try {
+                await view.goTo(resolved.cfi);
+              } catch {
+                // Leave the reader where it is; a wrong page is never saved.
+              }
+              await new Promise<void>((resolve) => {
+                const renderer = view.renderer;
+                let settled = false;
+                const finish = () => {
+                  if (settled) return;
+                  settled = true;
+                  clearTimeout(timer);
+                  renderer.removeEventListener('stabilized', finish);
+                  resolve();
+                };
+                const timer = setTimeout(finish, 1500);
+                renderer.addEventListener('stabilized', finish);
+                requestAnimationFrame(() => requestAnimationFrame(finish));
+              });
+              programmaticNavigationRef.current = false;
+              const after = view.lastLocation as
+                | (typeof view.lastLocation & { fraction?: number })
+                | undefined;
+              if (after?.cfi && isCfiWithinRange(resolved.cfi, after.cfi) && !disposedRef.current) {
+                const latest = useBookDataStore.getState().getConfig(bookKey);
+                if (
+                  latest &&
+                  latest.location === current.location &&
+                  latest.locationUpdatedAt === current.locationUpdatedAt &&
+                  rawAnchorKey(latest.rawAnchor) === rawAnchorKey(current.rawAnchor)
+                ) {
+                  const repaired: BookConfig = {
+                    ...latest,
+                    location: resolved.cfi,
+                    rawAnchor: current.rawAnchor,
+                    rawAnchorCleared: false,
+                    locationUpdatedAt: latest.locationUpdatedAt,
+                  };
+                  setConfig(bookKey, repaired);
+                  await saveConfig(envConfig, bookKey, repaired, settings, {
+                    preserveUpdatedAt: true,
+                  });
+                }
+              }
+            }
+          } else if (verified && landed?.cfi && landed.range) {
+            const landedIndex = getIndexFromCfi(landed.cfi);
+            if (landedIndex != null) {
+              const fraction = sectionFractionFor(landedIndex, landed.fraction);
+              const anchor = await buildRawAnchorForRange(
+                bookKey,
+                view,
+                landedIndex,
+                landed.range,
+                fraction,
+                viewSettings,
+              );
+              if (anchor && !disposedRef.current) {
+                const latest = useBookDataStore.getState().getConfig(bookKey);
+                if (
+                  latest &&
+                  latest.location === current.location &&
+                  latest.locationUpdatedAt === current.locationUpdatedAt &&
+                  rawAnchorKey(latest.rawAnchor) === rawAnchorKey(current.rawAnchor)
+                ) {
+                  const repaired: BookConfig = {
+                    ...latest,
+                    location: landed.cfi,
+                    rawAnchor: anchor,
+                    rawAnchorCleared: false,
+                    locationUpdatedAt: latest.locationUpdatedAt,
+                  };
+                  setConfig(bookKey, repaired);
+                  await saveConfig(envConfig, bookKey, repaired, settings, {
+                    preserveUpdatedAt: true,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
       const startMark = performance.getEntriesByName(`open-start:${bookKey}`).pop();
       if (startMark) {
         const now = performance.now();
@@ -813,6 +1042,10 @@ const FoliateViewer: React.FC<{
     };
 
     openBook();
+    return () => {
+      disposedRef.current = true;
+      resetLocationCaches(bookKey);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

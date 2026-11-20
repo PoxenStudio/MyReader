@@ -1,13 +1,19 @@
 import init, { simplecc } from '@simplecc/simplecc_wasm';
 import { ConvertChineseVariant } from '@/types/book';
 
-let initialized = false;
+let initPromise: Promise<void> | null = null;
 
-const initSimpleCC = async () => {
-  if (initialized) return;
-
-  await init('/vendor/simplecc/simplecc_wasm_bg.wasm');
-  initialized = true;
+const initSimpleCC = (): Promise<void> => {
+  if (!initPromise) {
+    initPromise = init('/vendor/simplecc/simplecc_wasm_bg.wasm')
+      .then(() => {})
+      .catch((error) => {
+        // A transient WASM load failure should be retryable.
+        initPromise = null;
+        throw error;
+      });
+  }
+  return initPromise;
 };
 
 const convertReverseMap: Record<ConvertChineseVariant, ConvertChineseVariant> = {

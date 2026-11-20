@@ -449,6 +449,25 @@ export interface ViewSettings
     WordLensConfig,
     ViewSettingsConfig {}
 
+export type ProgressSource = 'user' | 'tts' | 'remote' | 'restore' | 'repair';
+
+// Cross-device reading position, defined on the *raw* section text so it is
+// independent of the per-device content transformers (whitespace folding,
+// 简繁, punctuation, proofread, …). The local CFI stays a cache; this anchor
+// is what sync treats as authoritative.
+export interface RawLocationAnchor {
+  v: 2;
+  index: number; // spine index
+  rawOffset: number; // character offset in the raw section text stream
+  rawFraction: number; // rawOffset / raw text length (0..1)
+  rawQuote: string; // raw text at the position, used to refine local mapping
+  rawPrefix: string;
+  rawSuffix: string;
+  sectionHash: string; // hash of the raw section text
+  rawTextVersion: number;
+  precision: 'exact' | 'approx';
+}
+
 export interface BookProgress {
   location: string;
   sectionHref: string;
@@ -463,6 +482,7 @@ export interface BookProgress {
   index: number;
   range: Range;
   page: number;
+  source?: ProgressSource;
 }
 
 export type SearchMode = 'contains' | 'whole-words' | 'regex' | 'nearby-words';
@@ -519,6 +539,15 @@ export interface BookConfig {
   rsvpPosition?: { cfi: string; wordText: string };
   searchConfig?: Partial<BookSearchConfig>;
   viewSettings?: Partial<ViewSettings>;
+  rawAnchor?: RawLocationAnchor;
+  // The location moved since the anchor was written. The next push must
+  // invalidate the server's old anchor instead of pairing it with the new CFI.
+  rawAnchorCleared?: boolean;
+  locationUpdatedAt?: number;
+  // Last legacy (no raw anchor) server record this device migrated from, so
+  // "server wins during migration" cannot loop forever when an anchor cannot
+  // be built for this book.
+  migratedRemoteUpdatedAt?: number;
 
   lastSyncedAtConfig?: number;
   lastSyncedAtNotes?: number;
@@ -567,7 +596,12 @@ export interface BookDataRecord {
 // See document/MyBooks_Sync_API.md §1 / document/MyBooks_Sync_WS_Design.md §11.
 export type BookRecord = BookDataRecord & Book;
 export type BookNoteRecord = BookDataRecord & BookNote;
-export type BookConfigRecord = BookDataRecord & BookConfig;
+export type BookConfigRecord = BookDataRecord &
+  BookConfig & {
+    // Wire spelling used by the sync config record (snake_case, like
+    // `book_hash`/`updated_at`); mapped to `rawAnchor` locally.
+    raw_anchor?: RawLocationAnchor | null;
+  };
 
 export interface BooksGroup {
   id: string;
