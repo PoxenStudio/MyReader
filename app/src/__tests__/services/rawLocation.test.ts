@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import {
   buildRawAnchor,
   buildRawAnchorForRange,
@@ -241,6 +241,32 @@ describe('rawLocation cross-setting fallback', () => {
     const mapped = mapRawAnchorToRendered(raw, converted, anchor, plain);
     expect(mapped.mode).toBe('exact');
     expect(plain.text.slice(mapped.offset, mapped.offset + 2)).toBe('裏面');
+  });
+
+  test('the unconverted stream is only built when the primary match misses', () => {
+    const html = '<html><body><p>這是一本繁體書，裏面有很多內容。</p></body></html>';
+    const raw = rawFromHtml(html);
+    const plain = normalizeSearchable(collectTextStream(parse(html)));
+    const wrong = normalizeSearchable(collectTextStream(parse(html)), {
+      convertVariant: (t) => t.replace(/裏/g, '里'),
+    });
+    const anchor = buildRawAnchor(raw, 0, raw.searchable.text.indexOf('裏面'), 'exact');
+    const anchorFallback = vi.fn(() => plain);
+    expect(mapRawAnchorToRendered(raw, plain, anchor, anchorFallback).mode).toBe('exact');
+    expect(anchorFallback).not.toHaveBeenCalled();
+    expect(mapRawAnchorToRendered(raw, wrong, anchor, anchorFallback).mode).toBe('exact');
+    expect(anchorFallback).toHaveBeenCalledTimes(1);
+
+    const offset = plain.text.indexOf('裏面');
+    const offsetFallback = vi.fn(() => plain);
+    expect(mapRenderedOffsetToRaw(plain, raw.searchable, offset, 0.5, offsetFallback).mode).toBe(
+      'exact',
+    );
+    expect(offsetFallback).not.toHaveBeenCalled();
+    expect(mapRenderedOffsetToRaw(wrong, raw.searchable, offset, 0.5, offsetFallback).mode).toBe(
+      'exact',
+    );
+    expect(offsetFallback).toHaveBeenCalledTimes(1);
   });
 
   test('mapRenderedOffsetToRaw falls back to the unconverted stream', () => {

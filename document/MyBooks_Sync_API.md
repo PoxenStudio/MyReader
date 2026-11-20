@@ -236,8 +236,10 @@ Timestamp semantics for `configs` (see `useNativeSync` in the app):
   pulling does not make the local record "newest".
 - A client that does not send `raw_anchor` can advance `location` while the
   server keeps an older `raw_anchor`. Consumers must ignore an anchor whose
-  `updatedAt` is older than the record's `updated_at` (or missing, for legacy
-  anchors) and fall back to `location`.
+  `updatedAt` is older than the record's `updated_at`, or that has no
+  `updatedAt` at all (it cannot prove it describes this record), and fall back
+  to `location` under the normal LWW rule. `raw_anchor: null` means the author
+  cleared it; that is not a legacy record and gets no migration authority.
 
 ### 1.7 Sync cadence
 
