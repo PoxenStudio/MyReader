@@ -920,6 +920,14 @@ const RSVPControl = forwardRef<RSVPControlHandle, RSVPControlProps>(function RSV
       const config = getConfig(bookKey);
       if (config) {
         const update = buildRsvpExitConfigUpdate(rsvpPosition);
+        // The RSVP word is a real local position change: the pair of clocks
+        // must move with it, or the next open's anchor repair would prefer
+        // the pre-RSVP anchor over the position we just pinned.
+        if (update.location && update.location !== config.location) {
+          update.locationUpdatedAt = Date.now();
+          update.rawAnchor = undefined;
+          update.rawAnchorCleared = true;
+        }
         setConfig(bookKey, update);
         saveConfig(envConfig, bookKey, { ...config, ...update }, settings);
       }

@@ -26,11 +26,13 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useEinkMode } from '@/hooks/useEinkMode';
 import { useWebDAVSync } from '../hooks/useWebDAVSync';
 import { useNativeSync } from '../hooks/useNativeSync';
+import { useMyBooksSyncReady } from '../hooks/useMyBooksSyncReady';
 import {
   buildRawAnchorForRange,
   isCfiWithinRange,
   resetLocationCaches,
   resolveRawAnchorToCfi,
+  sectionFractionOf,
 } from '@/services/mybooks/rawLocation';
 import { userRelocateSource } from '../utils/progressSource';
 import {
@@ -140,6 +142,9 @@ const FoliateViewer: React.FC<{
   const bookData = getBookData(bookKey);
   const viewState = getViewState(bookKey);
   const viewSettings = getViewSettings(bookKey);
+  // Raw anchors only exist for MyBooks sync; parsing/normalizing every section
+  // for readers who are not logged in is pure overhead.
+  const isSyncReady = useMyBooksSyncReady();
 
   const viewRef = useRef<FoliateView | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -257,13 +262,6 @@ const FoliateViewer: React.FC<{
     if (requestIdle) requestIdle(callback, { timeout: 2000 });
     else setTimeout(callback, 0);
   };
-  const sectionFractionFor = useCallback((index: number, bookFraction?: number): number => {
-    const fractions = viewRef.current?.getSectionFractions?.() ?? [];
-    const start = fractions[index] ?? 0;
-    const end = fractions[index + 1] ?? 1;
-    const span = end - start;
-    return span > 0 ? Math.max(0, Math.min(1, ((bookFraction ?? 0.5) - start) / span)) : 0.5;
-  }, []);
   const commitRelocate = useCallback(() => {
     relocateRafRef.current = null;
     const event = pendingRelocateRef.current;
@@ -323,13 +321,17 @@ const FoliateViewer: React.FC<{
       source,
     );
 
-    if (source !== 'user' && source !== 'tts') return;
+    if (!isSyncReady || (source !== 'user' && source !== 'tts')) return;
     const view = viewRef.current;
     const index = getIndexFromCfi(detail.cfi);
     if (!view || index == null || !detail.range) return;
-    const fraction = sectionFractionFor(index, detail.fraction);
+    const fraction = sectionFractionOf(view, index, detail.fraction);
     const capturedCfi = detail.cfi;
     scheduleIdle(() => {
+      // The anchor describes the position this relocate committed; pair it
+      // with that position's clock so peers can drop it once a client that
+      // does not send anchors moves the record forward.
+      const updatedAt = useBookDataStore.getState().getConfig(bookKey)?.locationUpdatedAt;
       void buildRawAnchorForRange(
         bookKey,
         view,
@@ -337,6 +339,7 @@ const FoliateViewer: React.FC<{
         detail.range,
         fraction,
         getViewSettings(bookKey),
+        updatedAt,
       )
         .then((anchor) => {
           if (!anchor || disposedRef.current) return;
@@ -348,7 +351,7 @@ const FoliateViewer: React.FC<{
         })
         .catch((error) => console.warn('[sync] failed to build raw anchor', error));
     });
-  }, [bookKey, getViewState, setProgress, setConfig, getViewSettings, sectionFractionFor]);
+  }, [bookKey, getViewState, setProgress, setConfig, getViewSettings, isSyncReady]);
 
   const progressRelocateHandler = (event: Event) => {
     // Always stash the latest detail; if another rAF is already pending
@@ -969,7 +972,7 @@ const FoliateViewer: React.FC<{
       // Migration/repair, after init: resolving the anchor here reuses the
       // loader's already-transformed section instead of pre-transforming it
       // and throwing the cache away. A failed landing is never written back.
-      if (!overrideLocation && savedConfig.location && !disposedRef.current) {
+      if (!overrideLocation && savedConfig.location && !disposedRef.current && isSyncReady) {
         const landed = view.lastLocation as
           | (typeof view.lastLocation & { fraction?: number })
           | undefined;
@@ -1047,7 +1050,7 @@ const FoliateViewer: React.FC<{
           } else if (verified && landed?.cfi && landed.range) {
             const landedIndex = getIndexFromCfi(landed.cfi);
             if (landedIndex != null) {
-              const fraction = sectionFractionFor(landedIndex, landed.fraction);
+              const fraction = sectionFractionOf(view, landedIndex, landed.fraction);
               const anchor = await buildRawAnchorForRange(
                 bookKey,
                 view,
@@ -1055,6 +1058,7 @@ const FoliateViewer: React.FC<{
                 landed.range,
                 fraction,
                 viewSettings,
+                current.locationUpdatedAt,
               );
               if (anchor && !disposedRef.current) {
                 const latest = useBookDataStore.getState().getConfig(bookKey);

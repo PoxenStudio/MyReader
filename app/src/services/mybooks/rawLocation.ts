@@ -20,6 +20,21 @@ const MAX_OCCURRENCES = 64;
 const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
 
+// Book-level fraction (foliate's relocate detail) → fraction within a section,
+// which is the coordinate space raw offsets live in. Shared by the anchor
+// builder and the sync hook's pre-push rebuild so both compute the same hint.
+export const sectionFractionOf = (
+  view: { getSectionFractions?: () => number[] },
+  index: number,
+  bookFraction?: number,
+): number => {
+  const fractions = view.getSectionFractions?.() ?? [];
+  const start = fractions[index] ?? 0;
+  const end = fractions[index + 1] ?? 1;
+  const span = end - start;
+  return span > 0 ? Math.max(0, Math.min(1, ((bookFraction ?? 0.5) - start) / span)) : 0.5;
+};
+
 export const fnv1a = (text: string): string => {
   let hash = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
@@ -55,16 +70,21 @@ export interface RenderedTextInfo extends SearchableText {
   // false when the loader could not provide transformed HTML and the raw
   // section document was used instead; callers must not claim exact mapping.
   transformed: boolean;
+  // Lazily-normalized copy without the Chinese-variant conversion. The reverse
+  // converter assumes the book sits on the opposite side of the setting; when
+  // the book already is in the reader's target variant the conversion moves
+  // away from the raw text, so matching retries against this variant.
+  plainSearchable?: () => SearchableText | null;
 }
 
+// The runtime shape foliate-js's `Section` exposes (libs/document.ts only
+// declares the subset the reader uses); keep this local so the loader API is
+// not widened for every consumer.
 interface LoadableSection {
   createDocument: () => Promise<Document>;
   load?: () => Promise<string>;
   loadContent?: () => Promise<string | undefined>;
   unload?: () => void;
-  loadText?: () => Promise<string | null>;
-  href?: string;
-  id?: string;
 }
 
 interface TextNodeOptions {
@@ -306,19 +326,38 @@ const pickClosest = (occurrences: number[], target: number): number =>
     Math.abs(next - target) < Math.abs(best - target) ? next : best,
   );
 
-export const extractTextAround = (
+// A lazily-built second matching candidate (see RenderedTextInfo). Keeping it
+// a thunk means the unconverted normalization is only paid for when the
+// primary variant-space match fails.
+type SearchableTextFallback = SearchableText | (() => SearchableText | null) | null | undefined;
+
+const resolveFallback = (fallback: SearchableTextFallback): SearchableText | null =>
+  typeof fallback === 'function' ? fallback() : (fallback ?? null);
+
+// Window around `startAt` bounded by the text length. Near the end (or in a
+// short section) the window is shifted to end at the anchor instead of being
+// rewound to 0: rewinding would pull unrelated leading text into the needle
+// and defeat matching whenever an earlier position differs.
+const sliceWindow = (
   text: string,
-  offset: number,
-  quoteLength = 64,
-  contextLength = 24,
-): { quote: string; prefix: string; suffix: string } => {
+  startAt: number,
+  length: number,
+  minLength: number,
+): { start: number; needle: string } => {
+  let start = clamp(Math.round(startAt), 0, text.length);
+  let take = Math.min(length, text.length - start);
+  if (take < minLength) {
+    // Near the end of the text there is not enough content after the anchor;
+    // take the window ending at it instead of rewinding to the section start.
+    start = Math.max(0, start - length);
+    take = Math.min(length, text.length - start);
+  }
+  return { start, needle: text.slice(start, start + take) };
+};
+
+export const extractQuote = (text: string, offset: number, quoteLength = 64): string => {
   const start = clamp(Math.round(offset), 0, text.length);
-  const quote = text.slice(start, start + quoteLength);
-  return {
-    quote,
-    prefix: text.slice(Math.max(0, start - contextLength), start),
-    suffix: text.slice(start + quote.length, start + quote.length + contextLength),
-  };
+  return text.slice(start, start + quoteLength);
 };
 
 export const buildRawAnchor = (
@@ -326,21 +365,21 @@ export const buildRawAnchor = (
   index: number,
   rawOffset: number,
   precision: 'exact' | 'approx',
+  updatedAt?: number,
 ): RawLocationAnchor => {
   const safeOffset = Number.isFinite(rawOffset) ? rawOffset : 0;
   const offset = clamp(Math.round(safeOffset), 0, raw.searchable.text.length);
-  const { quote, prefix, suffix } = extractTextAround(raw.searchable.text, offset);
+  const quote = extractQuote(raw.searchable.text, offset);
   return {
     v: 2,
     index,
     rawOffset: offset,
     rawFraction: raw.searchable.text.length ? offset / raw.searchable.text.length : 0,
     rawQuote: quote,
-    rawPrefix: prefix,
-    rawSuffix: suffix,
     sectionHash: raw.hash,
     rawTextVersion: raw.version,
     precision,
+    ...(updatedAt != null && Number.isFinite(updatedAt) ? { updatedAt } : {}),
   };
 };
 
@@ -386,46 +425,64 @@ export const mapRenderedOffsetToRaw = (
   raw: SearchableText,
   renderedOffset: number,
   hintFraction?: number,
+  alternateRendered?: SearchableTextFallback,
 ): { offset: number; mode: 'exact' | 'approx' } => {
   const rawLength = raw.text.length;
   const safeRenderedOffset = Number.isFinite(renderedOffset) ? renderedOffset : 0;
   const safeHint = hintFraction != null && Number.isFinite(hintFraction) ? hintFraction : undefined;
   const fraction = safeHint ?? safeRenderedOffset / Math.max(1, rendered.text.length);
   const fallback = clamp(Math.round(fraction * rawLength), 0, rawLength);
-  if (!rendered.normalized || !raw.normalized || rawLength === 0) {
+  if (!raw.normalized || rawLength === 0) {
     return { offset: fallback, mode: 'approx' };
   }
 
   const textOffset = clamp(Math.round(safeRenderedOffset), 0, rendered.text.length);
-  const anchorNormalized = rendered.textToNormalized[textOffset] ?? 0;
   const scale = rawLength / Math.max(1, rendered.text.length);
-  const hint = safeHint != null ? safeHint * raw.normalized.length : anchorNormalized;
   const minMatch = Math.min(8, Math.max(2, rawLength));
 
-  const tryWindow = (startAt: number, length: number): number | null => {
-    const start = clamp(startAt, 0, Math.max(0, rendered.normalized.length - length));
-    const needle = rendered.normalized.slice(start, start + length);
-    if (needle.trim().length < minMatch) return null;
-    const occurrences = findOccurrences(raw.normalized, needle);
-    if (occurrences.length === 0) return null;
-    const best = occurrences.length === 1 ? occurrences[0]! : pickClosest(occurrences, hint);
-    const rawTextStart = raw.normalizedToText[best] ?? 0;
-    const renderedTextStart = rendered.normalizedToText[start] ?? 0;
-    return clamp(Math.round(rawTextStart + (textOffset - renderedTextStart) * scale), 0, rawLength);
+  const tryAgainst = (
+    target: SearchableText,
+  ): { offset: number; mode: 'exact' | 'approx' } | null => {
+    if (!target.normalized) return null;
+    const anchorNormalized = target.textToNormalized[textOffset] ?? 0;
+    const hint = safeHint != null ? safeHint * raw.normalized.length : anchorNormalized;
+
+    const tryWindow = (startAt: number, length: number): number | null => {
+      const { start, needle } = sliceWindow(target.normalized, startAt, length, minMatch);
+      if (needle.trim().length < minMatch) return null;
+      const occurrences = findOccurrences(raw.normalized, needle);
+      if (occurrences.length === 0) return null;
+      const best = occurrences.length === 1 ? occurrences[0]! : pickClosest(occurrences, hint);
+      const rawTextStart = raw.normalizedToText[best] ?? 0;
+      const renderedTextStart = target.normalizedToText[start] ?? 0;
+      return clamp(
+        Math.round(rawTextStart + (textOffset - renderedTextStart) * scale),
+        0,
+        rawLength,
+      );
+    };
+
+    for (const length of [96, 64, 48, 32]) {
+      const mapped = tryWindow(anchorNormalized, length);
+      if (mapped != null) return { offset: mapped, mode: 'exact' };
+    }
+
+    for (const step of [32, 64, 128, 256]) {
+      for (const direction of [1, -1]) {
+        const mapped = tryWindow(anchorNormalized + direction * step, 64);
+        if (mapped != null) return { offset: mapped, mode: 'approx' };
+      }
+    }
+    return null;
   };
 
-  for (const length of [96, 64, 48, 32]) {
-    const mapped = tryWindow(anchorNormalized, length);
-    if (mapped != null) return { offset: mapped, mode: 'exact' };
+  const primary = tryAgainst(rendered);
+  if (primary) return primary;
+  const alternate = resolveFallback(alternateRendered);
+  if (alternate) {
+    const mapped = tryAgainst(alternate);
+    if (mapped) return mapped;
   }
-
-  for (const step of [32, 64, 128, 256]) {
-    for (const direction of [1, -1]) {
-      const mapped = tryWindow(anchorNormalized + direction * step, 64);
-      if (mapped != null) return { offset: mapped, mode: 'approx' };
-    }
-  }
-
   return { offset: fallback, mode: 'approx' };
 };
 
@@ -433,6 +490,7 @@ export const mapRawAnchorToRendered = (
   rawInfo: RawTextInfo,
   rendered: SearchableText,
   anchor: RawLocationAnchor,
+  alternateRendered?: SearchableTextFallback,
 ): { offset: number; mode: 'exact' | 'approx' } => {
   const raw = rawInfo.searchable;
   const renderedLength = rendered.text.length;
@@ -448,64 +506,76 @@ export const mapRawAnchorToRendered = (
     anchor.sectionHash !== rawInfo.hash ||
     anchor.rawTextVersion !== rawInfo.version ||
     typeof anchor.rawQuote !== 'string' ||
-    !Number.isFinite(anchor.rawOffset) ||
-    !rendered.normalized
+    !Number.isFinite(anchor.rawOffset)
   ) {
     return { offset: fallback, mode: 'approx' };
   }
 
-  const hint = safeFraction * rendered.normalized.length;
-  const mappedFromOccurrences = (occurrences: number[]): number => {
-    const best = occurrences.length === 1 ? occurrences[0]! : pickClosest(occurrences, hint);
-    return rendered.normalizedToText[best] ?? fallback;
-  };
-
   const minMatch = Math.min(8, Math.max(2, raw.text.length));
   const quote = normalizeString(anchor.rawQuote);
-  if (quote.length >= minMatch) {
-    const occurrences = findOccurrences(rendered.normalized, quote);
-    if (occurrences.length > 0) {
-      return {
-        offset: mappedFromOccurrences(occurrences),
-        mode: approximate ? 'approx' : 'exact',
-      };
-    }
-  }
-
   const rawNormalizedOffset =
     raw.textToNormalized[clamp(anchor.rawOffset, 0, raw.text.length)] ?? 0;
-  const scale = renderedLength / Math.max(1, raw.text.length);
 
-  const tryRawWindow = (startAt: number, length: number): number | null => {
-    const start = clamp(startAt, 0, Math.max(0, raw.normalized.length - length));
-    const needle = raw.normalized.slice(start, start + length);
-    if (needle.trim().length < minMatch) return null;
-    const occurrences = findOccurrences(rendered.normalized, needle);
-    if (occurrences.length === 0) return null;
-    const best = occurrences.length === 1 ? occurrences[0]! : pickClosest(occurrences, hint);
-    const renderedTextStart = rendered.normalizedToText[best] ?? 0;
-    const rawTextStart = raw.normalizedToText[start] ?? 0;
-    return clamp(
-      Math.round(renderedTextStart + (anchor.rawOffset - rawTextStart) * scale),
-      0,
-      Math.max(0, renderedLength - 1),
-    );
+  const tryAgainst = (
+    target: SearchableText,
+  ): { offset: number; mode: 'exact' | 'approx' } | null => {
+    if (!target.normalized) return null;
+    const hint = safeFraction * target.normalized.length;
+    const mappedFromOccurrences = (occurrences: number[]): number => {
+      const best = occurrences.length === 1 ? occurrences[0]! : pickClosest(occurrences, hint);
+      return target.normalizedToText[best] ?? fallback;
+    };
+
+    if (quote.length >= minMatch) {
+      const occurrences = findOccurrences(target.normalized, quote);
+      if (occurrences.length > 0) {
+        return {
+          offset: mappedFromOccurrences(occurrences),
+          mode: approximate ? 'approx' : 'exact',
+        };
+      }
+    }
+
+    const scale = target.text.length / Math.max(1, raw.text.length);
+
+    const tryRawWindow = (startAt: number, length: number): number | null => {
+      const { start, needle } = sliceWindow(raw.normalized, startAt, length, minMatch);
+      if (needle.trim().length < minMatch) return null;
+      const occurrences = findOccurrences(target.normalized, needle);
+      if (occurrences.length === 0) return null;
+      const best = occurrences.length === 1 ? occurrences[0]! : pickClosest(occurrences, hint);
+      const renderedTextStart = target.normalizedToText[best] ?? 0;
+      const rawTextStart = raw.normalizedToText[start] ?? 0;
+      return clamp(
+        Math.round(renderedTextStart + (anchor.rawOffset - rawTextStart) * scale),
+        0,
+        Math.max(0, renderedLength - 1),
+      );
+    };
+
+    for (const length of [96, 64, 48, 32]) {
+      const mapped = tryRawWindow(rawNormalizedOffset, length);
+      if (mapped != null) {
+        return { offset: mapped, mode: approximate ? 'approx' : 'exact' };
+      }
+    }
+
+    for (const step of [64, 128, 256]) {
+      for (const direction of [1, -1]) {
+        const mapped = tryRawWindow(rawNormalizedOffset + direction * step, 64);
+        if (mapped != null) return { offset: mapped, mode: 'approx' };
+      }
+    }
+    return null;
   };
 
-  for (const length of [96, 64, 48, 32]) {
-    const mapped = tryRawWindow(rawNormalizedOffset, length);
-    if (mapped != null) {
-      return { offset: mapped, mode: approximate ? 'approx' : 'exact' };
-    }
+  const primary = tryAgainst(rendered);
+  if (primary) return primary;
+  const alternate = resolveFallback(alternateRendered);
+  if (alternate) {
+    const mapped = tryAgainst(alternate);
+    if (mapped) return mapped;
   }
-
-  for (const step of [64, 128, 256]) {
-    for (const direction of [1, -1]) {
-      const mapped = tryRawWindow(rawNormalizedOffset + direction * step, 64);
-      if (mapped != null) return { offset: mapped, mode: 'approx' };
-    }
-  }
-
   return { offset: fallback, mode: 'approx' };
 };
 
@@ -740,11 +810,19 @@ const getRenderedText = (
     const converter = await makeVariantConverter(settings?.convertChineseVariant);
     const stream = collectTextStream(rendered.doc);
     const searchable = normalizeSearchable(stream, { convertVariant: converter });
-    return {
+    const info: RenderedTextInfo = {
       ...searchable,
       doc: rendered.doc,
       transformed: rendered.transformed,
-    } satisfies RenderedTextInfo;
+    };
+    if (converter) {
+      let plain: SearchableText | undefined;
+      info.plainSearchable = () => {
+        if (!plain) plain = normalizeSearchable(stream);
+        return plain;
+      };
+    }
+    return info;
   })().catch((error) => {
     console.warn('[sync] failed to build rendered section text', index, error);
     return null;
@@ -782,6 +860,7 @@ export const buildRawAnchorForRange = async (
   range: Range,
   fraction: number,
   settings: ViewSettings | null,
+  updatedAt?: number,
 ): Promise<RawLocationAnchor | null> => {
   const [raw, rendered, converter] = await Promise.all([
     getRawText(bookKey, view, index),
@@ -792,7 +871,7 @@ export const buildRawAnchorForRange = async (
   if (raw.searchable.text.length === 0) return null;
 
   if (!rendered || !rendered.transformed || !rendered.normalized) {
-    return buildRawAnchor(raw, index, fraction * raw.searchable.text.length, 'approx');
+    return buildRawAnchor(raw, index, fraction * raw.searchable.text.length, 'approx', updatedAt);
   }
 
   const doc = range.startContainer.ownerDocument;
@@ -806,10 +885,16 @@ export const buildRawAnchorForRange = async (
   const renderedOffset = findBestWindow(rendered, normalizedWindow, hint);
   const targetRenderedOffset =
     renderedOffset != null ? renderedOffset : Math.round(fraction * rendered.text.length);
-  const mapped = mapRenderedOffsetToRaw(rendered, raw.searchable, targetRenderedOffset, fraction);
+  const mapped = mapRenderedOffsetToRaw(
+    rendered,
+    raw.searchable,
+    targetRenderedOffset,
+    fraction,
+    rendered.plainSearchable,
+  );
   const precision: 'exact' | 'approx' =
     renderedOffset != null && mapped.mode === 'exact' ? 'exact' : 'approx';
-  return buildRawAnchor(raw, index, mapped.offset, precision);
+  return buildRawAnchor(raw, index, mapped.offset, precision, updatedAt);
 };
 
 export const resolveRawAnchorToCfi = async (
@@ -825,7 +910,7 @@ export const resolveRawAnchorToCfi = async (
   if (!raw || !rendered) return null;
   const mapped =
     rendered.transformed && rendered.normalized
-      ? mapRawAnchorToRendered(raw, rendered, anchor)
+      ? mapRawAnchorToRendered(raw, rendered, anchor, rendered.plainSearchable)
       : {
           offset: clamp(
             Math.round(anchor.rawFraction * rendered.text.length),

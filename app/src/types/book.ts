@@ -456,7 +456,7 @@ export interface ViewSettings
     WordLensConfig,
     ViewSettingsConfig {}
 
-export type ProgressSource = 'user' | 'tts' | 'remote' | 'restore' | 'repair';
+export type ProgressSource = 'user' | 'tts' | 'remote' | 'restore';
 
 // Cross-device reading position, defined on the *raw* section text so it is
 // independent of the per-device content transformers (whitespace folding,
@@ -468,11 +468,14 @@ export interface RawLocationAnchor {
   rawOffset: number; // character offset in the raw section text stream
   rawFraction: number; // rawOffset / raw text length (0..1)
   rawQuote: string; // raw text at the position, used to refine local mapping
-  rawPrefix: string;
-  rawSuffix: string;
   sectionHash: string; // hash of the raw section text
   rawTextVersion: number;
   precision: 'exact' | 'approx';
+  // The locationUpdatedAt this anchor describes. A client that does not send
+  // anchors (or one that moved without one) can advance a record's location
+  // while the server keeps this field, so peers must ignore an anchor older
+  // than the record's `updated_at`.
+  updatedAt?: number;
 }
 
 export interface BookProgress {

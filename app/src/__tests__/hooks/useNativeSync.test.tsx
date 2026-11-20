@@ -115,6 +115,10 @@ vi.mock('@/store/readerStore', () => ({
   useReaderStore: h.readerStore,
 }));
 
+vi.mock('@/store/readerProgressStore', () => ({
+  useBookProgress: () => h.state.progress,
+}));
+
 vi.mock('@/store/settingsStore', () => ({
   useSettingsStore: h.makeStore({ settings: { version: 1 } }),
 }));
@@ -166,13 +170,12 @@ const rawLocationMocks = vi.hoisted(() => ({
     rawOffset: 10,
     rawFraction: 0.1,
     rawQuote: 'quote',
-    rawPrefix: '',
-    rawSuffix: '',
     sectionHash: 'hash',
     rawTextVersion: 1,
     precision: 'exact' as const,
   })),
   isCfiWithinRange: vi.fn((_target?: string, _visible?: string) => true),
+  sectionFractionOf: vi.fn(() => 0.5),
   resetLocationCaches: vi.fn(),
 }));
 
@@ -186,8 +189,6 @@ const makeRawAnchor = (rawOffset = 10) => ({
   rawOffset,
   rawFraction: 0.1,
   rawQuote: 'quote',
-  rawPrefix: '',
-  rawSuffix: '',
   sectionHash: 'hash',
   rawTextVersion: 1,
   precision: 'exact' as const,
@@ -195,8 +196,12 @@ const makeRawAnchor = (rawOffset = 10) => ({
 
 beforeEach(() => {
   vi.useFakeTimers();
-  h.pullSyncMock.mockClear();
-  h.pushSyncMock.mockClear();
+  // Reset (not just clear): tests install deferred implementations for these
+  // and a leftover one would hang the next test's initial pull.
+  h.pullSyncMock.mockReset();
+  h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+  h.pushSyncMock.mockReset();
+  h.pushSyncMock.mockResolvedValue({});
   h.setConfigMock.mockClear();
   h.saveConfigMock.mockClear();
   h.goToMock.mockClear();
@@ -219,8 +224,6 @@ beforeEach(() => {
     rawOffset: 10,
     rawFraction: 0.1,
     rawQuote: 'quote',
-    rawPrefix: '',
-    rawSuffix: '',
     sectionHash: 'hash',
     rawTextVersion: 1,
     precision: 'exact',
@@ -1130,6 +1133,106 @@ describe('useNativeSync', () => {
         (call) => (call[4] as { preserveUpdatedAt?: boolean } | undefined)?.preserveUpdatedAt,
       ),
     ).toBe(true);
+  });
+
+  test('ignores an anchor older than the record it is attached to', async () => {
+    // A client that does not send anchors keeps pushing `location` with a
+    // fresh `updated_at` while the server retains our stale `raw_anchor`.
+    const staleAnchor = { ...makeRawAnchor(120), updatedAt: 1000 };
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'epubcfi(/6/4!/4/2/1:5)',
+          raw_anchor: staleAnchor,
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        vi.advanceTimersByTime(800);
+        for (let j = 0; j < 10; j++) await Promise.resolve();
+      });
+    }
+
+    expect(rawLocationMocks.resolveRawAnchorToCfi).not.toHaveBeenCalled();
+    expect(rawLocationMocks.resolveLegacyCfiToLocal).toHaveBeenCalled();
+    expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('re-runs a pull requested while another pull is in flight', async () => {
+    const resolvers: Array<(value: unknown) => void> = [];
+    h.pullSyncMock.mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve)) as never,
+    );
+
+    const { result } = renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    expect(resolvers).toHaveLength(1);
+
+    const queued = result.current.pullNow();
+    await flushMicrotasks();
+    expect(resolvers).toHaveLength(1);
+
+    await act(async () => {
+      resolvers[0]!({ configs: null, notes: null });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    await act(async () => {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    expect(resolvers).toHaveLength(2);
+    await act(async () => {
+      resolvers[1]!({ configs: null, notes: null });
+      await queued;
+    });
+  });
+
+  test('re-runs a push requested while another push is in flight', async () => {
+    const resolvers: Array<(value: unknown) => void> = [];
+    const { result } = renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    h.pushSyncMock.mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve)) as never,
+    );
+    const first = result.current.pushNow();
+    await flushMicrotasks();
+    expect(resolvers).toHaveLength(1);
+
+    // A change that lands while the first push is still in flight.
+    h.state.config = {
+      location: 'epubcfi(/6/4!/4/2/1:7)',
+      updatedAt: 5000,
+      locationUpdatedAt: Number.MAX_SAFE_INTEGER,
+    };
+    void result.current.pushNow();
+    await flushMicrotasks();
+    expect(resolvers).toHaveLength(1);
+
+    await act(async () => {
+      resolvers[0]!({});
+      await first;
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    expect(resolvers).toHaveLength(2);
+    const queuedPayload = h.pushSyncMock.mock.calls.at(-1)![0] as {
+      configs?: { location?: string }[];
+    };
+    expect(queuedPayload.configs?.[0]?.location).toBe('epubcfi(/6/4!/4/2/1:7)');
+    await act(async () => {
+      resolvers[1]!({});
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
   });
 
   test('does not apply a remote location that cannot be resolved locally', async () => {
