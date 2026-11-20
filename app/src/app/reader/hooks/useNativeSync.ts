@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useAuth } from '@/context/AuthContext';
 import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore } from '@/store/bookDataStore';
-import { useMyBooksStatusStore, useMyBooksSyncAllowed } from '@/store/mybooksStatusStore';
+import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useReaderStore } from '@/store/readerStore';
+import { useBookProgress } from '@/store/readerProgressStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { debounce } from '@/utils/debounce';
@@ -13,7 +13,6 @@ import { getIndexFromCfi } from '@/utils/cfi';
 import { BookConfig, BookConfigRecord, BookNote, RawLocationAnchor } from '@/types/book';
 import type { FoliateView } from '@/types/view';
 import * as CFI from 'foliate-js/epubcfi.js';
-import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
 import {
@@ -21,6 +20,7 @@ import {
   isCfiWithinRange,
   resolveLegacyCfiToLocal,
   resolveRawAnchorToCfi,
+  sectionFractionOf,
 } from '@/services/mybooks/rawLocation';
 import {
   ActiveReadingTracker,
@@ -30,6 +30,7 @@ import {
 } from '@/services/mybooks/activeReadingTracker';
 import { useWindowActiveChanged } from './useWindowActiveChanged';
 import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvents';
+import { useMyBooksSyncReady } from './useMyBooksSyncReady';
 
 /**
  * MyReader(Readest) Native Sync per-book hook — syncs reading progress (`BookConfig`)
@@ -184,29 +185,22 @@ const isValidRawAnchor = (value: unknown): value is RawLocationAnchor => {
     typeof anchor.rawQuote === 'string' &&
     typeof anchor.sectionHash === 'string' &&
     Number.isFinite(anchor.rawTextVersion) &&
+    (anchor.updatedAt === undefined || Number.isFinite(anchor.updatedAt)) &&
     (anchor.precision === 'exact' || anchor.precision === 'approx')
   );
-};
-
-const sectionFractionOf = (view: FoliateView, index: number, bookFraction?: number): number => {
-  const fractions = view.getSectionFractions?.() ?? [];
-  const start = fractions[index] ?? 0;
-  const end = fractions[index + 1] ?? 1;
-  const span = end - start;
-  return span > 0 ? Math.max(0, Math.min(1, ((bookFraction ?? 0.5) - start) / span)) : 0.5;
 };
 
 export const useNativeSync = (bookKey: string) => {
   const _ = useTranslation();
   const { envConfig } = useEnv();
-  const { status, isGuest } = useAuth();
   const { settings } = useSettingsStore();
-  const { getProgress } = useReaderStore();
   const { getConfig, setConfig, getBookData, saveConfig } = useBookDataStore();
-  const isSyncAllowed = useMyBooksSyncAllowed();
-  const progress = getProgress(bookKey);
+  // Subscribe to progress instead of reading it imperatively: restore/remote
+  // relocates no longer write bookDataStore, so without this the open pull and
+  // the push-on-progress effect would wait for an unrelated re-render.
+  const progress = useBookProgress(bookKey);
 
-  const isReady = ENABLE_SYNC_FEATURE && status === 'logged_in' && !isGuest && isSyncAllowed;
+  const isReady = useMyBooksSyncReady();
 
   useNativeSyncEvents(isReady);
 
@@ -217,9 +211,20 @@ export const useNativeSync = (bookKey: string) => {
   const localLocationGenerationRef = useRef(0);
   const lastProgressLocationRef = useRef<string | null>(null);
   const pullInFlightRef = useRef<Promise<boolean> | null>(null);
+  const pullPendingRef = useRef(false);
   const pushInFlightRef = useRef(false);
+  const pushPendingRef = useRef(false);
   const lastPushedLocationUpdatedAtRef = useRef(0);
   const lastPushedAnchorSignatureRef = useRef('');
+  // Filled in by the effect below. A push/pull that was skipped because one
+  // was already in flight re-runs through these, so a change that lands
+  // mid-flight is not silently dropped.
+  const pushNowRef = useRef<() => Promise<void>>(async () => {});
+  const pullNowRef = useRef<() => Promise<boolean>>(async () => false);
+  const syncRefs = useRef<{ pushNow: () => Promise<void>; pullNow: () => Promise<boolean> }>({
+    pushNow: async () => {},
+    pullNow: async () => false,
+  });
 
   useEffect(() => {
     // A local anchor that predates this session has already been pushed (or
@@ -270,7 +275,8 @@ export const useNativeSync = (bookKey: string) => {
   const pushNow = useCallback(async () => {
     if (!isReady) return;
     if (pushInFlightRef.current) {
-      syncLog(bookKey, 'push:skip', { reason: 'push-in-flight' });
+      pushPendingRef.current = true;
+      syncLog(bookKey, 'push:queued', { reason: 'push-in-flight' });
       return;
     }
     if (!initialPullDoneRef.current) {
@@ -290,13 +296,24 @@ export const useNativeSync = (bookKey: string) => {
     const now = Date.now();
     lastPushAttemptAtRef.current = now;
 
+    // Releases the flight and immediately re-runs once if another push was
+    // requested while this one was in flight (dirtyRef alone would leave it
+    // waiting for the next page turn).
+    const endPush = () => {
+      pushInFlightRef.current = false;
+      if (pushPendingRef.current) {
+        pushPendingRef.current = false;
+        void pushNowRef.current();
+      }
+    };
+
     // A position change invalidates the anchor until the idle build lands.
     // Blur/unmount can push before that; build it now instead of sending
     // `raw_anchor: null` and clearing the server's good anchor.
     let effectiveAnchor = config.rawAnchor;
     let anchorCleared = !!config.rawAnchorCleared;
     if (!effectiveAnchor && anchorCleared) {
-      const progressNow = getProgress(bookKey);
+      const progressNow = useReaderStore.getState().getProgress(bookKey);
       const view = useReaderStore.getState().getView(bookKey);
       const index = config.location ? getIndexFromCfi(config.location) : null;
       if (view && index != null && progressNow?.range && progressNow.location === config.location) {
@@ -308,6 +325,7 @@ export const useNativeSync = (bookKey: string) => {
             progressNow.range,
             sectionFractionOf(view, index, progressNow.fraction),
             useReaderStore.getState().getViewSettings(bookKey),
+            config.locationUpdatedAt,
           );
           const latestConfig = getConfig(bookKey);
           if (
@@ -320,7 +338,7 @@ export const useNativeSync = (bookKey: string) => {
             syncLog(bookKey, 'push:skip', {
               reason: 'location-moved-during-anchor-build',
             });
-            pushInFlightRef.current = false;
+            endPush();
             return;
           }
           if (anchor) {
@@ -441,7 +459,7 @@ export const useNativeSync = (bookKey: string) => {
         console.warn('Native sync push failed', e);
       }
     } finally {
-      pushInFlightRef.current = false;
+      endPush();
     }
   }, [
     isReady,
@@ -459,6 +477,7 @@ export const useNativeSync = (bookKey: string) => {
   const resolveRemotePosition = useCallback(
     async (
       remoteConfig: Partial<BookConfigRecord>,
+      remoteAnchor: RawLocationAnchor | null,
     ): Promise<{
       view: FoliateView;
       cfi: string;
@@ -470,8 +489,6 @@ export const useNativeSync = (bookKey: string) => {
       const view = await waitForViewInited(bookKey);
       if (!view) return null;
       const viewSettings = useReaderStore.getState().getViewSettings(bookKey);
-      const remoteAnchorRaw = remoteConfig.raw_anchor ?? remoteConfig.rawAnchor ?? null;
-      const remoteAnchor = isValidRawAnchor(remoteAnchorRaw) ? remoteAnchorRaw : null;
       if (remoteAnchor) {
         const resolved = await resolveRawAnchorToCfi(bookKey, view, remoteAnchor, viewSettings);
         if (resolved) {
@@ -525,6 +542,7 @@ export const useNativeSync = (bookKey: string) => {
       remoteAnchor: RawLocationAnchor | null,
       generationAtStart: number,
       localized: boolean,
+      remoteUpdatedAt: number,
     ): Promise<{
       applied: boolean;
       location: string;
@@ -583,6 +601,7 @@ export const useNativeSync = (bookKey: string) => {
             landed.range,
             fraction,
             useReaderStore.getState().getViewSettings(bookKey),
+            remoteUpdatedAt,
           )) ?? undefined
         );
       };
@@ -694,10 +713,19 @@ export const useNativeSync = (bookKey: string) => {
         localLocationGenerationRef.current !== generationAtStart ||
         (liveConfig.locationUpdatedAt ?? 0) !== (config.locationUpdatedAt ?? 0);
 
-      const remoteAnchorRaw = remoteConfig?.raw_anchor ?? remoteConfig?.rawAnchor ?? null;
-      const remoteAnchor = isValidRawAnchor(remoteAnchorRaw) ? remoteAnchorRaw : null;
       const remoteLocationUpdatedAt =
         remoteConfig?.locationUpdatedAt ?? remoteConfig?.updated_at ?? remoteConfig?.updatedAt ?? 0;
+      const remoteAnchorRaw = remoteConfig?.raw_anchor ?? remoteConfig?.rawAnchor ?? null;
+      const remoteAnchorCandidate = isValidRawAnchor(remoteAnchorRaw) ? remoteAnchorRaw : null;
+      // A client that does not send anchors (an older build) keeps pushing
+      // `location` with a fresh `updated_at`, while the server retains our old
+      // `raw_anchor`. That anchor describes an older position and must not
+      // win over the newer location.
+      const remoteAnchor =
+        remoteAnchorCandidate?.updatedAt != null &&
+        remoteAnchorCandidate.updatedAt < remoteLocationUpdatedAt
+          ? null
+          : remoteAnchorCandidate;
       const localLocationUpdatedAt = liveConfig.locationUpdatedAt ?? liveConfig.updatedAt ?? 0;
       const hasRemoteLocation = !!(remoteAnchor || remoteConfig?.location);
       // Migration: a legacy server record (no raw anchor) is the source of
@@ -732,7 +760,7 @@ export const useNativeSync = (bookKey: string) => {
       let appliedAnchor: RawLocationAnchor | undefined;
       let locationFailure: string | undefined;
       if (remoteLocationWins && !localChangedDuringFlight && !previewMode) {
-        const resolved = await resolveRemotePosition(remoteConfig!);
+        const resolved = await resolveRemotePosition(remoteConfig!, remoteAnchor);
         if (!resolved) {
           locationFailure = 'unresolvable';
         } else {
@@ -743,6 +771,7 @@ export const useNativeSync = (bookKey: string) => {
             resolved.anchor,
             generationAtStart,
             resolved.localized,
+            remoteLocationUpdatedAt,
           );
           if (applied.applied) {
             locationApplied = true;
@@ -863,19 +892,27 @@ export const useNativeSync = (bookKey: string) => {
   ]);
 
   const pullNow = useCallback(async (): Promise<boolean> => {
-    if (pullInFlightRef.current) return pullInFlightRef.current;
+    if (pullInFlightRef.current) {
+      pullPendingRef.current = true;
+      return pullInFlightRef.current;
+    }
     const promise = doPull();
     pullInFlightRef.current = promise;
     try {
       return await promise;
     } finally {
       pullInFlightRef.current = null;
+      if (pullPendingRef.current) {
+        pullPendingRef.current = false;
+        void pullNowRef.current();
+      }
     }
   }, [doPull]);
 
-  const syncRefs = useRef({ pushNow, pullNow });
   useEffect(() => {
     syncRefs.current = { pushNow, pullNow };
+    pushNowRef.current = pushNow;
+    pullNowRef.current = pullNow;
   }, [pushNow, pullNow]);
 
   const debouncedPush = useCallback(

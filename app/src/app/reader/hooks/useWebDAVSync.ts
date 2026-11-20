@@ -360,6 +360,15 @@ export const useWebDAVSync = (bookKey: string) => {
       if (!wantNotes) {
         toApply.booknotes = config.booknotes;
       }
+      // The merged config can pair another device's location with this
+      // device's raw anchor (WebDAV never carries anchors). Keep the pair
+      // atomic or the on-open repair would jump back to the anchor's old
+      // position: a WebDAV-applied position is a local position change.
+      if (toApply.location && toApply.location !== config.location) {
+        toApply.locationUpdatedAt = Date.now();
+        toApply.rawAnchor = undefined;
+        toApply.rawAnchorCleared = true;
+      }
 
       setConfig(bookKey, toApply);
       // Persist locally so a later session sees the merged state even if

@@ -342,8 +342,6 @@ describe('readerStore', () => {
       rawOffset: 5,
       rawFraction: 0.1,
       rawQuote: 'quote',
-      rawPrefix: '',
-      rawSuffix: '',
       sectionHash: 'hash',
       rawTextVersion: 1,
       precision: 'exact',
