@@ -319,6 +319,12 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
         handleBookUpload(book);
       },
     });
+    const linkCloudBookMenuItem = await MenuItem.new({
+      text: _('Link Cloud Book'),
+      action: async () => {
+        eventDispatcher.dispatch('show-link-cloud-book-dialog', { book });
+      },
+    });
     const sendToDeviceMenuItem = await MenuItem.new({
       text: _('Send to Device'),
       action: async () => {
@@ -429,6 +435,7 @@ const BookshelfItem: React.FC<BookshelfItemProps> = ({
     }
     if (book.storageType !== 'cloud' && book.bookId === 0) {
       menu.append(uploadBookMenuItem);
+      menu.append(linkCloudBookMenuItem);
     }
     // Offered for cloud-bookshelf books and local books downloaded from
     // MyBooks (both carry a resolvable MyBooks book id); not for audiobooks

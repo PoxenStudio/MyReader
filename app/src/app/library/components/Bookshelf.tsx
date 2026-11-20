@@ -60,6 +60,7 @@ import BookshelfItem, { generateBookshelfItems } from './BookshelfItem';
 import SelectModeActions from './SelectModeActions';
 import SendToDeviceDialog from './SendToDeviceDialog';
 import BookReviewDialog from './BookReviewDialog';
+import LinkCloudBookDialog from './LinkCloudBookDialog';
 import { useAuth } from '@/context/AuthContext';
 import GroupingModal from './GroupingModal';
 import SetStatusAlert from './SetStatusAlert';
@@ -764,6 +765,28 @@ const Bookshelf: React.FC<BookshelfProps> = ({
     };
   }, [user, _]);
 
+  const [linkCloudBook, setLinkCloudBook] = useState<Book | null>(null);
+
+  useEffect(() => {
+    const handleLinkCloudBookIntent = (event: CustomEvent) => {
+      const book = (event.detail as { book?: Book } | undefined)?.book;
+      if (!book) return;
+      if (!user) {
+        eventDispatcher.dispatch('toast', {
+          type: 'info',
+          message: _('Sign in to link cloud books'),
+          timeout: 2500,
+        });
+        return;
+      }
+      setLinkCloudBook(book);
+    };
+    eventDispatcher.on('show-link-cloud-book-dialog', handleLinkCloudBookIntent);
+    return () => {
+      eventDispatcher.off('show-link-cloud-book-dialog', handleLinkCloudBookIntent);
+    };
+  }, [user, _]);
+
   // OverlayScrollbars + Virtuoso integration: Virtuoso manages its own
   // scroller; OverlayScrollbars wraps it for overlay scrollbar rendering.
   const osRootRef = useRef<HTMLDivElement>(null);
@@ -1162,6 +1185,11 @@ const Bookshelf: React.FC<BookshelfProps> = ({
         isOpen={!!reviewBook}
         book={reviewBook}
         onClose={() => setReviewBook(null)}
+      />
+      <LinkCloudBookDialog
+        isOpen={!!linkCloudBook}
+        book={linkCloudBook}
+        onClose={() => setLinkCloudBook(null)}
       />
     </div>
   );
