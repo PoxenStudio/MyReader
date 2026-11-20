@@ -211,10 +211,17 @@ export const useNativeSync = (bookKey: string) => {
   const lastPushAttemptAtRef = useRef(0);
 
   const ensureTracker = useCallback((): ActiveReadingTracker => {
+    // 站点时区名由 /user/info 的 sys 块下发（见 webserver/handlers/base.py 的
+    // _sys_info_with）。阅读时长按它的一日分桶，与服务端心跳/仪表盘同口径。
+    const timezone = useMyBooksStatusStore.getState().sysInfo?.timezone ?? null;
     if (!trackerRef.current) {
       const initialPending = getConfig(bookKey)?.pendingReadingSeconds ?? {};
-      trackerRef.current = new ActiveReadingTracker(initialPending);
+      trackerRef.current = new ActiveReadingTracker(initialPending, Date.now(), timezone);
       lastPersistedPendingRef.current = JSON.stringify(initialPending);
+    } else {
+      // sys.timezone 可能在会话中途变（管理员改站点时区 / 切服务器）：下一次 tick
+      // 起按新时区攒日期键，已经攒下的旧键不回溯。
+      trackerRef.current.setTimezone(timezone);
     }
     return trackerRef.current;
   }, [bookKey, getConfig]);
@@ -684,6 +691,9 @@ export const useNativeSync = (bookKey: string) => {
     const tracker = ensureTracker();
 
     const tickId = setInterval(() => {
+      // 每次 tick 顺手同步一次站点时区：sys.timezone 可能在阅读途中被管理员改掉，
+      // tick 是最主要的"往哪一天记"的写入路径，不该等下一次翻页才生效。
+      tracker.setTimezone(useMyBooksStatusStore.getState().sysInfo?.timezone ?? null);
       tracker.tick(isWindowActiveRef.current);
     }, TICK_INTERVAL_MS);
 

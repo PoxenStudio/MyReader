@@ -21,7 +21,8 @@ export interface SyncPushPayload {
   configs?: Partial<BookConfigRecord>[];
   // 离线阅读显式上报（见 document/Reading_Stats_Design.md 的离线阅读扩展和
   // activeReadingTracker.ts）：客户端已经自己算好的、心跳到达间隔完全看不到的阅读
-  // 时长，按 UTC 日期分桶。date 是 "YYYY-MM-DD"。
+  // 时长。date 是 "YYYY-MM-DD"，语义为**站点时区的一天**（服务端按 sys.timezone 切天，
+  // 与心跳同口径；老服务端没有该字段时退回 UTC 日）。
   reading_seconds?: { book_hash: string; date: string; seconds: number }[];
 }
 

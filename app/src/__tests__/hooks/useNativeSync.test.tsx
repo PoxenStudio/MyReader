@@ -64,7 +64,11 @@ const h = vi.hoisted(() => {
     setConfigMock: vi.fn(),
     saveConfigMock: vi.fn(async () => {}),
     goToMock: vi.fn(),
-    mybooksStatus: { currentUserId: 1, showOtherAnnotations: true },
+    mybooksStatus: {
+      currentUserId: 1,
+      showOtherAnnotations: true,
+      sysInfo: null as { timezone?: string | null } | null,
+    },
   };
 });
 
@@ -142,6 +146,7 @@ beforeEach(() => {
   };
   h.mybooksStatus.currentUserId = 1;
   h.mybooksStatus.showOtherAnnotations = true;
+  h.mybooksStatus.sysInfo = null;
 });
 
 afterEach(() => {
@@ -740,6 +745,33 @@ describe('useNativeSync', () => {
       'book-key',
       expect.objectContaining({ pendingReadingSeconds: {} }),
     );
+  });
+
+  test('buckets tracked seconds by the site timezone from sysInfo', async () => {
+    // 接线测试：sys.timezone → ensureTracker → tick → reading_seconds.date。
+    // 2026-10-30T16:30Z = 北京 10-31 00:30：按 UTC 日会记成 10-30，正是这个 bug。
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+    h.mybooksStatus.sysInfo = { timezone: 'Asia/Shanghai' };
+    vi.setSystemTime(new Date('2026-10-30T16:30:00Z'));
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    h.pushSyncMock.mockClear();
+
+    // 20s 时攒下第一段 10s（首个 tick 只记 lastTickAt）；等 keepalive（60s 间隔、
+    // 距上次 push 也要满 60s）把它带走——普通 debounce push 发生在攒到秒数之前。
+    await act(async () => {
+      vi.advanceTimersByTime(125_000);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    const withSeconds = h.pushSyncMock.mock.calls
+      .map((call) => call[0] as { reading_seconds?: { date: string; seconds: number }[] })
+      .filter((payload) => payload.reading_seconds && payload.reading_seconds.length > 0);
+    expect(withSeconds.length).toBeGreaterThan(0);
+    const readings = withSeconds.at(-1)!.reading_seconds!;
+    expect(readings[0]!.date).toBe('2026-10-31');
+    expect(readings[0]!.seconds).toBeGreaterThan(0);
   });
 
   test('keeps pending offline reading seconds on a failed push', async () => {

@@ -2,8 +2,13 @@
  * 客户端本地"活跃阅读"计时——覆盖心跳推算完全看不到的场景（尤其是离线阅读），见
  * document/Reading_Stats_Design.md 的离线阅读扩展。判定口径复用服务端
  * `HEARTBEAT_MAX_GAP`（60s）：最近一次翻页/滚动/交互距现在超过这个窗口就不计时，
- * 避免把"开着书但人已经走开"算进去。按 UTC 日期分桶，与服务端 `Reading.date`
- * 的存储语义保持一致——上报前的时区转换由这个模块完成，不依赖调用方记得转换。
+ * 避免把"开着书但人已经走开"算进去。
+ *
+ * 分桶日期必须是**站点时区**下的一天：新版 MyBooks 服务端的网页心跳和仪表盘都按
+ * sys.timezone 切天（webserver/site_time.py）。这里若按 UTC 分桶，东八区读者本地
+ * 00:00–07:59 的阅读会被上报成前一天——统计页「今日时长」从 0 点起一直不涨，连击、
+ * 热力图、周/月归属也跟着错位。站点时区名由 /user/info 的 sys.timezone 下发，
+ * 创建 tracker 时传进来。
  */
 
 export const ACTIVE_GAP_MS = 60_000;
@@ -14,8 +19,57 @@ export const KEEPALIVE_PUSH_MS = 60_000;
 // 把某一天的秒数攒到不合理的量级。
 export const MAX_DAILY_SECONDS = 18 * 3600;
 
-export function utcDateString(now: number = Date.now()): string {
+// 值为 null 表示"这个时区名已知不合法"，避免每 10 秒的 tick 重复抛一次 RangeError
+const dateFormatterCache = new Map<string, Intl.DateTimeFormat | null>();
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function utcDateString(now: number): string {
   return new Date(now).toISOString().slice(0, 10);
+}
+
+function localDateString(now: number): string {
+  const local = new Date(now);
+  return `${local.getFullYear()}-${pad2(local.getMonth() + 1)}-${pad2(local.getDate())}`;
+}
+
+/**
+ * `now` 在 `timezone`（IANA 名，如 Asia/Shanghai）下是哪一天，格式 YYYY-MM-DD。
+ *
+ * 三种情况要分开：
+ * - 字段缺失/空（undefined、null、''）：服务端早于 site_time.py，那时它按 **UTC 日**
+ *   切天，客户端跟着用 UTC 才对齐。退回设备本地日会在"UTC 站点 + 非 UTC 设备"上
+ *   把本来正确的时间记错一天。
+ * - 有值：按 IANA 名算。formatter 按时区名缓存，tick 每 10 秒一次不必重复构造。
+ * - 有值但浏览器不认（老 WebView 缺 tzdata、名字拼错）：只能猜设备本地日，并把这个
+ *   名字记成"已知非法"，避免每次都抛异常。
+ */
+export function siteDateString(now: number = Date.now(), timezone?: string | null): string {
+  if (!timezone) return utcDateString(now);
+
+  let formatter = dateFormatterCache.get(timezone);
+  if (formatter === undefined) {
+    try {
+      formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+    } catch {
+      formatter = null;
+    }
+    dateFormatterCache.set(timezone, formatter);
+  }
+  if (formatter) {
+    const parts = formatter.formatToParts(new Date(now));
+    const pick = (type: string) => parts.find((part) => part.type === type)?.value;
+    const [y, m, d] = [pick('year'), pick('month'), pick('day')];
+    if (y && m && d) return `${y}-${m}-${d}`;
+  }
+  return localDateString(now);
 }
 
 export interface ReadingSecondsEntry {
@@ -32,10 +86,24 @@ export class ActiveReadingTracker {
   private pending: Record<string, number>;
   private lastTickAt: number | null = null;
   private lastInteractionAt: number;
+  private timezone: string | null;
 
-  constructor(initialPending: Record<string, number> = {}, now: number = Date.now()) {
+  constructor(
+    initialPending: Record<string, number> = {},
+    now: number = Date.now(),
+    timezone: string | null = null,
+  ) {
     this.pending = { ...initialPending };
     this.lastInteractionAt = now;
+    this.timezone = timezone;
+  }
+
+  /**
+   * 更新站点时区（管理员改了 site_timezone，或切到了另一台服务器）。只影响之后新攒的
+   * 秒数：已经落在旧日期键里的 pending 保持原样，它们记录的是当时上报口径下的那一天。
+   */
+  setTimezone(timezone: string | null | undefined): void {
+    this.timezone = timezone ?? null;
   }
 
   /** 翻页/滚动/高亮等任意"用户仍在读"的信号。 */
@@ -74,7 +142,7 @@ export class ActiveReadingTracker {
     this.lastTickAt = now;
     if (elapsedSeconds <= 0) return false;
 
-    const date = utcDateString(now);
+    const date = siteDateString(now, this.timezone);
     const current = this.pending[date] ?? 0;
     this.pending[date] = Math.min(current + elapsedSeconds, MAX_DAILY_SECONDS);
     return true;
