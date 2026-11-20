@@ -917,7 +917,7 @@ describe('useNativeSync', () => {
   });
 
   test('applies a raw anchor and preserves the server record timestamp', async () => {
-    const anchor = makeRawAnchor(120);
+    const anchor = { ...makeRawAnchor(120), updatedAt: 2000 };
     rawLocationMocks.resolveRawAnchorToCfi.mockResolvedValue({
       cfi: 'anchor-loc',
       mode: 'exact',
@@ -997,6 +997,104 @@ describe('useNativeSync', () => {
     expect(rawLocationMocks.resolveRawAnchorToCfi).not.toHaveBeenCalled();
     expect(rawLocationMocks.resolveLegacyCfiToLocal).toHaveBeenCalled();
     expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('ignores an anchor that carries no position clock', async () => {
+    // Anchors written before `updatedAt` existed cannot prove they describe
+    // the record they travel with; they fall back to location + LWW.
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'epubcfi(/6/4!/4/2/1:5)',
+          raw_anchor: makeRawAnchor(120),
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        vi.advanceTimersByTime(800);
+        for (let j = 0; j < 10; j++) await Promise.resolve();
+      });
+    }
+
+    expect(rawLocationMocks.resolveRawAnchorToCfi).not.toHaveBeenCalled();
+    expect(rawLocationMocks.resolveLegacyCfiToLocal).toHaveBeenCalled();
+    expect(h.goToMock).toHaveBeenCalledWith('remote-loc');
+  });
+
+  test('a stale anchor does not grant server authority over a newer local position', async () => {
+    h.state.config = {
+      location: 'local-loc',
+      updatedAt: 1000,
+      locationUpdatedAt: 3000,
+    };
+    h.pullSyncMock.mockResolvedValue({
+      configs: [
+        {
+          id: 'book-hash',
+          book_hash: 'book-hash',
+          updatedAt: 2000,
+          progress: [1, 450],
+          location: 'epubcfi(/6/4!/4/2/1:5)',
+          raw_anchor: { ...makeRawAnchor(120), updatedAt: 1000 },
+        },
+      ],
+      notes: null,
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        vi.advanceTimersByTime(800);
+        for (let j = 0; j < 10; j++) await Promise.resolve();
+      });
+    }
+
+    expect(rawLocationMocks.resolveRawAnchorToCfi).not.toHaveBeenCalled();
+    expect(rawLocationMocks.resolveLegacyCfiToLocal).not.toHaveBeenCalled();
+    expect(h.goToMock).not.toHaveBeenCalled();
+  });
+
+  test('does not undo an anchor clear that landed during the push', async () => {
+    const resolvers: Array<(value: unknown) => void> = [];
+    const { result } = renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    h.pushSyncMock.mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve)) as never,
+    );
+    const first = result.current.pushNow();
+    await flushMicrotasks();
+    expect(resolvers).toHaveLength(1);
+
+    // A newer position was persisted (and its anchor invalidated) mid-flight.
+    h.state.config = {
+      location: 'epubcfi(/6/4!/4/2/1:9)',
+      updatedAt: 6000,
+      locationUpdatedAt: 6000,
+      rawAnchorCleared: true,
+    };
+    await act(async () => {
+      resolvers[0]!({});
+      await first;
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    const synced = h.setConfigMock.mock.calls.at(-1)?.[1] as {
+      rawAnchorCleared?: boolean;
+      location?: string;
+    };
+    expect(synced.location).toBe('epubcfi(/6/4!/4/2/1:9)');
+    expect(synced.rawAnchorCleared).toBe(true);
   });
 
   test('re-runs a pull requested while another pull is in flight', async () => {

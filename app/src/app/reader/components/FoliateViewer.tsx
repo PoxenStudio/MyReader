@@ -142,8 +142,14 @@ const FoliateViewer: React.FC<{
   const viewState = getViewState(bookKey);
   const viewSettings = getViewSettings(bookKey);
   // Raw anchors only exist for MyBooks sync; parsing/normalizing every section
-  // for readers who are not logged in is pure overhead.
+  // for readers who are not logged in is pure overhead. Event handlers are
+  // registered once per view (useFoliateEvents depends on [view]), so they
+  // must read this through a ref instead of a captured render value.
   const isSyncReady = useMyBooksSyncReady();
+  const syncReadyRef = useRef(isSyncReady);
+  useEffect(() => {
+    syncReadyRef.current = isSyncReady;
+  }, [isSyncReady]);
 
   const viewRef = useRef<FoliateView | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -235,7 +241,7 @@ const FoliateViewer: React.FC<{
     cancelAnimationFrame(id);
   }, []);
   const rawAnchorKey = (anchor?: BookConfig['rawAnchor']): string =>
-    anchor ? `${anchor.rawOffset}:${anchor.sectionHash}:${anchor.precision}` : '';
+    anchor ? `${anchor.index}:${anchor.rawOffset}:${anchor.sectionHash}:${anchor.precision}` : '';
   const scheduleIdle = (callback: () => void) => {
     const requestIdle = (
       globalThis as {
@@ -275,17 +281,18 @@ const FoliateViewer: React.FC<{
       source,
     );
 
-    if (!isSyncReady || (source !== 'user' && source !== 'tts')) return;
+    if (!syncReadyRef.current || (source !== 'user' && source !== 'tts')) return;
     const view = viewRef.current;
     const index = getIndexFromCfi(detail.cfi);
     if (!view || index == null || !detail.range) return;
     const fraction = sectionFractionOf(view, index, detail.fraction);
+    // Snapshot the config pair this relocate wrote (setProgress runs above).
+    // The idle build must only land on that exact pair: another writer
+    // (WebDAV pull, RSVP exit) can replace the location while it is pending.
     const capturedCfi = detail.cfi;
+    const snapshot = useBookDataStore.getState().getConfig(bookKey);
+    const capturedClock = snapshot?.locationUpdatedAt;
     scheduleIdle(() => {
-      // The anchor describes the position this relocate committed; pair it
-      // with that position's clock so peers can drop it once a client that
-      // does not send anchors moves the record forward.
-      const updatedAt = useBookDataStore.getState().getConfig(bookKey)?.locationUpdatedAt;
       void buildRawAnchorForRange(
         bookKey,
         view,
@@ -293,19 +300,26 @@ const FoliateViewer: React.FC<{
         detail.range,
         fraction,
         getViewSettings(bookKey),
-        updatedAt,
+        capturedClock,
       )
         .then((anchor) => {
           if (!anchor || disposedRef.current) return;
-          // A burst of page turns can finish this out of order; only keep the
-          // anchor for the position that is still current.
-          const current = useReaderStore.getState().getProgress(bookKey)?.location;
-          if (current !== capturedCfi) return;
+          const current = useBookDataStore.getState().getConfig(bookKey);
+          if (
+            !current ||
+            current.location !== capturedCfi ||
+            (current.locationUpdatedAt ?? 0) !== (capturedClock ?? 0)
+          ) {
+            // A burst of page turns, a WebDAV apply or an RSVP exit moved the
+            // pair while this anchor was building; the anchor would describe
+            // a position the config no longer holds.
+            return;
+          }
           setConfig(bookKey, { rawAnchor: anchor, rawAnchorCleared: false });
         })
         .catch((error) => console.warn('[sync] failed to build raw anchor', error));
     });
-  }, [bookKey, setProgress, setConfig, getViewSettings, isSyncReady]);
+  }, [bookKey, setProgress, setConfig, getViewSettings]);
 
   const progressRelocateHandler = (event: Event) => {
     // Always stash the latest detail; if another rAF is already pending
@@ -913,7 +927,7 @@ const FoliateViewer: React.FC<{
       // Migration/repair, after init: resolving the anchor here reuses the
       // loader's already-transformed section instead of pre-transforming it
       // and throwing the cache away. A failed landing is never written back.
-      if (!overrideLocation && savedConfig.location && !disposedRef.current && isSyncReady) {
+      if (!overrideLocation && savedConfig.location && !disposedRef.current) {
         const landed = view.lastLocation as
           | (typeof view.lastLocation & { fraction?: number })
           | undefined;
@@ -988,7 +1002,7 @@ const FoliateViewer: React.FC<{
                 }
               }
             }
-          } else if (verified && landed?.cfi && landed.range) {
+          } else if (verified && landed?.cfi && landed.range && syncReadyRef.current) {
             const landedIndex = getIndexFromCfi(landed.cfi);
             if (landedIndex != null) {
               const fraction = sectionFractionOf(view, landedIndex, landed.fraction);

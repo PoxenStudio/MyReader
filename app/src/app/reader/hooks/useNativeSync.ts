@@ -170,6 +170,13 @@ const rawAnchorSignature = (anchor?: RawLocationAnchor | null): string =>
       )}:${anchor.sectionHash}:${anchor.precision}`
     : '';
 
+const booknoteStamp = (config?: BookConfig | null): string => {
+  const notes = config?.booknotes ?? [];
+  let max = 0;
+  for (const n of notes) max = Math.max(max, n.updatedAt ?? 0, n.deletedAt ?? 0);
+  return `${notes.length}:${max}`;
+};
+
 const isValidRawAnchor = (value: unknown): value is RawLocationAnchor => {
   if (!value || typeof value !== 'object') return false;
   const anchor = value as Partial<RawLocationAnchor>;
@@ -295,6 +302,7 @@ export const useNativeSync = (bookKey: string) => {
     pushInFlightRef.current = true;
     const now = Date.now();
     lastPushAttemptAtRef.current = now;
+    const startedNotes = booknoteStamp(config);
 
     // Releases the flight and immediately re-runs once if another push was
     // requested while this one was in flight (dirtyRef alone would leave it
@@ -416,9 +424,6 @@ export const useNativeSync = (bookKey: string) => {
         })),
         ...(readingSecondsPayload.length > 0 && { reading_seconds: readingSecondsPayload }),
       });
-      dirtyRef.current = false;
-      pendingSinceRef.current = 0;
-      debounceResetCountRef.current = 0;
       lastPushedLocationUpdatedAtRef.current = Math.max(
         lastPushedLocationUpdatedAtRef.current,
         locationUpdatedAt,
@@ -434,9 +439,22 @@ export const useNativeSync = (bookKey: string) => {
 
       const latest = getConfig(bookKey);
       if (latest) {
+        // This push described the config snapshot above. If a page turn,
+        // WebDAV apply or note edit landed while it was in flight, the dirty
+        // flag belongs to that newer change and must not be cleared (and the
+        // anchor-cleared marker must not be undone).
+        const sameTarget =
+          latest.location === config.location &&
+          (latest.locationUpdatedAt ?? 0) === (config.locationUpdatedAt ?? 0);
+        const notesUnchanged = booknoteStamp(latest) === startedNotes;
+        if (sameTarget && notesUnchanged) {
+          dirtyRef.current = false;
+          pendingSinceRef.current = 0;
+          debounceResetCountRef.current = 0;
+        }
         const synced: BookConfig = {
           ...latest,
-          ...(configChanged ? { rawAnchorCleared: false } : {}),
+          ...(configChanged && sameTarget ? { rawAnchorCleared: false } : {}),
           lastSyncedAtConfig: configChanged ? now : latest.lastSyncedAtConfig,
           lastSyncedAtNotes: now,
           pendingReadingSeconds: tracker.getPending(),
@@ -715,24 +733,29 @@ export const useNativeSync = (bookKey: string) => {
 
       const remoteLocationUpdatedAt =
         remoteConfig?.locationUpdatedAt ?? remoteConfig?.updated_at ?? remoteConfig?.updatedAt ?? 0;
+      // `null` is an explicit "the author cleared it"; only a record with no
+      // anchor field at all predates anchors. Keep the distinction so an
+      // explicit clear does not get the legacy migration's server authority.
+      const anchorFieldPresent =
+        !!remoteConfig && ('raw_anchor' in remoteConfig || 'rawAnchor' in remoteConfig);
       const remoteAnchorRaw = remoteConfig?.raw_anchor ?? remoteConfig?.rawAnchor ?? null;
       const remoteAnchorCandidate = isValidRawAnchor(remoteAnchorRaw) ? remoteAnchorRaw : null;
-      // A client that does not send anchors (an older build) keeps pushing
-      // `location` with a fresh `updated_at`, while the server retains our old
-      // `raw_anchor`. That anchor describes an older position and must not
-      // win over the newer location.
+      // An anchor without a clock cannot prove it belongs to this record, and
+      // one older than the record was written for a previous position (a
+      // client that does not send anchors moved `location` forward). Both
+      // must yield to the record's location under normal LWW.
       const remoteAnchor =
         remoteAnchorCandidate?.updatedAt != null &&
-        remoteAnchorCandidate.updatedAt < remoteLocationUpdatedAt
-          ? null
-          : remoteAnchorCandidate;
+        remoteAnchorCandidate.updatedAt >= remoteLocationUpdatedAt
+          ? remoteAnchorCandidate
+          : null;
       const localLocationUpdatedAt = liveConfig.locationUpdatedAt ?? liveConfig.updatedAt ?? 0;
       const hasRemoteLocation = !!(remoteAnchor || remoteConfig?.location);
-      // Migration: a legacy server record (no raw anchor) is the source of
+      // Migration: a legacy server record (predating anchors) is the source of
       // truth once. `migratedRemoteUpdatedAt` keeps this from re-triggering
       // forever on books that cannot build an anchor (image-only sections).
       const migratedAt = liveConfig.migratedRemoteUpdatedAt ?? -1;
-      const isLegacyRemote = hasRemoteLocation && !remoteAnchor;
+      const isLegacyRemote = hasRemoteLocation && !anchorFieldPresent;
       const migration = isLegacyRemote && remoteLocationUpdatedAt > migratedAt;
       const remoteLocationWins =
         hasRemoteLocation && (migration || remoteLocationUpdatedAt > localLocationUpdatedAt);

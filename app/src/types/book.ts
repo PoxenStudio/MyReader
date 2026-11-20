@@ -467,7 +467,8 @@ export interface RawLocationAnchor {
   // The locationUpdatedAt this anchor describes. A client that does not send
   // anchors (or one that moved without one) can advance a record's location
   // while the server keeps this field, so peers must ignore an anchor older
-  // than the record's `updated_at`.
+  // than the record's `updated_at`. Missing means "cannot prove freshness"
+  // and is ignored for the same reason.
   updatedAt?: number;
 }
 
