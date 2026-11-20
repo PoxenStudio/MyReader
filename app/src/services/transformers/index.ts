@@ -12,6 +12,8 @@ import { proofreadTransformer } from './proofread';
 import { warichuTransformer } from './warichu';
 import { nbspTransformer } from './nbsp';
 
+export { TRANSFORM_PIPELINE_VERSION } from './version';
+
 export const availableTransformers: Transformer[] = [
   mathmlTransformer,
   punctuationTransformer,

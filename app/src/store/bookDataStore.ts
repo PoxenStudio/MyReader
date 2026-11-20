@@ -75,6 +75,7 @@ interface BookDataState {
     bookKey: string,
     config: BookConfig,
     settings: SystemSettings,
+    options?: { preserveUpdatedAt?: boolean },
   ) => Promise<void>;
   updateBooknotes: (key: string, booknotes: BookNote[]) => BookConfig | undefined;
   getBookData: (keyOrId: string) => BookData | null;
@@ -126,6 +127,7 @@ export const useBookDataStore = create<BookDataState>((set, get) => ({
     bookKey: string,
     config: BookConfig,
     settings: SystemSettings,
+    options?: { preserveUpdatedAt?: boolean },
   ) => {
     const appService = await envConfig.getAppService();
     const { library, hashIndex, setLibrary } = useLibraryStore.getState();
@@ -151,8 +153,13 @@ export const useBookDataStore = create<BookDataState>((set, get) => ({
     // Refresh updatedAt immutably via the store rather than mutating the
     // caller-provided object. This notifies Zustand subscribers and works
     // regardless of whether the caller passed the shared store config.
-    get().setConfig(bookKey, { updatedAt: now });
-    const configToSave = { ...config, updatedAt: now };
+    // Sync/restore repairs pass `preserveUpdatedAt` so applying a remote
+    // position does not make this device out-rank the record it just pulled.
+    const configUpdatedAt = options?.preserveUpdatedAt ? config.updatedAt : now;
+    if (!options?.preserveUpdatedAt) {
+      get().setConfig(bookKey, { updatedAt: configUpdatedAt });
+    }
+    const configToSave = { ...config, updatedAt: configUpdatedAt };
     // Per-book config: still write eagerly — it's small (one book's
     // settings + booknotes) and is the source of truth used by sync to
     // reconstruct the shelf if library.json is missing or stale.

@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 
-type Progress = { location: string } | null;
+type Progress = {
+  location: string;
+  source?: 'user' | 'tts' | 'remote' | 'restore';
+} | null;
 
 const h = vi.hoisted(() => {
   // Zustand-like store mock. Supports both destructure form `store()`
@@ -18,7 +21,7 @@ const h = vi.hoisted(() => {
 
   const state = {
     config: { location: 'cfi-loc', updatedAt: 1000 } as { location: string; updatedAt: number },
-    progress: { location: 'cfi-loc' } as Progress,
+    progress: { location: 'cfi-loc', source: 'user' } as Progress,
     previewMode: false,
   };
 
@@ -75,7 +78,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   h.saveConfigMock.mockClear();
   h.state.config = { location: 'cfi-loc', updatedAt: 1000 };
-  h.state.progress = { location: 'cfi-loc' };
+  h.state.progress = { location: 'cfi-loc', source: 'user' };
   h.state.previewMode = false;
 });
 
@@ -106,27 +109,50 @@ describe('useProgressAutoSave', () => {
     // or applyRemoteProgress.view.goTo). The config's location is what
     // setProgress would have updated, and progress reference changes too.
     h.state.config = { location: 'cfi-loc-next', updatedAt: 1000 };
-    h.state.progress = { location: 'cfi-loc-next' };
+    h.state.progress = { location: 'cfi-loc-next', source: 'user' };
     rerender();
     await flushDebouncedSave();
 
     expect(h.saveConfigMock).toHaveBeenCalledTimes(1);
   });
 
-  test('saves when applyRemoteProgress moves the view to a newer remote location', async () => {
-    // Mirrors the cross-device sync case: device opens at the local position
-    // (loaded from disk), then the pull lands a newer remote position and
-    // view.goTo(remote) fires. Auto-save must persist the new location so the
-    // outgoing push carries the remote-applied progress, not the stale local.
+  test('persists TTS-driven progress', async () => {
+    const { rerender } = renderHook(() => useProgressAutoSave('h1-view1'));
+    await flushDebouncedSave();
+    expect(h.saveConfigMock).not.toHaveBeenCalled();
+
+    h.state.config = { location: 'cfi-tts', updatedAt: 1000 };
+    h.state.progress = { location: 'cfi-tts', source: 'tts' };
+    rerender();
+    await flushDebouncedSave();
+
+    expect(h.saveConfigMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not persist remote/restore relocates from auto-save', async () => {
+    // Remote positions are committed by the sync layer only after the landing
+    // is verified; auto-save must not persist the fallback page in between.
     const { rerender } = renderHook(() => useProgressAutoSave('h1-view1'));
     await flushDebouncedSave();
     expect(h.saveConfigMock).not.toHaveBeenCalled();
 
     h.state.config = { location: 'cfi-remote', updatedAt: 1000 };
-    h.state.progress = { location: 'cfi-remote' };
+    h.state.progress = { location: 'cfi-remote', source: 'remote' };
     rerender();
     await flushDebouncedSave();
 
+    h.state.config = { location: 'cfi-restore', updatedAt: 1000 };
+    h.state.progress = { location: 'cfi-restore', source: 'restore' };
+    rerender();
+    await flushDebouncedSave();
+
+    expect(h.saveConfigMock).not.toHaveBeenCalled();
+
+    // The reader turning a page still persists normally.
+    h.state.config = { location: 'cfi-user', updatedAt: 1000 };
+    h.state.progress = { location: 'cfi-user', source: 'user' };
+    rerender();
+    await flushDebouncedSave();
     expect(h.saveConfigMock).toHaveBeenCalledTimes(1);
   });
 

@@ -30,6 +30,11 @@ export const useProgressAutoSave = (bookKey: string) => {
         // Skip while previewing a deep-link target — the user's actual
         // last-read position should not be overwritten by a transient view.
         if (useReaderStore.getState().getViewState(bookKey)?.previewMode) return;
+        // Only a position the reader actually produced (or verified TTS
+        // navigation) may be persisted. Restore/remote relocates are
+        // display-only; persisting their fallback page is how #44 spread.
+        const source = useReaderStore.getState().getProgress(bookKey)?.source;
+        if (source !== 'user' && source !== 'tts') return;
         const config = getConfig(bookKey);
         if (!config) return;
         const currentLocation = config.location ?? null;

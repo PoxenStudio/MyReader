@@ -5,6 +5,7 @@ import {
   BookConfig,
   PageInfo,
   BookProgress,
+  ProgressSource,
   ViewSettings,
   TimeInfo,
   FIXED_LAYOUT_FORMATS,
@@ -65,7 +66,10 @@ const scheduleReadingStatus = (hash: string) => {
   );
 };
 
-const updateLibraryReadingProgress = (id: string, pageInfo: PageInfo) => {
+const updateLibraryReadingProgress = (id: string, pageInfo: PageInfo, persistable = true) => {
+  // Remote/restore positions are display-only; don't let their fallback page
+  // move the shelf's "continue reading" percentage either.
+  if (!persistable) return;
   const progress: [number, number] = [pageInfo.current + 1, pageInfo.total];
   const progressPercentage = Math.round((progress[0] / progress[1]) * 100);
   // Lightweight library update — O(1) lookup, no array copy, no refreshGroups
@@ -119,6 +123,10 @@ interface ViewState {
      so the user's actual last-read position isn't overwritten by a preview.
      Cleared on the first user-initiated relocate (page turn / scroll). */
   previewMode: boolean;
+  /* Where the current reading position came from. Only `user`/`tts`
+     positions may advance the persisted/synced location; `remote` and
+     `restore` relocates are display-only until the user actually reads. */
+  progressSource: ProgressSource;
   /* View settings for the view:
     generally view settings have a hierarchy of global settings < book settings < view settings
     view settings for primary view are saved to book config which is persisted to config file
@@ -153,6 +161,7 @@ interface ReaderStore {
     timeinfo: TimeInfo,
     range: Range,
     fraction: number,
+    source?: ProgressSource,
   ) => void;
   setProgressLocation: (key: string, location: string, range?: Range | null) => void;
   getProgress: (key: string) => BookProgress | null;
@@ -176,6 +185,7 @@ interface ReaderStore {
   setGridInsets: (key: string, insets: Insets | null) => void;
   setViewInited: (key: string, inited: boolean) => void;
   setPreviewMode: (key: string, previewMode: boolean) => void;
+  setProgressSource: (key: string, source: ProgressSource) => void;
   recreateViewer: (envConfig: EnvConfigType, key: string) => void;
 }
 
@@ -246,6 +256,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
           syncing: false,
           gridInsets: null,
           previewMode: false,
+          progressSource: 'restore',
           viewSettings: null,
         },
       },
@@ -450,6 +461,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
             syncing: false,
             gridInsets: null,
             previewMode: false,
+            progressSource: 'restore',
             viewSettings: { ...globalViewSettings, ...configViewSettings },
           },
         },
@@ -475,6 +487,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
             syncing: false,
             gridInsets: null,
             previewMode: false,
+            progressSource: 'restore',
             viewSettings: null,
           },
         },
@@ -530,27 +543,30 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     timeinfo: TimeInfo,
     range: Range,
     fraction: number,
+    source: ProgressSource = 'user',
   ) => {
     const id = getBookHash(key);
     const bookData = useBookDataStore.getState().booksData[id];
     const viewState = get().viewStates[key];
     if (!viewState || !bookData) return;
+    const persistable = source === 'user' || source === 'tts';
 
     // Any real relocate invalidates an in-flight TTS CFI derivation; it would
     // otherwise write the previous position back over the user's page turn.
     progressLocationTokens.set(key, (progressLocationTokens.get(key) ?? 0) + 1);
     const pageInfo = bookData.isFixedLayout ? section : pageinfo;
     const progress: [number, number] = [pageInfo.current + 1, pageInfo.total];
-    updateLibraryReadingProgress(id, pageInfo);
+    updateLibraryReadingProgress(id, pageInfo, persistable);
 
     // Only the primary view persists progress into the shared bookData
-    // config — secondary views in a parallel layout shouldn't overwrite
-    // it. Skip the bookDataStore write entirely when not primary to spare
-    // its subscribers a re-render.
-    if (viewState.isPrimary) {
+    // config — secondary views in a parallel layout shouldn't overwrite it.
+    // Remote/restore relocates are display-only: writing them here is how a
+    // fallback page used to become the new reading position (#44).
+    if (viewState.isPrimary && persistable) {
       useBookDataStore.setState((state) => {
         const existing = state.booksData[id];
-        if (!existing) return state;
+        if (!existing?.config) return state;
+        const locationChanged = existing.config.location !== location;
         return {
           booksData: {
             ...state.booksData,
@@ -560,6 +576,16 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
                 ...existing.config,
                 progress,
                 location,
+                ...(locationChanged
+                  ? {
+                      locationUpdatedAt: Date.now(),
+                      // The old anchor describes the old position; keep the
+                      // pair atomic by invalidating it until the async
+                      // anchor for this new location lands.
+                      rawAnchor: undefined,
+                      rawAnchorCleared: true,
+                    }
+                  : {}),
               } as BookConfig,
             },
           },
@@ -584,6 +610,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       index: section.current,
       range,
       page: pageInfo.current + 1,
+      source,
     } as BookProgress);
   },
   // TTS sentence marks are the progress authority while listening; layout
@@ -791,6 +818,18 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
         },
       },
     })),
+
+  setProgressSource: (key: string, source: ProgressSource) =>
+    set((state) => {
+      const viewState = state.viewStates[key];
+      if (!viewState || viewState.progressSource === source) return state;
+      return {
+        viewStates: {
+          ...state.viewStates,
+          [key]: { ...viewState, progressSource: source },
+        },
+      };
+    }),
 
   recreateViewer: (envConfig: EnvConfigType, key: string) => {
     const id = getBookHash(key);
