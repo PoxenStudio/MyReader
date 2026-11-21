@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
+import { useBookProgress } from '@/store/readerProgressStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { debounce } from '@/utils/debounce';
@@ -73,9 +74,11 @@ export const useWebDAVSync = (bookKey: string) => {
   const _ = useTranslation();
   const { envConfig, appService } = useEnv();
   const { settings, setSettings, saveSettings } = useSettingsStore();
-  const { getProgress, getViewsById, getView } = useReaderStore();
+  const { getViewsById, getView } = useReaderStore();
   const { getConfig, setConfig, getBookData, saveConfig } = useBookDataStore();
-  const progress = getProgress(bookKey);
+  // Subscribe instead of reading imperatively: progress lives in its own
+  // store and page turns do not re-render through readerStore.
+  const progress = useBookProgress(bookKey);
 
   /**
    * `dirtyRef` flips to true on the first locally-driven change after a
@@ -359,6 +362,17 @@ export const useWebDAVSync = (bookKey: string) => {
       }
       if (!wantNotes) {
         toApply.booknotes = config.booknotes;
+      }
+      // The merged config can pair another device's location with this
+      // device's raw anchor (WebDAV never carries anchors). Keep the pair
+      // atomic or the on-open repair would jump back to the anchor's old
+      // position. The clock is the remote record's own `updatedAt`, not the
+      // local apply time: this device did not produce the position, and
+      // stamping `now` would out-rank genuinely newer MyBooks records.
+      if (toApply.location && toApply.location !== config.location) {
+        toApply.locationUpdatedAt = toApply.updatedAt ?? config.locationUpdatedAt ?? Date.now();
+        toApply.rawAnchor = undefined;
+        toApply.rawAnchorCleared = true;
       }
 
       setConfig(bookKey, toApply);

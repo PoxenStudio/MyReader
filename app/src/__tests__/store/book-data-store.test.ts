@@ -476,5 +476,25 @@ describe('bookDataStore', () => {
       const persistedConfig = saveBookConfig.mock.calls[0]![1] as BookConfig;
       expect(persistedConfig.updatedAt).toBeGreaterThan(1000);
     });
+
+    test('preserveUpdatedAt keeps the pulled record timestamp', async () => {
+      const saveBookConfig = vi.fn().mockResolvedValue(undefined);
+      const saveLibraryBooks = vi.fn().mockResolvedValue(undefined);
+      const envConfig = makeEnvConfig({ saveBookConfig, saveLibraryBooks });
+
+      useLibraryStore.getState().setLibrary([makeLibraryBook({ hash: 'h1' })]);
+
+      const data = makeBookData('h1', { progress: [42, 100], updatedAt: 2000 });
+      useBookDataStore.setState({ booksData: { h1: data } });
+
+      await useBookDataStore
+        .getState()
+        .saveConfig(envConfig, 'h1', data.config!, FAKE_SETTINGS, { preserveUpdatedAt: true });
+
+      const persistedConfig = saveBookConfig.mock.calls[0]![1] as BookConfig;
+      expect(persistedConfig.updatedAt).toBe(2000);
+      // Applying a remote position must not make the local record look newer.
+      expect(useBookDataStore.getState().getConfig('h1')!.updatedAt).toBe(2000);
+    });
   });
 });

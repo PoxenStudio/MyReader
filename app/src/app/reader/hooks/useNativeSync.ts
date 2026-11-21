@@ -1,20 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useAuth } from '@/context/AuthContext';
 import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore } from '@/store/bookDataStore';
-import { useMyBooksStatusStore, useMyBooksSyncAllowed } from '@/store/mybooksStatusStore';
+import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useReaderStore } from '@/store/readerStore';
+import { useBookProgress } from '@/store/readerProgressStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { debounce } from '@/utils/debounce';
 import { eventDispatcher } from '@/utils/event';
 import { getBookHash } from '@/utils/book';
-import { BookConfig, BookNote } from '@/types/book';
+import { getIndexFromCfi } from '@/utils/cfi';
+import { BookConfig, BookConfigRecord, BookNote, RawLocationAnchor } from '@/types/book';
 import type { FoliateView } from '@/types/view';
 import * as CFI from 'foliate-js/epubcfi.js';
-import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
+import {
+  buildRawAnchorForRange,
+  isCfiWithinRange,
+  resolveLegacyCfiToLocal,
+  resolveRawAnchorToCfi,
+  sectionFractionOf,
+} from '@/services/mybooks/rawLocation';
 import {
   ActiveReadingTracker,
   KEEPALIVE_PUSH_MS,
@@ -23,18 +30,16 @@ import {
 } from '@/services/mybooks/activeReadingTracker';
 import { useWindowActiveChanged } from './useWindowActiveChanged';
 import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvents';
+import { useMyBooksSyncReady } from './useMyBooksSyncReady';
 
 /**
  * MyReader(Readest) Native Sync per-book hook — syncs reading progress (`BookConfig`)
- * and notes/highlights (`BookNote`) against mybooks' `/api/sync`
- * (document/MyBooks_Sync_WS_Design.md §11). Deliberately scoped to
- * configs + notes only:
- *   - Book file binaries are out of scope (mybooks owns the library).
- *   - Book metadata (title/author/tags) sync is not wired up here yet —
- *     it would need a library-page-level hook, not a per-reader one.
+ * and notes/highlights (`BookNote`) against mybooks' `/api/sync`.
  *
- * Gated on having an active (non-guest) mybooks login — there is no
- * separate on/off toggle; being logged into mybooks *is* the toggle.
+ * Cross-device positions are expressed as a raw-text anchor (spine index +
+ * character offset in the *untransformed* EPUB text). Per-device transforms
+ * (whitespace folding, 简繁, punctuation, proofread, …) only affect the local
+ * raw→rendered mapping; they never decide whether a position can sync.
  */
 
 const PUSH_DEBOUNCE_MS = 15_000;
@@ -47,26 +52,8 @@ const PULL_COOLDOWN_MS = 60_000;
 // (#44). Wait for a quiet gap in the renderer's own load/stabilized events so
 // the jump runs against a laid-out document. Those two events mark layout
 // work; page turns (`relocate`) are deliberately not watched.
-//
-// The gap is a heuristic: a background preload of an adjacent section emits
-// nothing until it finishes, so a load longer than the quiet window can still
-// slip through. It should be replaced by a renderer-reported "layout settled"
-// signal once packages/foliate-js (a submodule) exposes one.
-//
-// There is deliberately no upper bound. Slow devices lay a large section out
-// for tens of seconds (the #44 logs show the first page at 15.6s), and giving
-// up on a still-busy renderer would mean those devices never jump at all. The
-// wait ends when layout does, when the book is closed (no more events), or
-// when `view-moved` below aborts it; a reader who keeps turning pages while
-// waiting is never yanked, because their turn changes `lastLocation`.
 const RENDER_QUIET_MS = 800;
 
-/**
- * Resolves with the view once it has finished `init()`; null when the book was
- * closed or failed to open while waiting. No time limit: opening a large book
- * on a slow device can take far longer than any timeout worth guessing, and
- * closing the book or an open failure are observable, so neither needs one.
- */
 const waitForViewInited = (bookKey: string): Promise<FoliateView | null> => {
   const viewState = () => useReaderStore.getState().getViewState(bookKey);
   const readyView = (): FoliateView | null =>
@@ -86,13 +73,10 @@ const waitForViewInited = (bookKey: string): Promise<FoliateView | null> => {
       if (!state || state.error) finish(null);
     };
     unsubscribe = useReaderStore.subscribe(check);
-    // The book can already be closed or failed by the time we get here; the
-    // subscription only fires on future updates, so check once immediately.
     check();
   });
 };
 
-/** Resolves once the renderer has emitted no load/stabilized event for `RENDER_QUIET_MS`. */
 const waitForLayoutSettled = (view: FoliateView): Promise<void> => {
   const renderer = view.renderer;
   return new Promise((resolve) => {
@@ -119,16 +103,6 @@ const waitForLayoutSettled = (view: FoliateView): Promise<void> => {
  * (goTo loads and renders it itself), the CFI does not resolve in any of the
  * rendered chunks (fixed layout, section-level or stale CFI), or the range is
  * collapsed and cannot be measured here.
- *
- * The paginator scrolls to the section's first page whenever the resolved
- * range has no client rects — a section that is still being laid into a
- * zero-width iframe — which is how a pulled position turned into "chapter
- * start" in #44. This is that exact precondition, checked from the outside,
- * so the jump waits for the layout instead of guessing.
- *
- * A section larger than the chunk threshold renders as several documents that
- * all report the same spine index; only the chunk that actually holds the
- * target resolves it, so every chunk has to be tried.
  */
 const isTargetLaidOut = (view: FoliateView, target: string): boolean | null => {
   let index: number;
@@ -156,26 +130,32 @@ const isTargetLaidOut = (view: FoliateView, target: string): boolean | null => {
     } catch {
       continue;
     }
-    if (!range || range.collapsed) continue;
+    if (!range) continue;
+    if (range.collapsed) {
+      const node = range.startContainer;
+      const element = node.nodeType === 1 ? (node as Element) : node.parentElement;
+      if (element) {
+        const rect = element.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) return true;
+        measurable = true;
+      }
+      continue;
+    }
     const rects = Array.from(range.getClientRects?.() ?? []);
     if (rects.some((rect) => rect.width > 0 && rect.height > 0)) return true;
     measurable = true;
   }
-  // A resolved range with no geometry is a positive "still laying out" signal;
-  // anything we could not resolve is left to goTo, which handles chunk
-  // mapping, section loads and fixed layout itself.
   return measurable ? false : null;
 };
 
-/**
- * Compares the start of two locations and ignores their end. `CFI.compare`
- * also compares range ends, and a background re-anchor can move a page's end
- * without the reader going anywhere; only a changed start means the view was
- * navigated. Malformed values only match verbatim.
- */
+const CFI_PATTERN = /^\s*epubcfi\(/;
+
 const isSameStart = (a?: string, b?: string): boolean => {
   if (a === b) return true;
   if (!a || !b) return false;
+  // Malformed values (and test doubles) both collapse to `epubcfi()`, which
+  // would compare equal. Only real CFIs may use the semantic comparison.
+  if (!CFI_PATTERN.test(a) || !CFI_PATTERN.test(b)) return false;
   try {
     return CFI.compare(CFI.collapse(a), CFI.collapse(b)) === 0;
   } catch {
@@ -183,17 +163,51 @@ const isSameStart = (a?: string, b?: string): boolean => {
   }
 };
 
+const rawAnchorSignature = (anchor?: RawLocationAnchor | null): string =>
+  anchor
+    ? `${anchor.v}:${anchor.index}:${anchor.rawOffset}:${Math.round(
+        anchor.rawFraction * 1e6,
+      )}:${anchor.sectionHash}:${anchor.precision}`
+    : '';
+
+const booknoteStamp = (config?: BookConfig | null): string => {
+  const notes = config?.booknotes ?? [];
+  let max = 0;
+  for (const n of notes) max = Math.max(max, n.updatedAt ?? 0, n.deletedAt ?? 0);
+  return `${notes.length}:${max}`;
+};
+
+const isValidRawAnchor = (value: unknown): value is RawLocationAnchor => {
+  if (!value || typeof value !== 'object') return false;
+  const anchor = value as Partial<RawLocationAnchor>;
+  return (
+    anchor.v === 2 &&
+    Number.isInteger(anchor.index) &&
+    (anchor.index ?? -1) >= 0 &&
+    Number.isFinite(anchor.rawOffset) &&
+    (anchor.rawOffset ?? -1) >= 0 &&
+    Number.isFinite(anchor.rawFraction) &&
+    (anchor.rawFraction ?? -1) >= 0 &&
+    (anchor.rawFraction ?? 2) <= 1 &&
+    typeof anchor.rawQuote === 'string' &&
+    typeof anchor.sectionHash === 'string' &&
+    Number.isFinite(anchor.rawTextVersion) &&
+    (anchor.updatedAt === undefined || Number.isFinite(anchor.updatedAt)) &&
+    (anchor.precision === 'exact' || anchor.precision === 'approx')
+  );
+};
+
 export const useNativeSync = (bookKey: string) => {
   const _ = useTranslation();
   const { envConfig } = useEnv();
-  const { status, isGuest } = useAuth();
   const { settings } = useSettingsStore();
-  const { getProgress } = useReaderStore();
   const { getConfig, setConfig, getBookData, saveConfig } = useBookDataStore();
-  const isSyncAllowed = useMyBooksSyncAllowed();
-  const progress = getProgress(bookKey);
+  // Subscribe to progress instead of reading it imperatively: restore/remote
+  // relocates no longer write bookDataStore, so without this the open pull and
+  // the push-on-progress effect would wait for an unrelated re-render.
+  const progress = useBookProgress(bookKey);
 
-  const isReady = ENABLE_SYNC_FEATURE && status === 'logged_in' && !isGuest && isSyncAllowed;
+  const isReady = useMyBooksSyncReady();
 
   useNativeSyncEvents(isReady);
 
@@ -201,33 +215,49 @@ export const useNativeSync = (bookKey: string) => {
   const lastPulledAtRef = useRef(0);
   const hasPulledOnce = useRef(false);
   const initialPullDoneRef = useRef(false);
+  const localLocationGenerationRef = useRef(0);
+  const lastProgressLocationRef = useRef<string | null>(null);
+  const pullInFlightRef = useRef<Promise<boolean> | null>(null);
+  const pullPendingRef = useRef(false);
+  const pushInFlightRef = useRef(false);
+  const pushPendingRef = useRef(false);
+  const lastPushedLocationUpdatedAtRef = useRef(0);
+  const lastPushedAnchorSignatureRef = useRef('');
+  // Filled in by the effect below. A push/pull that was skipped because one
+  // was already in flight re-runs through these, so a change that lands
+  // mid-flight is not silently dropped.
+  const pushNowRef = useRef<() => Promise<void>>(async () => {});
+  const pullNowRef = useRef<() => Promise<boolean>>(async () => false);
+  const syncRefs = useRef<{ pushNow: () => Promise<void>; pullNow: () => Promise<boolean> }>({
+    pushNow: async () => {},
+    pullNow: async () => false,
+  });
 
-  // 本地"活跃阅读"计时器（见 activeReadingTracker.ts）：覆盖心跳到达间隔完全看不到
-  // 的场景，典型是离线阅读。惰性初始化（首次拿到本地持久化的 config 时才创建，用它
-  // 里面上次未上报成功的 pendingReadingSeconds 续上，而不是每次重新挂载都清零）。
+  useEffect(() => {
+    // A local anchor that predates this session has already been pushed (or
+    // is covered by locationUpdatedAt); do not re-push it just because the
+    // ref starts empty.
+    const anchor = getConfig(bookKey)?.rawAnchor;
+    if (anchor) lastPushedAnchorSignatureRef.current = rawAnchorSignature(anchor);
+  }, [bookKey, getConfig]);
+
   const trackerRef = useRef<ActiveReadingTracker | null>(null);
   const isWindowActiveRef = useRef(true);
   const lastPersistedPendingRef = useRef<string>('');
   const lastPushAttemptAtRef = useRef(0);
 
   const ensureTracker = useCallback((): ActiveReadingTracker => {
-    // 站点时区名由 /user/info 的 sys 块下发（见 webserver/handlers/base.py 的
-    // _sys_info_with）。阅读时长按它的一日分桶，与服务端心跳/仪表盘同口径。
     const timezone = useMyBooksStatusStore.getState().sysInfo?.timezone ?? null;
     if (!trackerRef.current) {
       const initialPending = getConfig(bookKey)?.pendingReadingSeconds ?? {};
       trackerRef.current = new ActiveReadingTracker(initialPending, Date.now(), timezone);
       lastPersistedPendingRef.current = JSON.stringify(initialPending);
     } else {
-      // sys.timezone 可能在会话中途变（管理员改站点时区 / 切服务器）：下一次 tick
-      // 起按新时区攒日期键，已经攒下的旧键不回溯。
       trackerRef.current.setTimezone(timezone);
     }
     return trackerRef.current;
   }, [bookKey, getConfig]);
 
-  // 只落本地（不联网），供 tick/persist 节拍和窗口失焦时调用。跳过一次没有实际变化
-  // 的写入，避免 30s 节拍在阅读完全静止时仍然反复触发 IPC。
   const persistPendingSeconds = useCallback(async () => {
     const tracker = trackerRef.current;
     if (!tracker) return;
@@ -239,22 +269,23 @@ export const useNativeSync = (bookKey: string) => {
     if (!config) return;
     setConfig(bookKey, { pendingReadingSeconds: pending });
     const latest = getConfig(bookKey);
-    if (latest) await saveConfig(envConfig, bookKey, latest, settings);
+    if (latest) {
+      // Persisting the local reading-time counter is bookkeeping, not a
+      // reading-position edit; do not advance the record timestamp.
+      await saveConfig(envConfig, bookKey, latest, settings, { preserveUpdatedAt: true });
+    }
   }, [bookKey, getConfig, setConfig, saveConfig, envConfig, settings]);
-  // Diagnostic only (see syncLogger.ts): timestamps how long a change has
-  // sat "dirty" and how many times the push debounce got reset before it
-  // actually fired — used to confirm/rule out debounce starvation (the
-  // timer never getting a 15s quiet gap because progress keeps changing)
-  // as the cause of reported 3+ minute gaps between pushes. Remove once
-  // confirmed and fixed.
+
   const pendingSinceRef = useRef(0);
   const debounceResetCountRef = useRef(0);
 
   const pushNow = useCallback(async () => {
     if (!isReady) return;
-    // Never push before the initial pull-on-open has resolved: pushing local
-    // progress before the pull's remote merge lands would overwrite whatever
-    // newer progress the server holds.
+    if (pushInFlightRef.current) {
+      pushPendingRef.current = true;
+      syncLog(bookKey, 'push:queued', { reason: 'push-in-flight' });
+      return;
+    }
     if (!initialPullDoneRef.current) {
       syncLog(bookKey, 'push:skip', { reason: 'initial-pull-not-settled-yet' });
       return;
@@ -268,41 +299,122 @@ export const useNativeSync = (bookKey: string) => {
     const book = getBookData(bookKey)?.book;
     if (!config || !book) return;
 
+    pushInFlightRef.current = true;
     const now = Date.now();
     lastPushAttemptAtRef.current = now;
+    const startedNotes = booknoteStamp(config);
+
+    // Releases the flight and immediately re-runs once if another push was
+    // requested while this one was in flight (dirtyRef alone would leave it
+    // waiting for the next page turn).
+    const endPush = () => {
+      pushInFlightRef.current = false;
+      if (pushPendingRef.current) {
+        pushPendingRef.current = false;
+        void pushNowRef.current();
+      }
+    };
+
+    // A position change invalidates the anchor until the idle build lands.
+    // Blur/unmount can push before that; build it now instead of sending
+    // `raw_anchor: null` and clearing the server's good anchor.
+    let effectiveAnchor = config.rawAnchor;
+    let anchorCleared = !!config.rawAnchorCleared;
+    if (!effectiveAnchor && anchorCleared) {
+      const progressNow = useReaderStore.getState().getProgress(bookKey);
+      const view = useReaderStore.getState().getView(bookKey);
+      const index = config.location ? getIndexFromCfi(config.location) : null;
+      if (view && index != null && progressNow?.range && progressNow.location === config.location) {
+        try {
+          const anchor = await buildRawAnchorForRange(
+            bookKey,
+            view,
+            index,
+            progressNow.range,
+            sectionFractionOf(view, index, progressNow.fraction),
+            useReaderStore.getState().getViewSettings(bookKey),
+            config.locationUpdatedAt,
+          );
+          const latestConfig = getConfig(bookKey);
+          if (
+            latestConfig &&
+            (latestConfig.location !== config.location ||
+              latestConfig.locationUpdatedAt !== config.locationUpdatedAt)
+          ) {
+            // The reader moved while the anchor was building. This push's
+            // snapshot is stale; a later keepalive/turn pushes the new one.
+            syncLog(bookKey, 'push:skip', {
+              reason: 'location-moved-during-anchor-build',
+            });
+            endPush();
+            return;
+          }
+          if (anchor) {
+            effectiveAnchor = anchor;
+            anchorCleared = false;
+            setConfig(bookKey, { rawAnchor: anchor, rawAnchorCleared: false });
+          }
+        } catch (error) {
+          console.warn('[sync] failed to build raw anchor before push', error);
+        }
+      }
+    }
+
+    const locationUpdatedAt = config.locationUpdatedAt ?? config.updatedAt ?? 0;
+    const anchorSignature = rawAnchorSignature(effectiveAnchor);
+    const configChanged =
+      (locationUpdatedAt > (config.lastSyncedAtConfig ?? 0) &&
+        locationUpdatedAt > lastPushedLocationUpdatedAtRef.current) ||
+      (!!anchorSignature && anchorSignature !== lastPushedAnchorSignatureRef.current);
+
     syncLog(bookKey, 'push:start', {
       location: config.location,
-      progress: config.progress,
-      localUpdatedAt: config.updatedAt ?? 0,
+      locationUpdatedAt,
+      configChanged,
+      anchorChanged: !!anchorSignature && anchorSignature !== lastPushedAnchorSignatureRef.current,
     });
-    // 离线阅读显式上报：随这次 push 顺路带走本地计时器攒的秒数（见
-    // activeReadingTracker.ts），不依赖 configs 是否真的有变化——用户可能全程停在
-    // 同一页，但确实读了这么久。只有 push 成功才清掉已发出去的那部分（见下方）。
+
     const tracker = ensureTracker();
     const sentReadingSeconds = tracker.getPending();
     const readingSecondsPayload = tracker.toReadingSecondsPayload(book.hash);
+    let collapsedLocation: string | undefined;
+    if (configChanged && config.location) {
+      try {
+        collapsedLocation = CFI.collapse(config.location);
+      } catch {
+        collapsedLocation = config.location;
+      }
+    }
     try {
       const currentUserId = useMyBooksStatusStore.getState().currentUserId;
-      // Never push back a note that belongs to someone else — it can only be
-      // here because it was pulled in via showOtherAnnotations, and pushing
-      // it would re-store it under this account's own records server-side.
       const ownNotes = (config.booknotes ?? []).filter(
         (note) => !note.userId || note.userId === String(currentUserId),
       );
+      if (!configChanged && ownNotes.length === 0 && readingSecondsPayload.length === 0) {
+        syncLog(bookKey, 'push:skip', { reason: 'nothing-to-push' });
+        return;
+      }
       await pushSync({
-        configs: [
-          {
-            id: book.hash,
-            book_hash: book.hash,
-            meta_hash: book.metaHash,
-            updated_at: now,
-            deleted_at: null,
-            progress: config.progress,
-            location: config.location,
-            xpointer: config.xpointer,
-            updatedAt: now,
-          },
-        ],
+        ...(configChanged && {
+          configs: [
+            {
+              id: book.hash,
+              book_hash: book.hash,
+              meta_hash: book.metaHash,
+              updated_at: locationUpdatedAt,
+              updatedAt: locationUpdatedAt,
+              deleted_at: null,
+              progress: config.progress,
+              location: collapsedLocation,
+              xpointer: config.xpointer,
+              ...(effectiveAnchor
+                ? { raw_anchor: effectiveAnchor }
+                : anchorCleared
+                  ? { raw_anchor: null }
+                  : {}),
+            },
+          ],
+        }),
         notes: ownNotes.map((note) => ({
           book_hash: book.hash,
           meta_hash: book.metaHash,
@@ -312,25 +424,46 @@ export const useNativeSync = (bookKey: string) => {
         })),
         ...(readingSecondsPayload.length > 0 && { reading_seconds: readingSecondsPayload }),
       });
-      dirtyRef.current = false;
-      pendingSinceRef.current = 0;
-      debounceResetCountRef.current = 0;
-      syncLog(bookKey, 'push:done', { elapsedMs: Date.now() - now });
+      lastPushedLocationUpdatedAtRef.current = Math.max(
+        lastPushedLocationUpdatedAtRef.current,
+        locationUpdatedAt,
+      );
+      if (anchorSignature) lastPushedAnchorSignatureRef.current = anchorSignature;
+      syncLog(bookKey, 'push:done', {
+        elapsedMs: Date.now() - now,
+        configPushed: configChanged,
+      });
       if (readingSecondsPayload.length > 0) {
         tracker.clearSent(sentReadingSeconds);
       }
 
       const latest = getConfig(bookKey);
       if (latest) {
+        // This push described the config snapshot above. If a page turn,
+        // WebDAV apply or note edit landed while it was in flight, the dirty
+        // flag belongs to that newer change and must not be cleared (and the
+        // anchor-cleared marker must not be undone).
+        const sameTarget =
+          latest.location === config.location &&
+          (latest.locationUpdatedAt ?? 0) === (config.locationUpdatedAt ?? 0);
+        const notesUnchanged = booknoteStamp(latest) === startedNotes;
+        if (sameTarget && notesUnchanged) {
+          dirtyRef.current = false;
+          pendingSinceRef.current = 0;
+          debounceResetCountRef.current = 0;
+        }
         const synced: BookConfig = {
           ...latest,
-          lastSyncedAtConfig: now,
+          ...(configChanged && sameTarget ? { rawAnchorCleared: false } : {}),
+          lastSyncedAtConfig: configChanged ? now : latest.lastSyncedAtConfig,
           lastSyncedAtNotes: now,
           pendingReadingSeconds: tracker.getPending(),
         };
         lastPersistedPendingRef.current = JSON.stringify(synced.pendingReadingSeconds);
         setConfig(bookKey, synced);
-        await saveConfig(envConfig, bookKey, synced, settings);
+        // The push itself must not make this device out-rank a newer remote
+        // record; only the reader moving the position advances the timestamp.
+        await saveConfig(envConfig, bookKey, synced, settings, { preserveUpdatedAt: true });
       }
     } catch (e) {
       if (e instanceof SyncApiError) {
@@ -343,6 +476,8 @@ export const useNativeSync = (bookKey: string) => {
         syncWarn(bookKey, 'push:error', { error: String(e) });
         console.warn('Native sync push failed', e);
       }
+    } finally {
+      endPush();
     }
   }, [
     isReady,
@@ -357,83 +492,228 @@ export const useNativeSync = (bookKey: string) => {
     ensureTracker,
   ]);
 
-  // Applies a pulled position to the live view. The jump itself is the same
-  // goTo(CFI) as before; what changed is when it runs. A section that is still
-  // being laid out (large sections on slow devices take tens of seconds) has
-  // no settled document, so the CFI is resolved against a half-built DOM, the
-  // paginator falls back to the section's first page and that fallback is then
-  // persisted as the reading position (#44). The jump therefore waits for the
-  // view to be inited, for a quiet gap in the renderer's load/stabilized
-  // events, and — the deterministic part — for the target range to actually
-  // have layout geometry.
-  const applyRemoteLocation = useCallback(
-    async (target: string) => {
+  const resolveRemotePosition = useCallback(
+    async (
+      remoteConfig: Partial<BookConfigRecord>,
+      remoteAnchor: RawLocationAnchor | null,
+    ): Promise<{
+      view: FoliateView;
+      cfi: string;
+      index: number;
+      anchor: RawLocationAnchor | null;
+      // false for the last-resort remote CFI, which is not a local coordinate.
+      localized: boolean;
+    } | null> => {
       const view = await waitForViewInited(bookKey);
-      if (!view) {
-        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-not-inited' });
-        return;
+      if (!view) return null;
+      const viewSettings = useReaderStore.getState().getViewSettings(bookKey);
+      if (remoteAnchor) {
+        const resolved = await resolveRawAnchorToCfi(bookKey, view, remoteAnchor, viewSettings);
+        if (resolved) {
+          return {
+            view,
+            cfi: resolved.cfi,
+            index: remoteAnchor.index,
+            anchor: remoteAnchor,
+            localized: true,
+          };
+        }
+        syncWarn(bookKey, 'pull:anchor-unresolved', {
+          index: remoteAnchor.index,
+          rawOffset: remoteAnchor.rawOffset,
+        });
       }
-      const startedAt = Date.now();
-      const from = view.lastLocation?.cfi;
-      await waitForLayoutSettled(view);
-      // The book can be closed (or reopened) while waiting.
-      if (useReaderStore.getState().getView(bookKey) !== view) {
-        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-replaced' });
-        return;
-      }
-      // No geometry means the section is still being laid out and the
-      // paginator would fall back to its first page. Wait for the next layout
-      // event and re-check, however long the device needs.
-      let waitedForLayout = false;
-      while (isTargetLaidOut(view, target) === false) {
-        waitedForLayout = true;
-        await waitForLayoutSettled(view);
-        if (useReaderStore.getState().getView(bookKey) !== view) {
-          syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-replaced' });
-          return;
+      if (remoteConfig.location) {
+        const legacy = await resolveLegacyCfiToLocal(
+          bookKey,
+          view,
+          remoteConfig.location,
+          viewSettings,
+        );
+        if (legacy) {
+          return { view, cfi: legacy.cfi, index: legacy.index, anchor: null, localized: true };
+        }
+        syncWarn(bookKey, 'pull:legacy-unresolved', { location: remoteConfig.location });
+        // Last resort for sections without a text stream (image-only or
+        // fixed-layout): let the renderer try the collapsed CFI itself. The
+        // landing is still verified before anything is persisted.
+        try {
+          const collapsed = CFI.collapse(remoteConfig.location);
+          const index = view.resolveCFI(collapsed).index;
+          if (index != null && index >= 0) {
+            return { view, cfi: collapsed, index, anchor: null, localized: false };
+          }
+        } catch {
+          // fall through
         }
       }
-      // A page turn (or another navigation) moved the view while we waited;
-      // jumping now would yank the reader away from what is on screen.
-      const movedTo = view.lastLocation?.cfi;
-      if (!isSameStart(from, movedTo)) {
-        syncWarn(bookKey, 'pull:goTo-aborted', { reason: 'view-moved', from, to: movedTo });
-        return;
-      }
-      await view.goTo(target);
-      const waitedMs = Date.now() - startedAt;
-      // Logged after the jump so `landed` shows where the view actually went.
-      // `dropped` marks the renderer ignoring the goTo (it drops one issued
-      // mid-turn), which leaves the view where it was.
-      const landed = view.lastLocation?.cfi;
-      syncLog(bookKey, 'pull:goTo-applied', {
-        to: target,
-        landed,
-        dropped: isSameStart(landed, from) && !isSameStart(landed, target),
-        waitedForLayout,
-        waitedMs,
-      });
+      return null;
     },
     [bookKey],
   );
 
-  const pullNow = useCallback(async (): Promise<boolean> => {
+  const applyRemotePosition = useCallback(
+    async (
+      view: FoliateView,
+      target: string,
+      index: number,
+      remoteAnchor: RawLocationAnchor | null,
+      generationAtStart: number,
+      localized: boolean,
+      remoteUpdatedAt: number,
+    ): Promise<{
+      applied: boolean;
+      location: string;
+      anchor?: RawLocationAnchor;
+      reason?: string;
+    }> => {
+      if (useReaderStore.getState().getView(bookKey) !== view) {
+        return { applied: false, location: target, reason: 'view-replaced' };
+      }
+      // Capture the starting position before waiting: a page turn during the
+      // quiet window must abort the jump, not be mistaken for the start.
+      const from = view.lastLocation?.cfi;
+      await waitForLayoutSettled(view);
+      if (useReaderStore.getState().getView(bookKey) !== view) {
+        return { applied: false, location: target, reason: 'view-replaced' };
+      }
+      let waitedForLayout = false;
+      // A section can report a resolvable range with no geometry forever
+      // (hidden chunk, zero-height inline content). Bounded attempts: proceed
+      // to the jump and let the containment check decide, instead of hanging
+      // pullNow (and every later pull) forever.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (isTargetLaidOut(view, target) !== false) break;
+        waitedForLayout = true;
+        await waitForLayoutSettled(view);
+        if (useReaderStore.getState().getView(bookKey) !== view) {
+          return { applied: false, location: target, reason: 'view-replaced' };
+        }
+      }
+      if (
+        localLocationGenerationRef.current !== generationAtStart ||
+        !isSameStart(from, view.lastLocation?.cfi)
+      ) {
+        syncWarn(bookKey, 'pull:goTo-aborted', {
+          reason: 'view-moved',
+          from,
+          to: view.lastLocation?.cfi,
+        });
+        const currentSource = useReaderStore.getState().getViewState(bookKey)?.progressSource;
+        if (currentSource !== 'tts') {
+          useReaderStore.getState().setProgressSource(bookKey, 'user');
+        }
+        return { applied: false, location: target, reason: 'view-moved' };
+      }
+
+      const buildAnchorFrom = async (
+        landed: NonNullable<FoliateView['lastLocation']> & { fraction?: number },
+      ): Promise<RawLocationAnchor | undefined> => {
+        if (!landed.range) return undefined;
+        const fraction = sectionFractionOf(view, index, landed.fraction);
+        return (
+          (await buildRawAnchorForRange(
+            bookKey,
+            view,
+            index,
+            landed.range,
+            fraction,
+            useReaderStore.getState().getViewSettings(bookKey),
+            remoteUpdatedAt,
+          )) ?? undefined
+        );
+      };
+
+      // Already on the requested page: do not disturb the view (and do not
+      // re-anchor layout/TTS) just because the remote timestamp moved.
+      if (isCfiWithinRange(target, view.lastLocation?.cfi)) {
+        const landed = view.lastLocation as
+          | (NonNullable<FoliateView['lastLocation']> & { fraction?: number })
+          | undefined;
+        const anchor = remoteAnchor ?? (landed ? await buildAnchorFrom(landed) : undefined);
+        return {
+          applied: true,
+          location: localized ? target : (landed?.cfi ?? target),
+          anchor,
+        };
+      }
+
+      useReaderStore.getState().setProgressSource(bookKey, 'remote');
+      const startedAt = Date.now();
+      try {
+        await view.goTo(target);
+        await waitForLayoutSettled(view);
+        let contained = isCfiWithinRange(target, view.lastLocation?.cfi);
+        if (!contained) {
+          await waitForLayoutSettled(view);
+          contained = isCfiWithinRange(target, view.lastLocation?.cfi);
+        }
+        const landed = view.lastLocation as
+          | (NonNullable<FoliateView['lastLocation']> & { fraction?: number })
+          | undefined;
+        syncLog(bookKey, 'pull:goTo-applied', {
+          to: target,
+          landed: landed?.cfi,
+          contained,
+          waitedForLayout,
+          waitedMs: Date.now() - startedAt,
+        });
+        if (localLocationGenerationRef.current !== generationAtStart) {
+          // The reader turned a page while the jump was settling. Their page
+          // wins: do not revert it and do not mark the remote position.
+          useReaderStore.getState().setProgressSource(bookKey, 'user');
+          return { applied: false, location: target, reason: 'user-moved' };
+        }
+        if (!contained || !landed?.cfi) {
+          // The renderer may have dropped us on a fallback page. Keep the
+          // source non-persistable, and put the reader back where it was;
+          // never let the fallback become a saved "user" position.
+          useReaderStore.getState().setProgressSource(bookKey, 'remote');
+          if (from) {
+            try {
+              await view.goTo(from);
+              await waitForLayoutSettled(view);
+            } catch {
+              // Best effort; the source guard still prevents persistence.
+            }
+          }
+          useReaderStore.getState().setProgressSource(bookKey, 'restore');
+          return { applied: false, location: target, reason: 'unverified' };
+        }
+
+        const anchor = remoteAnchor ?? (await buildAnchorFrom(landed));
+        // The jump's own relocates are `navigation`/`anchor`, which the
+        // reader does not promote; the next real page turn flips to user.
+        useReaderStore.getState().setProgressSource(bookKey, 'restore');
+        return {
+          applied: true,
+          location: localized ? target : landed.cfi,
+          anchor,
+        };
+      } catch (e) {
+        useReaderStore.getState().setProgressSource(bookKey, 'restore');
+        return { applied: false, location: target, reason: String(e) };
+      }
+    },
+    [bookKey],
+  );
+
+  const doPull = useCallback(async (): Promise<boolean> => {
     if (!isReady) return false;
     const book = getBookData(bookKey)?.book;
     const config = getConfig(bookKey);
     if (!book || !config) return false;
 
+    const generationAtStart = localLocationGenerationRef.current;
     const requestStartedAt = Date.now();
     syncLog(bookKey, 'pull:request', {
       bookHash: book.hash,
       localLocation: config.location,
-      localUpdatedAt: config.updatedAt ?? 0,
+      localLocationUpdatedAt: config.locationUpdatedAt ?? config.updatedAt ?? 0,
     });
 
     try {
       const showOtherAnnotations = useMyBooksStatusStore.getState().showOtherAnnotations;
-      // Always pass own explicitly (0/1), never omitted — lets the server
-      // tell this (new) client apart from an old one that never sends it.
       const result = await pullSync(0, {
         book: book.hash,
         own: showOtherAnnotations ? 0 : 1,
@@ -444,72 +724,133 @@ export const useNativeSync = (bookKey: string) => {
 
       const remoteConfig = result.configs?.[0];
       const remoteNotes = result.notes ?? [];
+      const liveConfig = getConfig(bookKey) ?? config;
 
-      const localUpdatedAt = config.updatedAt ?? 0;
-      const remoteUpdatedAt = remoteConfig?.updatedAt ?? remoteConfig?.updated_at ?? 0;
-      const remoteWins = !!remoteConfig && remoteUpdatedAt > localUpdatedAt;
-
-      // The comparison above (and everything derived from it) is computed
-      // against `config`, a snapshot taken *before* the network await. If a
-      // local write landed on this book while the request was in flight,
-      // that write is invisible here — and the wholesale `setConfig` below
-      // still overwrites the (now fresher) live config with a value built
-      // on top of this stale snapshot, silently reverting it.
-      const liveConfigNow = getConfig(bookKey);
+      const previewMode = useReaderStore.getState().getViewState(bookKey)?.previewMode ?? false;
       const localChangedDuringFlight =
-        !!liveConfigNow && liveConfigNow.location !== config.location;
+        localLocationGenerationRef.current !== generationAtStart ||
+        (liveConfig.locationUpdatedAt ?? 0) !== (config.locationUpdatedAt ?? 0);
+
+      const remoteLocationUpdatedAt =
+        remoteConfig?.locationUpdatedAt ?? remoteConfig?.updated_at ?? remoteConfig?.updatedAt ?? 0;
+      // `null` is an explicit "the author cleared it"; only a record with no
+      // anchor field at all predates anchors. Keep the distinction so an
+      // explicit clear does not get the legacy migration's server authority.
+      const anchorFieldPresent =
+        !!remoteConfig && ('raw_anchor' in remoteConfig || 'rawAnchor' in remoteConfig);
+      const remoteAnchorRaw = remoteConfig?.raw_anchor ?? remoteConfig?.rawAnchor ?? null;
+      const remoteAnchorCandidate = isValidRawAnchor(remoteAnchorRaw) ? remoteAnchorRaw : null;
+      // An anchor without a clock cannot prove it belongs to this record, and
+      // one older than the record was written for a previous position (a
+      // client that does not send anchors moved `location` forward). Both
+      // must yield to the record's location under normal LWW.
+      const remoteAnchor =
+        remoteAnchorCandidate?.updatedAt != null &&
+        remoteAnchorCandidate.updatedAt >= remoteLocationUpdatedAt
+          ? remoteAnchorCandidate
+          : null;
+      const localLocationUpdatedAt = liveConfig.locationUpdatedAt ?? liveConfig.updatedAt ?? 0;
+      const hasRemoteLocation = !!(remoteAnchor || remoteConfig?.location);
+      // Migration: a legacy server record (predating anchors) is the source of
+      // truth once. `migratedRemoteUpdatedAt` keeps this from re-triggering
+      // forever on books that cannot build an anchor (image-only sections).
+      const migratedAt = liveConfig.migratedRemoteUpdatedAt ?? -1;
+      const isLegacyRemote = hasRemoteLocation && !anchorFieldPresent;
+      const migration = isLegacyRemote && remoteLocationUpdatedAt > migratedAt;
+      const remoteLocationWins =
+        hasRemoteLocation && (migration || remoteLocationUpdatedAt > localLocationUpdatedAt);
 
       syncLog(bookKey, 'pull:response', {
         elapsedMs,
         hasRemoteConfig: !!remoteConfig,
         remoteLocation: remoteConfig?.location,
-        remoteUpdatedAt,
-        localUpdatedAt,
-        remoteWins,
+        remoteLocationUpdatedAt,
+        localLocationUpdatedAt,
+        remoteLocationWins,
+        migration,
+        previewMode,
         remoteNotesCount: remoteNotes.length,
       });
       if (localChangedDuringFlight) {
         syncWarn(bookKey, 'pull:local-drifted-during-flight', {
           snapshotLocation: config.location,
-          liveLocationNow: liveConfigNow?.location,
+          liveLocationNow: liveConfig.location,
           elapsedMs,
         });
       }
-
-      const mergedConfig: BookConfig = remoteWins
-        ? {
-            ...config,
-            progress: remoteConfig.progress ?? config.progress,
-            location: remoteConfig.location ?? config.location,
-            xpointer: remoteConfig.xpointer ?? config.xpointer,
-            updatedAt: remoteUpdatedAt,
+      let locationApplied = false;
+      let appliedLocation: string | undefined;
+      let appliedAnchor: RawLocationAnchor | undefined;
+      let locationFailure: string | undefined;
+      if (remoteLocationWins && !localChangedDuringFlight && !previewMode) {
+        const resolved = await resolveRemotePosition(remoteConfig!, remoteAnchor);
+        if (!resolved) {
+          locationFailure = 'unresolvable';
+        } else {
+          const applied = await applyRemotePosition(
+            resolved.view,
+            resolved.cfi,
+            resolved.index,
+            resolved.anchor,
+            generationAtStart,
+            resolved.localized,
+            remoteLocationUpdatedAt,
+          );
+          if (applied.applied) {
+            locationApplied = true;
+            appliedLocation = applied.location;
+            appliedAnchor = applied.anchor;
+            // Only an actually-applied remote position suppresses the local
+            // config push; an unresolvable newer record must not freeze this
+            // device's own progress.
+            lastPushedLocationUpdatedAtRef.current = Math.max(
+              lastPushedLocationUpdatedAtRef.current,
+              remoteLocationUpdatedAt,
+            );
+            // A remote record that already had an anchor does not need to be
+            // pushed back; one built locally during migration does.
+            lastPushedAnchorSignatureRef.current = resolved.anchor
+              ? rawAnchorSignature(resolved.anchor)
+              : '';
+          } else {
+            locationFailure = applied.reason;
           }
-        : { ...config };
-      mergedConfig.lastSyncedAtConfig = now;
+        }
+      } else if (remoteLocationWins) {
+        locationFailure = previewMode ? 'preview-mode' : 'local-changed-during-flight';
+      }
 
-      // `pullSync` is always called with since=0 (see above), so `remoteNotes`
-      // is a full snapshot of what the server has for this query scope — not
-      // a delta. A local note missing from that snapshot means the server no
-      // longer has it (deleted elsewhere), and the stale local copy must be
-      // dropped; otherwise it survives every pull forever (only a full
-      // site-data wipe clears it, since the cache lives in IndexedDB).
-      //
-      // The one case that must NOT be swept away: a note edited/created here
-      // since the last successful sync but not pushed yet — the server
-      // simply doesn't know about it yet, that's not the same as "deleted".
-      // `lastSyncedAtNotes` (stamped after every successful push/pull) is the
-      // watermark: only notes at or before it are safe to reconcile against
-      // an authoritative snapshot.
-      //
-      // `own=1` pulls only cover this account's own notes, so a note pulled
-      // in earlier from another user (via showOtherAnnotations) is out of
-      // scope for that query and must be left alone.
+      // Re-read: the apply may have taken seconds, during which notes,
+      // reading seconds or another user action may have landed. Never write
+      // back a snapshot taken before the await.
+      const fresh = getConfig(bookKey) ?? liveConfig;
+      const userMovedAfterApply = localLocationGenerationRef.current !== generationAtStart;
+      if (userMovedAfterApply) locationApplied = false;
+      const merged: BookConfig = { ...fresh };
+      if (locationApplied && appliedLocation) {
+        merged.location = appliedLocation;
+        merged.rawAnchor = appliedAnchor;
+        merged.rawAnchorCleared = !appliedAnchor;
+        merged.locationUpdatedAt = remoteLocationUpdatedAt;
+        merged.updatedAt =
+          remoteConfig!.updatedAt ?? remoteConfig!.updated_at ?? remoteLocationUpdatedAt;
+        if (remoteConfig!.progress) merged.progress = remoteConfig!.progress;
+        if (remoteConfig!.xpointer) merged.xpointer = remoteConfig!.xpointer;
+      }
+      if (isLegacyRemote && !previewMode) {
+        // The server record has been migrated (or was unusable) once; a later
+        // pull must not roll a reader who has already moved back. A deep-link
+        // preview is not a migration attempt and must keep the one-time
+        // server-truth migration available for the next normal open.
+        merged.migratedRemoteUpdatedAt = Math.max(migratedAt, remoteLocationUpdatedAt);
+      }
+
       const currentUserId = useMyBooksStatusStore.getState().currentUserId;
       const remoteNoteIds = new Set(remoteNotes.map((n) => n.id));
-      const syncWatermark = config.lastSyncedAtNotes ?? 0;
+      const syncWatermark = fresh.lastSyncedAtNotes ?? 0;
 
       const byId = new Map<string, BookNote>();
-      for (const n of config.booknotes ?? []) {
+      for (const n of fresh.booknotes ?? []) {
         const isOwn = !n.userId || n.userId === String(currentUserId);
         const inScope = showOtherAnnotations || isOwn;
         const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
@@ -525,49 +866,26 @@ export const useNativeSync = (bookKey: string) => {
           byId.set(remote.id, {
             ...local,
             ...remote,
-            // The wire field is `uid` (a number), not `user_id` — see
-            // `BookDataRecord.uid`'s doc comment.
             userId: remote.uid !== undefined ? String(remote.uid) : undefined,
             author: remote.author,
           } as BookNote);
         }
       }
-      mergedConfig.booknotes = Array.from(byId.values());
-      mergedConfig.lastSyncedAtNotes = now;
+      merged.booknotes = Array.from(byId.values());
+      // Only an applied remote location is "synced". Otherwise keep the old
+      // watermark so an unsynced local position can still be pushed.
+      merged.lastSyncedAtConfig = locationApplied ? now : (fresh.lastSyncedAtConfig ?? 0);
+      merged.lastSyncedAtNotes = now;
 
-      setConfig(bookKey, mergedConfig);
+      setConfig(bookKey, merged);
       const latest = getConfig(bookKey);
-      if (latest) await saveConfig(envConfig, bookKey, latest, settings);
-
-      // saveConfig unconditionally re-stamps updatedAt to Date.now() (see
-      // bookDataStore.saveConfig) instead of preserving remoteUpdatedAt when
-      // remoteWins. Log the divergence so it's visible: this device's local
-      // "freshness" clock just jumped to "now" even though the content is
-      // only as fresh as remoteUpdatedAt, which can make this device
-      // wrongly out-rank a genuinely newer push from another device on the
-      // very next comparison.
-      const savedUpdatedAt = getConfig(bookKey)?.updatedAt ?? 0;
-      if (remoteWins && savedUpdatedAt !== remoteUpdatedAt) {
-        syncWarn(bookKey, 'pull:updatedAt-restamped-past-remote', {
-          remoteUpdatedAt,
-          savedUpdatedAt,
-          driftMs: savedUpdatedAt - remoteUpdatedAt,
-        });
+      if (latest) {
+        // Pulls never advance the record timestamp; applying a remote
+        // position must not make this device look newer than the peer.
+        await saveConfig(envConfig, bookKey, latest, settings, { preserveUpdatedAt: true });
       }
 
-      // The remote config landing here doesn't otherwise reach the already-
-      // rendered view (it only opens at `config.location` once, at mount),
-      // so without this the pulled position is silently ignored on screen.
-      if (remoteWins && mergedConfig.location && mergedConfig.location !== config.location) {
-        syncLog(bookKey, 'pull:goTo', { from: config.location, to: mergedConfig.location });
-        void applyRemoteLocation(mergedConfig.location).catch((e) =>
-          syncWarn(bookKey, 'pull:goTo-error', { error: String(e) }),
-        );
-      } else if (remoteWins) {
-        syncLog(bookKey, 'pull:goTo-skipped', {
-          reason: !mergedConfig.location ? 'no-location' : 'same-as-local',
-        });
-      }
+      syncLog(bookKey, 'pull:applied', { locationApplied, locationFailure });
       return true;
     } catch (e) {
       if (e instanceof SyncApiError) {
@@ -592,15 +910,34 @@ export const useNativeSync = (bookKey: string) => {
     envConfig,
     settings,
     _,
-    applyRemoteLocation,
+    resolveRemotePosition,
+    applyRemotePosition,
   ]);
 
-  const syncRefs = useRef({ pushNow, pullNow });
+  const pullNow = useCallback(async (): Promise<boolean> => {
+    if (pullInFlightRef.current) {
+      pullPendingRef.current = true;
+      return pullInFlightRef.current;
+    }
+    const promise = doPull();
+    pullInFlightRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      pullInFlightRef.current = null;
+      if (pullPendingRef.current) {
+        pullPendingRef.current = false;
+        void pullNowRef.current();
+      }
+    }
+  }, [doPull]);
+
   useEffect(() => {
     syncRefs.current = { pushNow, pullNow };
+    pushNowRef.current = pushNow;
+    pullNowRef.current = pullNow;
   }, [pushNow, pullNow]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const debouncedPush = useCallback(
     debounce(
       () => {
@@ -622,15 +959,11 @@ export const useNativeSync = (bookKey: string) => {
   );
 
   const markDirtyAndSchedule = useCallback(() => {
-    // Diagnostic only (see pendingSinceRef/debounceResetCountRef comment
-    // above): a call while already dirty means the 15s debounce timer just
-    // got reset again before it could fire — track how long that's been
-    // going on and how many times, to confirm/rule out debounce starvation.
     if (dirtyRef.current) {
       debounceResetCountRef.current += 1;
       syncLog(bookKey, 'push:debounce-reset', {
         resetCount: debounceResetCountRef.current,
-        pendingMs: Date.now() - pendingSinceRef.current,
+        pendingMs: pendingSinceRef.current ? Date.now() - pendingSinceRef.current : null,
       });
     } else {
       pendingSinceRef.current = Date.now();
@@ -640,7 +973,6 @@ export const useNativeSync = (bookKey: string) => {
     debouncedPush();
   }, [debouncedPush, bookKey]);
 
-  // Pull once on book open.
   useEffect(() => {
     if (!isReady) {
       syncLog(bookKey, 'open:pull-once-skip', { reason: 'not-ready' });
@@ -656,17 +988,42 @@ export const useNativeSync = (bookKey: string) => {
     void syncRefs.current.pullNow().finally(() => {
       initialPullDoneRef.current = true;
       syncLog(bookKey, 'open:initial-pull-settled');
+      // Opening the book is reading interaction; keep the tracker live and
+      // queue a push only when the local record is actually ahead of the
+      // last acknowledged sync (the pull may have just applied a remote one).
+      ensureTracker().noteInteraction();
+      const latest = getConfig(bookKey);
+      const locationUpdatedAt = latest?.locationUpdatedAt ?? latest?.updatedAt ?? 0;
+      const hasPendingSeconds = Object.keys(latest?.pendingReadingSeconds ?? {}).length > 0;
+      if (latest && (locationUpdatedAt > (latest.lastSyncedAtConfig ?? 0) || hasPendingSeconds)) {
+        markDirtyAndSchedule();
+      }
     });
-  }, [isReady, progress?.location]);
+  }, [isReady, progress?.location, ensureTracker, getConfig, markDirtyAndSchedule]);
 
-  // Auto-push on progress changes.
   useEffect(() => {
     if (!isReady) return;
     if (!progress?.location) return;
-    syncLog(bookKey, 'push:progress-changed', { location: progress.location });
+    // The first render carries the position restored from disk; it is not a
+    // user navigation and must not bump the local sync generation.
+    const isFirstSnapshot = lastProgressLocationRef.current === null;
+    const changed = lastProgressLocationRef.current !== progress.location;
+    lastProgressLocationRef.current = progress.location;
+    if (isFirstSnapshot || !changed) return;
+    if (progress.source !== 'user' && progress.source !== 'tts') {
+      syncLog(bookKey, 'push:progress-display-only', {
+        source: progress.source ?? 'unknown',
+      });
+      return;
+    }
+    localLocationGenerationRef.current += 1;
+    syncLog(bookKey, 'push:progress-changed', {
+      location: progress.location,
+      source: progress.source,
+    });
     ensureTracker().noteInteraction();
     markDirtyAndSchedule();
-  }, [isReady, progress?.location, markDirtyAndSchedule, ensureTracker]);
+  }, [isReady, progress?.location, progress?.source, markDirtyAndSchedule, ensureTracker]);
 
   const config = getConfig(bookKey);
   const booknoteFingerprint = useMemo(() => {
@@ -682,17 +1039,11 @@ export const useNativeSync = (bookKey: string) => {
     markDirtyAndSchedule();
   }, [isReady, booknoteFingerprint, markDirtyAndSchedule, ensureTracker]);
 
-  // 本地"活跃阅读"计时器：tick 判定"是否算在阅读"（前台可见 + 最近有交互，口径与
-  // 服务端 60s 心跳窗口一致，见 activeReadingTracker.ts），持久化防崩溃丢数据，
-  // keep-alive 兜底"长时间不翻页也不会让攒的秒数迟迟发不出去"。三个节拍各自独立，
-  // 互不依赖——tick 最频繁且纯内存，persist/keep-alive 更粗。
   useEffect(() => {
     if (!isReady) return;
     const tracker = ensureTracker();
 
     const tickId = setInterval(() => {
-      // 每次 tick 顺手同步一次站点时区：sys.timezone 可能在阅读途中被管理员改掉，
-      // tick 是最主要的"往哪一天记"的写入路径，不该等下一次翻页才生效。
       tracker.setTimezone(useMyBooksStatusStore.getState().sysInfo?.timezone ?? null);
       tracker.tick(isWindowActiveRef.current);
     }, TICK_INTERVAL_MS);
@@ -714,10 +1065,6 @@ export const useNativeSync = (bookKey: string) => {
     };
   }, [isReady, ensureTracker, persistPendingSeconds]);
 
-  // WS acceleration: an immediate pull when the WS channel reports this
-  // book's config/notes changed elsewhere, instead of waiting for the next
-  // window-focus pull. No-op when the WS channel isn't connected (Web, or
-  // sync disabled) — the window-focus pull below is the REST fallback.
   useEffect(() => {
     if (!isReady) return;
     const handleChanged = (event: CustomEvent) => {
@@ -732,11 +1079,6 @@ export const useNativeSync = (bookKey: string) => {
   }, [isReady, bookKey]);
 
   useWindowActiveChanged((isActive) => {
-    // Tick right at the transition (not just on the next 10s interval poll)
-    // so lastTickAt gets reset exactly when the window actually went
-    // inactive/active — otherwise the next interval tick would measure
-    // elapsed time all the way back past however long the window was
-    // backgrounded, and wrongly credit that whole gap as reading.
     trackerRef.current?.tick(isActive);
     isWindowActiveRef.current = isActive;
     if (!isReady) return;
@@ -745,8 +1087,6 @@ export const useNativeSync = (bookKey: string) => {
       void syncRefs.current.pullNow();
     } else {
       if (dirtyRef.current) debouncedPush.flush();
-      // 后台/失焦时立即落一次本地盘（不等 30s 节拍），并且如果攒了还没上报的秒数，
-      // 顺路推一次——不依赖 dirtyRef（用户可能全程停在同一页）。
       void persistPendingSeconds();
       if (trackerRef.current && !trackerRef.current.isEmpty()) {
         void syncRefs.current.pushNow();
