@@ -36,6 +36,9 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
   const getBookData = useBookDataStore((s) => s.getBookData);
   const getViewSettings = useReaderStore((s) => s.getViewSettings);
   const getView = useReaderStore((s) => s.getView);
+  // Page-count progress is frozen while listening (sentence CFI owns
+  // progress), so hide the page-number segments instead of showing stale data.
+  const ttsEnabled = useReaderStore((s) => s.viewStates?.[bookKey]?.ttsEnabled ?? false);
   const view = getView(bookKey);
   const bookData = getBookData(bookKey);
   const viewSettings = getViewSettings(bookKey)!;
@@ -131,7 +134,8 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
           })
     : '';
 
-  const hasRemainingInfo = viewSettings.showRemainingTime || viewSettings.showRemainingPages;
+  const hasRemainingInfo =
+    !ttsEnabled && (viewSettings.showRemainingTime || viewSettings.showRemainingPages);
   const hasTimeInfo = viewSettings.showCurrentTime;
   const hasBatteryInfo = viewSettings.showCurrentBatteryStatus;
 
@@ -162,14 +166,14 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
         isVertical ? 'writing-vertical-rl' : 'w-full',
       )}
       aria-label={[
-        progress
+        !ttsEnabled && progress
           ? _('On {{current}} of {{total}} page', {
               current: current + 1,
               total: total,
             })
           : '',
-        timeLeftStr,
-        pagesLeftStr,
+        ttsEnabled ? '' : timeLeftStr,
+        ttsEnabled ? '' : pagesLeftStr,
       ]
         .filter(Boolean)
         .join(', ')}
@@ -201,7 +205,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
         )}
         style={isVertical ? {} : { height: `${viewSettings.marginBottomPx}px` }}
       >
-        {stickyBarActive && (
+        {stickyBarActive && !ttsEnabled && (
           <StickyProgressBar
             className='h-3 flex-1'
             fraction={fillFraction}
@@ -273,7 +277,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
             !stickyBarActive && 'flex-1 min-w-0',
           )}
         >
-          {viewSettings.showProgressInfo && (
+          {!ttsEnabled && viewSettings.showProgressInfo && (
             <span
               className={clsx(
                 'progress-info-label text-end',

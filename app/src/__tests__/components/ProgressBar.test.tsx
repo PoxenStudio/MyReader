@@ -17,6 +17,7 @@ let currentBookData: {
 let currentRenderer: { page: number; pages: number };
 let currentSectionFractions: number[] = [];
 let currentTocHrefIndex: Record<string, number> = {};
+let currentTtsEnabled = false;
 
 vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => (s: string, values?: Record<string, unknown>) =>
@@ -36,6 +37,11 @@ vi.mock('@/context/EnvContext', () => ({
 // state object.
 vi.mock('@/store/readerStore', () => {
   const state = {
+    viewStates: {
+      get ['book-1']() {
+        return { ttsEnabled: currentTtsEnabled };
+      },
+    },
     getProgress: () => currentProgress,
     getViewSettings: () => currentViewSettings,
     getView: () => ({
@@ -104,6 +110,7 @@ beforeEach(() => {
   currentRenderer = { page: 0, pages: 0 };
   currentSectionFractions = [];
   currentTocHrefIndex = {};
+  currentTtsEnabled = false;
 });
 
 const makeProgress = (current: number, total: number): BookProgress =>
@@ -348,5 +355,33 @@ describe('ProgressBar — contrast against the page (#4901)', () => {
 
     const info = container.querySelector('.progressinfo') as HTMLElement;
     expect(info.classList.contains('mix-blend-difference')).toBe(false);
+  });
+});
+
+describe('ProgressBar — TTS listening', () => {
+  it('hides page-count and remaining-page segments while TTS is active', () => {
+    currentViewSettings = {
+      ...baseSettings,
+      showRemainingPages: true,
+      showRemainingTime: false,
+      showProgressInfo: true,
+    } as ViewSettings;
+    currentProgress = makeProgress(2, 10);
+    currentBookData = { isFixedLayout: false };
+    currentRenderer = { page: 1, pages: 9 };
+
+    currentTtsEnabled = false;
+    const off = renderProgressBar();
+    expect(off.container.querySelector('.progressinfo')?.getAttribute('aria-label')).toContain(
+      'pages left in chapter',
+    );
+    cleanup();
+
+    currentTtsEnabled = true;
+    const on = renderProgressBar();
+    const label = on.container.querySelector('.progressinfo')?.getAttribute('aria-label') ?? '';
+    expect(label).not.toContain('pages left in chapter');
+    expect(label).not.toContain('On 3 of 10 page');
+    expect(on.container.textContent).not.toContain('pages left in chapter');
   });
 });
