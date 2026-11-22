@@ -24,6 +24,8 @@ import ReadingProgress from './ReadingProgress';
 import BookCover from '@/components/BookCover';
 import FormatBadge from './FormatBadge';
 
+const TITLE_TAIL_LENGTH = 3;
+
 interface BookItemProps {
   book: Book;
   mode: LibraryViewModeType;
@@ -86,6 +88,13 @@ const BookItem: React.FC<BookItemProps> = ({
     : undefined;
 
   const seriesText = formatSeries(book.metadata?.series, book.metadata?.seriesIndex);
+
+  // Keep the trailing characters (e.g. a series index like "(1)") visible when
+  // the title is truncated in a grid card, so series books stay distinguishable.
+  const titleChars = Array.from(book.title);
+  const hasTitleTail = titleChars.length > TITLE_TAIL_LENGTH;
+  const titleHead = hasTitleTail ? titleChars.slice(0, -TITLE_TAIL_LENGTH).join('') : book.title;
+  const titleTail = hasTitleTail ? titleChars.slice(-TITLE_TAIL_LENGTH).join('') : '';
 
   return (
     <div
@@ -162,12 +171,19 @@ const BookItem: React.FC<BookItemProps> = ({
         <div className={clsx('min-w-0 flex-1', mode === 'list' && 'flex flex-col gap-1')}>
           <h4
             className={clsx(
-              'overflow-hidden text-ellipsis font-semibold',
-              mode === 'grid' && 'block whitespace-nowrap text-[0.6em] text-xs',
+              'overflow-hidden font-semibold',
+              mode === 'grid' && 'flex whitespace-nowrap text-[0.6em] text-xs',
               mode === 'list' && 'line-clamp-1 text-base',
             )}
           >
-            {book.title}
+            {mode === 'grid' ? (
+              <>
+                <span className='min-w-0 truncate'>{titleHead}</span>
+                {titleTail && <span className='shrink-0'>{titleTail}</span>}
+              </>
+            ) : (
+              book.title
+            )}
           </h4>
           {mode === 'list' && (
             <p className='text-neutral-content line-clamp-1 text-sm'>
