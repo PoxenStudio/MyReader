@@ -292,7 +292,11 @@ export class HandwritingService {
     });
 
     const toPage = (x: number, y: number): InkPoint => {
-      const p = screenToPage({ x, y }, this.rect, { clamp: true });
+      // Not clamped: in a fixed-layout spread the pen may land on the sibling
+      // page, outside this page's normal 0..1 box. The router re-normalizes
+      // such a stroke to the page it is over; clamping would glue it to this
+      // page's edge instead.
+      const p = screenToPage({ x, y }, this.rect);
       return [p.x, p.y];
     };
 
@@ -331,14 +335,21 @@ export class HandwritingService {
     return this.editor.strokes(this.page).some((stroke) => this.place(stroke));
   }
 
-  /** Whether a screen point (CSS px) lands on ink shown on this page. */
+  /** Whether a screen point (CSS px) lands on ink shown on this page (or a spread sibling). */
   hitTest(x: number, y: number): boolean {
     // Before the first measurement there is no page to hit (and the slop
     // radius would divide by zero).
     if (this.rect.width <= 0 || this.rect.height <= 0) return false;
     const p = screenToPage({ x, y }, this.rect);
-    if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return false;
-    return this.editor.hits(this.page, [p.x, p.y], HIT_SLOP_PX / this.rect.width, this.place);
+    const target = this.targetOf([[p.x, p.y]]);
+    const point = target.points[0]!;
+    if (point[0] < 0 || point[0] > 1 || point[1] < 0 || point[1] > 1) return false;
+    return this.editor.hits(
+      target.page,
+      point,
+      (HIT_SLOP_PX * target.scale) / this.rect.width,
+      this.placeWith(target.anchoring),
+    );
   }
 
   /** Bind a finished stroke to the content under it, reusing the burst's anchor. */
