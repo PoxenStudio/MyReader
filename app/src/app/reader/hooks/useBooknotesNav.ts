@@ -98,7 +98,10 @@ export function useBooknotesNav(bookKey: string, toc: TOCItem[]) {
   // Start navigation for a specific booknote type
   const startNavigation = useCallback(
     (type: BookNoteType) => {
-      const filtered = allBooknotes.filter((note) => note.type === type);
+      // Drawings live in the Annotations tab alongside highlights and notes.
+      const filtered = allBooknotes.filter(
+        (note) => note.type === type || (type === 'annotation' && note.type === 'ink'),
+      );
       if (filtered.length === 0) return;
 
       const sorted = [...filtered].sort((a, b) => CFI.compare(a.cfi, b.cfi));
@@ -158,7 +161,7 @@ export function useBooknotesNav(bookKey: string, toc: TOCItem[]) {
     [allBooknotes],
   );
   const annotationCount = useMemo(
-    () => allBooknotes.filter((n) => n.type === 'annotation').length,
+    () => allBooknotes.filter((n) => n.type === 'annotation' || n.type === 'ink').length,
     [allBooknotes],
   );
   const excerptCount = useMemo(

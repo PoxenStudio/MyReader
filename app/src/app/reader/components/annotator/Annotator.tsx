@@ -1628,7 +1628,8 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
 
     const config = getConfig(bookKey)!;
     const { booknotes: allNotes = [] } = config;
-    const booknotes = allNotes.filter((note) => !note.deletedAt);
+    // Handwriting has no text to export; skip it rather than emit blank quotes.
+    const booknotes = allNotes.filter((note) => note.type !== 'ink' && !note.deletedAt);
     if (booknotes.length === 0) {
       eventDispatcher.dispatch('toast', {
         type: 'info',

@@ -90,6 +90,7 @@ import {
   getTTSMiniPlayerBottomOffset,
   TTS_MINI_PLAYER_HEIGHT,
 } from '../utils/ttsMiniPlayerPosition';
+import { getDrawingDockClearance } from '../utils/drawingDock';
 
 declare global {
   interface Window {
@@ -922,7 +923,13 @@ const FoliateViewer: React.FC<{
     const moreLeftInset = showDoubleBorderFooter ? 32 : 0;
     const topMargin = (showTopHeader ? insets.top : viewInsets.top) + moreTopInset;
     const rightMargin = insets.right + moreRightInset;
-    const bottomMargin = (showBottomFooter ? insets.bottom : viewInsets.bottom) + moreBottomInset;
+    // The drawing dock stays up for the whole drawing session, so the text
+    // makes room for it instead of running underneath.
+    const drawingDock = viewState?.drawingEnabled ? getDrawingDockClearance(gridInsets) : null;
+    const bottomMargin = Math.max(
+      (showBottomFooter ? insets.bottom : viewInsets.bottom) + moreBottomInset,
+      drawingDock?.bottom ?? 0,
+    );
     const leftMargin = insets.left + moreLeftInset;
     viewRef.current?.renderer.setAttribute('margin-top', `${topMargin}px`);
     viewRef.current?.renderer.setAttribute('margin-right', `${rightMargin}px`);
@@ -1080,6 +1087,7 @@ const FoliateViewer: React.FC<{
     viewSettings?.scrolled,
     viewSettings?.noContinuousScroll,
     viewState?.ttsEnabled,
+    viewState?.drawingEnabled,
     // footerReservesBand inputs: the band must collapse/return live when the
     // user flips these settings.
     viewSettings?.showStickyProgressBar,

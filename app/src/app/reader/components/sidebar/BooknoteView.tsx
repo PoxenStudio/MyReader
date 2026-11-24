@@ -45,7 +45,11 @@ const BooknoteView: React.FC<{
   // through derived data and prevents needless recomputation when unrelated
   // config fields change (e.g. viewSettings, lastUpdated).
   const filteredNotes = useMemo(
-    () => allNotes.filter((note) => note.type === type && !note.deletedAt),
+    () =>
+      allNotes.filter(
+        (note) =>
+          (note.type === type || (type === 'annotation' && note.type === 'ink')) && !note.deletedAt,
+      ),
     [allNotes, type],
   );
 

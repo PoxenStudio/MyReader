@@ -27,6 +27,7 @@ import HintInfo from './HintInfo';
 import ReadingRuler from './ReadingRuler';
 import DoubleBorder from './DoubleBorder';
 import ReadingStatsTracker from './ReadingStatsTracker';
+import HandwritingOverlay from './handwriting/HandwritingOverlay';
 
 interface BooksGridProps {
   bookKeys: string[];
@@ -264,6 +265,8 @@ const BookCellInner: React.FC<BookCellProps> = ({
         isHoveredAnim={false}
         gridInsets={gridInsets}
       />
+      {/* After the page chrome so it can't paint over ink near the edges. */}
+      <HandwritingOverlay bookKey={bookKey} gridInsets={gridInsets} />
       <ReadingStatsTracker bookKey={bookKey} />
     </div>
   );

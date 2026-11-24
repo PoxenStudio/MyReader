@@ -6,6 +6,7 @@ import { OPDSCatalog } from './opds';
 import type { AISettings } from '@/services/ai/types';
 import type { NotebookTab } from '@/store/notebookStore';
 import type { DictionarySettings, ImportedDictionary } from '@/services/dictionaries/types';
+import type { InkTool } from '@/services/handwriting/model';
 
 export type ThemeType = 'light' | 'dark' | 'auto';
 export type LibraryViewModeType = 'grid' | 'list';
@@ -69,6 +70,13 @@ export interface ReadSettings {
   defaultHighlightLabels: Partial<Record<HighlightColor, string>>;
   customTtsHighlightColors: string[];
   customThemes: CustomTheme[];
+  /** Ink color and pen width for the handwriting tool, remembered per install. */
+  handwritingColor: string;
+  handwritingWidth: number;
+  /** The tool chosen last; each tool keeps its own color and width. */
+  handwritingTool: InkTool;
+  handwritingMarkerColor: string;
+  handwritingMarkerWidth: number;
 }
 
 export interface ReadwiseSettings {

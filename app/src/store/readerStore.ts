@@ -105,6 +105,9 @@ interface ViewState {
      `getBookProgress(key)` for one-shot reads. */
   ribbonVisible: boolean;
   ttsEnabled: boolean;
+  /* True while the handwriting (drawing) dock is engaged for this view;
+     session-only, never persisted. */
+  drawingEnabled: boolean;
   /* True while an Auto Scroll session (#4998) is engaged for this view;
      session-only, never persisted. Drives the View menu checkmark. */
   autoScrollEnabled: boolean;
@@ -136,6 +139,7 @@ interface ReaderStore {
   setBottomBarTab: (tab: string) => void;
   setBookmarkRibbonVisibility: (key: string, visible: boolean) => void;
   setTTSEnabled: (key: string, enabled: boolean) => void;
+  setDrawingEnabled: (key: string, enabled: boolean) => void;
   setAutoScrollEnabled: (key: string, enabled: boolean) => void;
   setIsLoading: (key: string, loading: boolean) => void;
   setIsSyncing: (key: string, syncing: boolean) => void;
@@ -237,6 +241,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
           error: null,
           ribbonVisible: false,
           ttsEnabled: false,
+          drawingEnabled: false,
           autoScrollEnabled: false,
           syncing: false,
           gridInsets: null,
@@ -440,6 +445,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
             error: null,
             ribbonVisible: false,
             ttsEnabled: false,
+            drawingEnabled: false,
             autoScrollEnabled: false,
             syncing: false,
             gridInsets: null,
@@ -464,6 +470,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
             error: 'Failed to load book.',
             ribbonVisible: false,
             ttsEnabled: false,
+            drawingEnabled: false,
             autoScrollEnabled: false,
             syncing: false,
             gridInsets: null,
@@ -702,6 +709,17 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
         [key]: {
           ...state.viewStates[key]!,
           ttsEnabled: enabled,
+        },
+      },
+    })),
+
+  setDrawingEnabled: (key: string, enabled: boolean) =>
+    set((state) => ({
+      viewStates: {
+        ...state.viewStates,
+        [key]: {
+          ...state.viewStates[key]!,
+          drawingEnabled: enabled,
         },
       },
     })),

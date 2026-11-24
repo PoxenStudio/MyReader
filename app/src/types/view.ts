@@ -79,7 +79,7 @@ export interface FoliateView extends HTMLElement {
   isOverflowY: () => boolean;
   goLeft: () => void;
   goRight: () => void;
-  getCFI: (index: number, range: Range) => string;
+  getCFI: (index: number, range?: Range) => string;
   getCFIProgress: (cfi: string) => Promise<{
     fraction: number;
     section: { current: number; total: number };

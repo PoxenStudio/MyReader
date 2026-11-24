@@ -255,7 +255,7 @@ const BooknoteItem: React.FC<BooknoteItemProps> = ({ bookKey, item, isNearest, o
                 } as React.CSSProperties
               }
             >
-              {text || ''}
+              {text || (item.type === 'ink' ? _('Drawing') : '')}
             </span>
           </div>
         </div>
