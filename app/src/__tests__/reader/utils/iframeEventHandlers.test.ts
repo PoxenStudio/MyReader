@@ -89,7 +89,7 @@ describe('iframeEventHandlers click gestures', () => {
     // window-space coordinates; without a frame the event's client point is it.
     const click = postSpy.mock.calls
       .map((call: unknown[]) => call[0] as Record<string, unknown>)
-      .find((message) => message['type'] === 'iframe-single-click');
+      .find((message: Record<string, unknown>) => message['type'] === 'iframe-single-click');
     expect(click?.['windowX']).toBe(100);
     expect(click?.['windowY']).toBe(100);
   });

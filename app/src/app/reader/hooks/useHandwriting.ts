@@ -15,6 +15,7 @@ import { createInkAnchoring } from '../utils/inkAnchoring';
 import { boundsOf } from '@/services/handwriting/anchor';
 import type { PageRect } from '@/services/handwriting/coords';
 import type { InkStroke, InkTool } from '@/services/handwriting/model';
+import type { BookNote } from '@/types/book';
 import type { ReadSettings } from '@/types/settings';
 import type { FoliateView } from '@/types/view';
 
@@ -89,6 +90,15 @@ export function useHandwriting(bookKey: string) {
   const getViewSettings = useReaderStore((s) => s.getViewSettings);
   const settings = useSettingsStore((s) => s.settings);
   const currentUserId = useMyBooksStatusStore((s) => s.currentUserId);
+  // This reader's own ink only: a shared drawing from another account must
+  // not reload the editor (and drop a live stroke) when it arrives.
+  const ownBooknotes = useCallback(
+    (notes: BookNote[] | undefined) =>
+      notes?.filter(
+        (note) => note.type !== 'ink' || !note.userId || note.userId === String(currentUserId),
+      ),
+    [currentUserId],
+  );
   const { envConfig } = useEnv();
   const isFixedLayout = !!useBookDataStore((s) => s.getBookData(bookKey)?.isFixedLayout);
   // Scrolled views show several pages at once; strokes are routed per page.
@@ -121,14 +131,14 @@ export function useHandwriting(bookKey: string) {
   const [erasing, setErasing] = useState(false);
 
   const loadEditor = useCallback(() => {
-    const booknotes = getConfig(bookKey)?.booknotes;
+    const booknotes = ownBooknotes(getConfig(bookKey)?.booknotes);
     inkSignatureRef.current = inkSignature(booknotes);
     editorRef.current = loadInkEditor(
       booknotes ?? [],
       isFixedLayout,
       currentUserId !== null ? String(currentUserId) : undefined,
     );
-  }, [bookKey, currentUserId, getConfig, isFixedLayout]);
+  }, [bookKey, ownBooknotes, currentUserId, getConfig, isFixedLayout]);
 
   if (!editorRef.current) loadEditor();
 
@@ -182,8 +192,8 @@ export function useHandwriting(bookKey: string) {
   // changes the notes without this hook; pick it up.
   const booknotes = useBookDataStore((s) => s.getConfig(bookKey)?.booknotes);
   useEffect(() => {
-    if (inkSignature(booknotes) !== inkSignatureRef.current) reload();
-  }, [booknotes, reload]);
+    if (inkSignature(ownBooknotes(booknotes)) !== inkSignatureRef.current) reload();
+  }, [booknotes, ownBooknotes, reload]);
 
   // Write to the store on every committed edit, and to disk shortly after, so
   // ink survives the app being killed before the next page turn.
@@ -203,7 +213,7 @@ export function useHandwriting(bookKey: string) {
         cfiOf: (index) => view.getCFI(index),
         describe: (cfi) => describeInk(view, cfi),
       });
-      inkSignatureRef.current = inkSignature(booknotes);
+      inkSignatureRef.current = inkSignature(ownBooknotes(booknotes));
       setConfig(bookKey, { booknotes });
       // First change arms the timer and later ones don't push it back: a
       // continuous drawing session is still flushed every second instead of
