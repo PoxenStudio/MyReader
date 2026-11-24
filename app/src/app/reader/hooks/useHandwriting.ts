@@ -329,7 +329,9 @@ export function useHandwriting(bookKey: string) {
       const placed = strokes.flatMap((stroke) =>
         stroke.anchor
           ? (anchoring.place(stroke) ?? []).map((points) => ({ ...stroke, points }))
-          : [],
+          : // Unanchored ink was stored in cell coordinates already; hiding it
+            // would make a margin drawing vanish in scrolled mode.
+            [stroke],
       );
       return [{ strokes: placed, rect: cellRect }];
     });

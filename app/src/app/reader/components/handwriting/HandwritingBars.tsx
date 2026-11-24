@@ -24,8 +24,10 @@ const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
   { tool: 'marker', label: 'Marker', Icon: RiMarkPenLine },
 ];
 
+// Narrow phones cannot fit nine 32px buttons; let the dock scroll sideways
+// rather than clip Save/Close off the edge.
 const BAR =
-  'eink-bordered bg-base-100 border-base-300/50 absolute inset-x-0 z-30 flex items-center';
+  'eink-bordered bg-base-100 border-base-300/50 absolute inset-x-0 z-30 flex items-center overflow-x-auto';
 
 interface HandwritingDockProps {
   erasing: boolean;
@@ -91,7 +93,7 @@ export const HandwritingDock: React.FC<HandwritingDockProps> = ({
           />
         </div>
       )}
-      <div className='flex items-center gap-2'>
+      <div className='flex shrink-0 items-center gap-2'>
         {TOOLS.map(({ tool: value, label, Icon }) => {
           const active = !erasing && tool === value;
           return (
@@ -147,7 +149,7 @@ export const HandwritingDock: React.FC<HandwritingDockProps> = ({
         />
       </div>
       {/* Pages turn by their on-screen side, like the reader's own buttons. */}
-      <div className='flex items-center gap-2' dir='ltr'>
+      <div className='flex shrink-0 items-center gap-2' dir='ltr'>
         <AnnotationToolButton
           showTooltip
           tooltipText={_('Previous Page')}
