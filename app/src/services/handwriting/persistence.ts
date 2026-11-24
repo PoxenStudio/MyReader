@@ -145,7 +145,9 @@ export const withInkNotes = (
       text: (prev?.cfi === cfi && prev.text) || describe(cfi),
       note: prev?.note ?? '',
       ink: strokes,
-      createdAt: prev && !prev.deletedAt ? prev.createdAt : now,
+      // Drawing again over a tombstoned id resurrects the note.
+      deletedAt: null,
+      createdAt: prev?.createdAt ?? now,
       updatedAt: now,
     });
   }

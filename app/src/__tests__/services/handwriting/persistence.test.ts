@@ -163,6 +163,30 @@ describe('ink notes', () => {
     });
   });
 
+  it('resurrects a tombstoned drawing that is drawn on again', () => {
+    const gone: BookNote = {
+      id: 'ink-s1',
+      type: 'ink',
+      cfi: WORDS,
+      text: '',
+      note: '',
+      ink: [],
+      deletedAt: 50,
+      createdAt: 10,
+      updatedAt: 50,
+    };
+    const editor = loadInkEditor([gone], false, '7');
+    editor.addStroke('sec:3', stroke('a', 'ink-s1', WORDS));
+    const [note] = write([gone], editor, 200);
+    expect(note).toMatchObject({
+      id: 'ink-s1',
+      deletedAt: null,
+      createdAt: 10,
+      updatedAt: 200,
+    });
+    expect(note!.ink!.map((s) => s.id)).toEqual(['a']);
+  });
+
   it('leaves a drawing that arrived after the editor loaded untouched', () => {
     const editor = loadInkEditor([], false, '7');
     const pulled: BookNote = {
