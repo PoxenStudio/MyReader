@@ -314,6 +314,24 @@ export function useHandwriting(bookKey: string) {
   }, [cellEl, measure, isFixedLayout, getView, bookKey, location, sectionIndex]);
 
   /**
+   * Whether a section's frame is actually on screen. The paginator keeps
+   * preloaded sections mounted off-screen; their unanchored ink would
+   * otherwise be painted over the current page, and re-anchoring them every
+   * live-draw frame is wasted work.
+   */
+  const isOnScreen = (doc: Document | undefined): boolean => {
+    const frame = doc?.defaultView?.frameElement;
+    if (!frame || !cellRect.width) return false;
+    const rect = frame.getBoundingClientRect();
+    return (
+      rect.right > cellRect.left &&
+      rect.left < cellRect.left + cellRect.width &&
+      rect.bottom > cellRect.top &&
+      rect.top < cellRect.top + cellRect.height
+    );
+  };
+
+  /**
    * In scrolled mode every loaded page or section on screen shows its ink,
    * placed from its own frame or text.
    */
@@ -325,7 +343,7 @@ export function useHandwriting(bookKey: string) {
     // same spine index; each section's ink must be painted once.
     const seen = new Set<number>();
     return view.renderer.getContents().flatMap(({ doc, index }): InkLayer[] => {
-      if (index === undefined || seen.has(index)) return [];
+      if (index === undefined || seen.has(index) || !isOnScreen(doc)) return [];
       seen.add(index);
       if (isFixedLayout) {
         const frame = doc?.defaultView?.frameElement;
@@ -379,8 +397,8 @@ export function useHandwriting(bookKey: string) {
     const editor = editorRef.current;
     if (!view || !editor || !cellRect.width) return [];
     const seen = new Set<number>();
-    return view.renderer.getContents().flatMap(({ index }): InkLayer[] => {
-      if (index === undefined || seen.has(index)) return [];
+    return view.renderer.getContents().flatMap(({ doc, index }): InkLayer[] => {
+      if (index === undefined || seen.has(index) || !isOnScreen(doc)) return [];
       seen.add(index);
       const strokes = editor.strokes(sectionPageKey(index));
       if (!strokes.length) return [];
