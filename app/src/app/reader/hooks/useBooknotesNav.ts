@@ -4,6 +4,7 @@ import { useSidebarStore } from '@/store/sidebarStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useBookProgress } from '@/store/readerProgressStore';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { createCfiLocationMatcher } from '@/utils/cfi';
 import { findTocItemBS } from '@/services/nav';
 import { BookNoteType } from '@/types/book';
@@ -29,11 +30,20 @@ export function useBooknotesNav(bookKey: string, toc: TOCItem[]) {
   const progress = useBookProgress(bookKey);
   const currentLocation = progress?.location;
 
+  const currentUserId = useMyBooksStatusStore((s) => s.currentUserId);
+
   // Get booknotes from config and filter by type
   const allBooknotes = useMemo(() => {
     const config = getConfig(bookKey);
-    return config?.booknotes?.filter((note) => !note.deletedAt) || [];
-  }, [bookKey, getConfig]);
+    return (
+      config?.booknotes?.filter(
+        (note) =>
+          !note.deletedAt &&
+          // Drawings stay private to their author, like the annotations list.
+          !(note.type === 'ink' && note.userId && note.userId !== String(currentUserId)),
+      ) || []
+    );
+  }, [bookKey, getConfig, currentUserId]);
 
   // Sort booknotes by CFI order
   const sortedBooknotes = useMemo(() => {
