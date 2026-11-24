@@ -337,8 +337,9 @@ export const useWebDAVSync = (bookKey: string) => {
           if (note.deletedAt && (!prev || !prev.deletedAt)) {
             // Newly soft-deleted on the remote — strip overlays locally.
             getViewsById(getBookHash(bookKey)).forEach((v) => removeBookNoteOverlays(v, note));
-          } else if (!note.deletedAt && note.cfi && view) {
+          } else if (!note.deletedAt && note.type === 'annotation' && note.cfi && view) {
             // Newly added or re-surrected; only render in the live spine.
+            // Drawings are painted from their ink payload, not a text range.
             try {
               view.addAnnotation(note);
             } catch {
@@ -349,16 +350,30 @@ export const useWebDAVSync = (bookKey: string) => {
         }
       }
 
-      // Honour sub-toggles: drop the parts the user opted out of before
-      // writing back to the local config store.
+      // The merge ran against the config snapshot taken before the network
+      // await. Re-read the live config so strokes/notes committed while the
+      // request was in flight are not overwritten by the stale snapshot.
+      const liveConfig = getConfig(bookKey) ?? config;
       const toApply = { ...result.mergedConfig };
-      if (!wantProgress) {
-        toApply.progress = config.progress;
-        toApply.location = config.location;
-        toApply.xpointer = config.xpointer;
+      const localMovedDuringPull = liveConfig.location !== config.location;
+      if (!wantProgress || localMovedDuringPull) {
+        toApply.progress = liveConfig.progress;
+        toApply.location = liveConfig.location;
+        toApply.xpointer = liveConfig.xpointer;
       }
       if (!wantNotes) {
-        toApply.booknotes = config.booknotes;
+        toApply.booknotes = liveConfig.booknotes;
+      } else {
+        // Re-merge the live notes over the pulled ones (whole-record LWW, as
+        // elsewhere); anything drawn during the pull survives.
+        const merged = new Map((result.mergedConfig.booknotes ?? []).map((n) => [n.id, n]));
+        for (const note of liveConfig.booknotes ?? []) {
+          const current = merged.get(note.id);
+          const noteTs = Math.max(note.updatedAt ?? 0, note.deletedAt ?? 0);
+          const currentTs = current ? Math.max(current.updatedAt ?? 0, current.deletedAt ?? 0) : -1;
+          if (!current || noteTs > currentTs) merged.set(note.id, note);
+        }
+        toApply.booknotes = [...merged.values()];
       }
 
       setConfig(bookKey, toApply);

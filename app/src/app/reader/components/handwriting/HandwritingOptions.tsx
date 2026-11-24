@@ -29,7 +29,7 @@ const HandwritingOptions: React.FC<HandwritingOptionsProps> = ({
   onSelectWidth,
 }) => {
   const _ = useTranslation();
-  const { settings } = useSettingsStore();
+  const settings = useSettingsStore((state) => state.settings);
   const { isEink, isColorEink } = settings.globalViewSettings;
   const showColors = !isEink || isColorEink;
   const swatchSize = useResponsiveSize(20);

@@ -100,6 +100,8 @@ export class HandwritingService {
   private eraseTail: InkPoint | null = null;
   private rect: PageRect;
   private onRender: (() => void) | null = null;
+  /** Bumped by attach/detach so a probe that outlives the session is dropped. */
+  private attachGeneration = 0;
 
   constructor(
     editor: HandwritingEditor,
@@ -127,7 +129,7 @@ export class HandwritingService {
   private strokeWidth() {
     const { tool, widthFraction } = this.options;
     const { width } = this.rect;
-    if (tool === 'marker' || width <= PEN_MAX_SCALING_WIDTH) return widthFraction;
+    if (width <= 0 || tool === 'marker' || width <= PEN_MAX_SCALING_WIDTH) return widthFraction;
     return (widthFraction * PEN_MAX_SCALING_WIDTH) / width;
   }
 
@@ -283,6 +285,10 @@ export class HandwritingService {
   }
 
   async attach(el: HTMLElement) {
+    // Detach (or a newer attach) while the capability probe is in flight must
+    // win: otherwise the probe resolves after drawing mode was left and
+    // installs pointer listeners on a canvas that is no longer interactive.
+    const generation = ++this.attachGeneration;
     // This port has no vendor pen channel: every platform draws through
     // pointer events. The capability probe still gates browsers with no
     // PointerEvent support, where drawing is simply unavailable.
@@ -290,6 +296,7 @@ export class HandwritingService {
       queryNative: null,
       hasPointerEvents: typeof window !== 'undefined' && 'PointerEvent' in window,
     });
+    if (generation !== this.attachGeneration) return;
 
     const toPage = (x: number, y: number): InkPoint => {
       // Not clamped: in a fixed-layout spread the pen may land on the sibling
@@ -307,6 +314,7 @@ export class HandwritingService {
   }
 
   async detach() {
+    this.attachGeneration++;
     this.pointer.detach();
   }
 

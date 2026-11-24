@@ -9,6 +9,7 @@ import { RiBookmark3Line, RiBookmarkLine } from 'react-icons/ri';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSidebarStore } from '@/store/sidebarStore';
+import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { findTocItemBS } from '@/services/nav';
 import { findNearestCfi } from '@/utils/cfi';
 import { TOCItem } from '@/libs/document';
@@ -44,13 +45,18 @@ const BooknoteView: React.FC<{
   // Filter active notes of this type. useMemo so referential stability flows
   // through derived data and prevents needless recomputation when unrelated
   // config fields change (e.g. viewSettings, lastUpdated).
+  const currentUserId = useMyBooksStatusStore((state) => state.currentUserId);
   const filteredNotes = useMemo(
     () =>
       allNotes.filter(
         (note) =>
-          (note.type === type || (type === 'annotation' && note.type === 'ink')) && !note.deletedAt,
+          (note.type === type || (type === 'annotation' && note.type === 'ink')) &&
+          !note.deletedAt &&
+          // Drawings are private to their author even when shared highlights
+          // are enabled for the book.
+          (note.type !== 'ink' || !note.userId || note.userId === String(currentUserId)),
       ),
-    [allNotes, type],
+    [allNotes, type, currentUserId],
   );
 
   // Build groups + sort by toc id and intra-group cfi.
@@ -295,7 +301,11 @@ const BooknoteView: React.FC<{
           <EmptyState
             Icon={type === 'annotation' ? PiNotePencil : RiBookmark3Line}
             label={type === 'annotation' ? _('No Annotations') : _('No Bookmarks')}
-            hint={type === 'annotation' ? _('Select some text to highlight') : undefined}
+            hint={
+              type === 'annotation'
+                ? `${_('Select some text to highlight')} / ${_('Draw')}`
+                : undefined
+            }
             action={
               type === 'bookmark' ? (
                 <button

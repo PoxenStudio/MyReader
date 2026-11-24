@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import HandwritingOverlay from '@/app/reader/components/handwriting/HandwritingOverlay';
+import { eventDispatcher } from '@/utils/event';
 
 const h = vi.hoisted(() => ({
   enabled: false,
   layers: [] as { strokes: unknown[]; rect: unknown }[],
   setHoveredBookKey: vi.fn(),
+  setAutoScrollEnabled: vi.fn(),
   setErasing: vi.fn(),
+  setEnabled: vi.fn(),
+  hitTestResult: false,
 }));
 
 vi.mock('@/app/reader/hooks/useHandwriting', () => ({
@@ -16,8 +20,8 @@ vi.mock('@/app/reader/hooks/useHandwriting', () => ({
     visible: true,
     editable: true,
     enabled: h.enabled,
-    setEnabled: vi.fn(),
-    hitTest: () => false,
+    setEnabled: h.setEnabled,
+    hitTest: () => h.hitTestResult,
     layers: h.layers,
     cellRect: { left: 0, top: 0, width: 400, height: 800 },
     containerRef: vi.fn(),
@@ -40,9 +44,15 @@ vi.mock('@/app/reader/hooks/useHandwriting', () => ({
 
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }));
 
-vi.mock('@/store/readerStore', () => ({
-  useReaderStore: () => ({ setHoveredBookKey: h.setHoveredBookKey }),
-}));
+vi.mock('@/store/readerStore', () => {
+  const state = {
+    setHoveredBookKey: h.setHoveredBookKey,
+    setAutoScrollEnabled: h.setAutoScrollEnabled,
+  };
+  return {
+    useReaderStore: (select?: (s: typeof state) => unknown) => (select ? select(state) : state),
+  };
+});
 
 vi.mock('@/app/reader/components/handwriting/HandwritingBars', () => ({
   HandwritingDock: () => <div data-testid='handwriting-dock' />,
@@ -51,8 +61,11 @@ vi.mock('@/app/reader/components/handwriting/HandwritingBars', () => ({
 afterEach(() => {
   cleanup();
   h.layers = [];
+  h.hitTestResult = false;
   h.setHoveredBookKey.mockClear();
+  h.setAutoScrollEnabled.mockClear();
   h.setErasing.mockClear();
+  h.setEnabled.mockClear();
 });
 
 const insets = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -81,6 +94,20 @@ describe('HandwritingOverlay', () => {
     h.enabled = false;
     render(<HandwritingOverlay bookKey='book-1' gridInsets={insets} />);
     expect(h.setHoveredBookKey).not.toHaveBeenCalled();
+  });
+
+  it('opens drawing on a tap that lands on existing ink', () => {
+    h.enabled = false;
+    h.hitTestResult = true;
+    render(<HandwritingOverlay bookKey='book-1' gridInsets={insets} />);
+    act(() => {
+      eventDispatcher.dispatchSync('iframe-single-click', {
+        bookKey: 'book-1',
+        windowX: 12,
+        windowY: 34,
+      });
+    });
+    expect(h.setEnabled).toHaveBeenCalledWith(true);
   });
 
   // The ink layer spans the whole book cell, scrolled mode's scrollbar

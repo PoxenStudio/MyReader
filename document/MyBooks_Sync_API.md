@@ -141,9 +141,26 @@ This is the category that carries **bookmarks, highlights, and annotations** —
 the thing KOSync does *not* cover.
 
 ```ts
-type BookNoteType = 'bookmark' | 'annotation' | 'excerpt';
+type BookNoteType = 'bookmark' | 'annotation' | 'excerpt' | 'ink';
 type HighlightStyle = 'highlight' | 'underline' | 'squiggly';
 type HighlightColor = 'red' | 'yellow' | 'green' | 'blue' | 'violet' | string; // hex allowed
+
+// Handwriting strokes of an `ink` note. Points are page-normalized (0..1);
+// the optional third element is pen pressure (0..1). A stroke with an
+// `anchor` (reflowable books) is pinned to that text CFI; a stroke with a
+// `page` belongs to that fixed-layout page index. Ink notes carry no
+// xpointer, so KOReader plugins skip them instead of importing a drawing as
+// a highlight.
+interface InkStroke {
+  id: string;
+  color: string;
+  width: number; // fraction of page width
+  tool?: 'marker';
+  anchor?: string;
+  shape?: 'flow' | 'box' | 'spanL' | 'spanR';
+  page?: number;
+  points: ([number, number] | [number, number, number])[];
+}
 
 interface BookNote {
   bookHash?: string;   // = book_hash
@@ -159,6 +176,7 @@ interface BookNote {
   color?: HighlightColor;
   note: string;        // user-written note content
   global?: boolean;    // apply to every occurrence of `text` in the section
+  ink?: InkStroke[];   // drawing strokes (type === 'ink' only)
 
   createdAt: number;
   updatedAt: number;

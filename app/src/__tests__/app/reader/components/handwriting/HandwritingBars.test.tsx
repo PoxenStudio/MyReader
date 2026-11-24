@@ -15,12 +15,18 @@ vi.mock('@/hooks/useTranslation', () => ({
 vi.mock('@/hooks/useResponsiveSize', () => ({ useResponsiveSize: (n: number) => n }));
 vi.mock('@/context/EnvContext', () => ({ useEnv: () => ({ appService: {} }) }));
 vi.mock('@/utils/event', () => ({ eventDispatcher: { dispatch: h.dispatch } }));
-vi.mock('@/store/readerStore', () => ({
-  useReaderStore: () => ({ getViewSettings: () => ({ scrolled: h.scrolled }) }),
-}));
-vi.mock('@/store/settingsStore', () => ({
-  useSettingsStore: () => ({ settings: { globalViewSettings: { isEink: false } } }),
-}));
+vi.mock('@/store/readerStore', () => {
+  const state = { getViewSettings: () => ({ scrolled: h.scrolled }) };
+  return {
+    useReaderStore: (select?: (s: typeof state) => unknown) => (select ? select(state) : state),
+  };
+});
+vi.mock('@/store/settingsStore', () => {
+  const state = { settings: { globalViewSettings: { isEink: false, isColorEink: false } } };
+  return {
+    useSettingsStore: (select?: (s: typeof state) => unknown) => (select ? select(state) : state),
+  };
+});
 
 afterEach(() => {
   cleanup();

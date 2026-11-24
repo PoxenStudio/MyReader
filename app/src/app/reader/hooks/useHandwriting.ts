@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useBookProgress } from '@/store/readerProgressStore';
 import { useEnv } from '@/context/EnvContext';
 import { saveSysSettings } from '@/helpers/settings';
@@ -84,8 +85,10 @@ export function useHandwriting(bookKey: string) {
   const getConfig = useBookDataStore((s) => s.getConfig);
   const setConfig = useBookDataStore((s) => s.setConfig);
   const saveConfig = useBookDataStore((s) => s.saveConfig);
-  const { getView, getViewSettings } = useReaderStore();
-  const { settings } = useSettingsStore();
+  const getView = useReaderStore((s) => s.getView);
+  const getViewSettings = useReaderStore((s) => s.getViewSettings);
+  const settings = useSettingsStore((s) => s.settings);
+  const currentUserId = useMyBooksStatusStore((s) => s.currentUserId);
   const { envConfig } = useEnv();
   const isFixedLayout = !!useBookDataStore((s) => s.getBookData(bookKey)?.isFixedLayout);
   // Scrolled views show several pages at once; strokes are routed per page.
@@ -120,8 +123,12 @@ export function useHandwriting(bookKey: string) {
   const loadEditor = useCallback(() => {
     const booknotes = getConfig(bookKey)?.booknotes;
     inkSignatureRef.current = inkSignature(booknotes);
-    editorRef.current = loadInkEditor(booknotes ?? [], isFixedLayout);
-  }, [bookKey, getConfig, isFixedLayout]);
+    editorRef.current = loadInkEditor(
+      booknotes ?? [],
+      isFixedLayout,
+      currentUserId !== null ? String(currentUserId) : undefined,
+    );
+  }, [bookKey, currentUserId, getConfig, isFixedLayout]);
 
   if (!editorRef.current) loadEditor();
 
@@ -198,15 +205,28 @@ export function useHandwriting(bookKey: string) {
       });
       inkSignatureRef.current = inkSignature(booknotes);
       setConfig(bookKey, { booknotes });
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(save, SAVE_DELAY_MS);
+      // First change arms the timer and later ones don't push it back: a
+      // continuous drawing session is still flushed every second instead of
+      // only after the pen rests.
+      if (!timer) timer = setTimeout(save, SAVE_DELAY_MS);
     });
+    const flush = () => {
+      if (!timer) return;
+      clearTimeout(timer);
+      save();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    // A background kill, tab switch or app close must not lose the last
+    // strokes even when the pen never paused.
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', flush);
     return () => {
       unsubscribe();
-      if (timer) {
-        clearTimeout(timer);
-        save();
-      }
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', flush);
+      flush();
     };
   }, [editorVersion, bookKey, envConfig, getConfig, getView, setConfig, saveConfig]);
 
@@ -259,6 +279,10 @@ export function useHandwriting(bookKey: string) {
     const renderer = view?.renderer;
     for (const frame of isFixedLayout ? pageFrames(view) : []) ro.observe(frame);
     renderer?.addEventListener('scroll', update);
+    // The paginator re-lays out a section on font/margin changes and emits
+    // `stabilized` when it settles; anchored ink must re-anchor then even if
+    // the reading location did not change.
+    renderer?.addEventListener('stabilized', update);
     const mo = new MutationObserver(update);
     // A push page turn slides the whole view in and writes its resting
     // transform there when it lands; a page measured mid-slide is off screen.
@@ -275,6 +299,7 @@ export function useHandwriting(bookKey: string) {
       ro.disconnect();
       mo.disconnect();
       renderer?.removeEventListener('scroll', update);
+      renderer?.removeEventListener('stabilized', update);
     };
   }, [cellEl, measure, isFixedLayout, getView, bookKey, location, sectionIndex]);
 
@@ -286,8 +311,12 @@ export function useHandwriting(bookKey: string) {
     const view = getView(bookKey);
     const editor = editorRef.current;
     if (!view || !editor || !cellRect.width) return [];
+    // A large section can be mounted as several chunks that all report the
+    // same spine index; each section's ink must be painted once.
+    const seen = new Set<number>();
     return view.renderer.getContents().flatMap(({ doc, index }): InkLayer[] => {
-      if (index === undefined) return [];
+      if (index === undefined || seen.has(index)) return [];
+      seen.add(index);
       if (isFixedLayout) {
         const frame = doc?.defaultView?.frameElement;
         const strokes = editor.strokes(fixedPageKey(index));
@@ -307,20 +336,21 @@ export function useHandwriting(bookKey: string) {
   };
 
   /**
-   * Fixed-layout spreads show two pages at once. The current page draws its
-   * own ink (service layer below); the other page gets a layer of its own so
-   * its drawings stay aligned with its frame instead of the spread's union.
+   * Fixed-layout spreads show two pages at once, and each page's ink is
+   * normalized to its own frame. Every visible page gets a layer measured
+   * from its frame (the current page's fresh pageRect, the sibling's cached
+   * rect); the service's live stroke layer sits on top of them.
    */
-  const fixedSiblingLayers = (): InkLayer[] => {
+  const fixedFrameLayers = (): InkLayer[] => {
     if (!isFixedLayout || scrolled || sectionIndex === undefined) return [];
     const view = getView(bookKey);
     const editor = editorRef.current;
     if (!view || !editor || !cellRect.width) return [];
     return view.renderer.getContents().flatMap(({ index }): InkLayer[] => {
-      if (index === undefined || index === sectionIndex) return [];
-      const rect = frameRectsRef.current.get(index);
+      if (index === undefined) return [];
+      const rect = index === sectionIndex ? pageRect : frameRectsRef.current.get(index);
       const strokes = editor.strokes(fixedPageKey(index));
-      if (!rect || !strokes.length) return [];
+      if (!rect?.width || !strokes.length) return [];
       return [{ strokes: [...strokes], rect }];
     });
   };
@@ -480,12 +510,15 @@ export function useHandwriting(bookKey: string) {
     [saveReadSettings],
   );
 
+  const liveStrokes = serviceRef.current?.liveStrokes() ?? [];
   const layers: InkLayer[] = scrolled
-    ? [...scrolledLayers(), { strokes: serviceRef.current?.liveStrokes() ?? [], rect: pageRect }]
-    : [
-        ...fixedSiblingLayers(),
-        { strokes: serviceRef.current?.strokesForRender() ?? [], rect: pageRect },
-      ];
+    ? [...scrolledLayers(), { strokes: liveStrokes, rect: pageRect }]
+    : isFixedLayout
+      ? [
+          ...fixedFrameLayers(),
+          ...(liveStrokes.length ? [{ strokes: liveStrokes, rect: pageRect }] : []),
+        ]
+      : [{ strokes: serviceRef.current?.strokesForRender() ?? [], rect: pageRect }];
 
   return {
     layers,

@@ -65,6 +65,12 @@ const touches = (stroke: InkStroke, placed: InkPoint[][], pathSegs: Seg[], radiu
 export class HandwritingEditor {
   private pages = new Map<string, PageState>();
   private listeners = new Set<() => void>();
+  /**
+   * Ink note ids this editor was loaded from. A note missing from the editor
+   * can only be tombstoned if it was loaded here; notes added by a pull after
+   * the load, or notes whose strokes could not be placed, must be left alone.
+   */
+  loadedNoteIds?: Set<string>;
 
   constructor(pages?: Record<string, InkPage>) {
     for (const [key, page] of Object.entries(pages ?? {})) {

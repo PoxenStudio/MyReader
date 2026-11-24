@@ -22,17 +22,21 @@ const HandwritingOverlay: React.FC<HandwritingOverlayProps> = ({ bookKey, gridIn
   const _ = useTranslation();
   const hw = useHandwriting(bookKey);
   const { visible, editable, enabled, setEnabled, setErasing, hitTest } = hw;
-  const { setHoveredBookKey } = useReaderStore();
+  const setHoveredBookKey = useReaderStore((state) => state.setHoveredBookKey);
+  const setAutoScrollEnabled = useReaderStore((state) => state.setAutoScrollEnabled);
 
-  // Drawing is started from the header's instant annotation tools, which
-  // leaves the reader's header and footer up; the dock takes their place, and
-  // the canvas takes the tap that would hide them. Each session starts with the pen: an eraser
-  // left on last time would silently wipe ink instead of drawing.
+  // Drawing is started from the header pen button (or the instant annotation
+  // menu), which leaves the reader's header and footer up; the dock takes
+  // their place. Each session starts with the pen: an eraser left on last
+  // time would silently wipe ink instead of drawing. Read-aloud and auto
+  // scroll would move the page under the pen, so drawing stops them.
   useEffect(() => {
     if (!enabled) return;
     setHoveredBookKey(null);
     setErasing(false);
-  }, [enabled, setHoveredBookKey, setErasing]);
+    setAutoScrollEnabled(bookKey, false);
+    eventDispatcher.dispatch('tts-stop', { bookKey });
+  }, [bookKey, enabled, setHoveredBookKey, setErasing, setAutoScrollEnabled]);
 
   useEffect(() => {
     const onHandwritingEvent = (event: CustomEvent) => {
@@ -50,18 +54,19 @@ const HandwritingOverlay: React.FC<HandwritingOverlayProps> = ({ bookKey, gridIn
   useEffect(() => {
     if (!editable || enabled) return;
     const onTap = (event: CustomEvent) => {
-      // MyReader's iframe-single-click carries viewport (client) coordinates.
+      // The page tap carries a window-space point (iframe-local client
+      // coordinates are offset by the frame, so hit-testing needs these).
       const {
         bookKey: target,
-        clientX,
-        clientY,
+        windowX,
+        windowY,
       } = (event.detail ?? {}) as {
         bookKey?: string;
-        clientX?: number;
-        clientY?: number;
+        windowX?: number;
+        windowY?: number;
       };
-      if (target !== bookKey || clientX === undefined || clientY === undefined) return false;
-      if (!hitTest(clientX, clientY)) return false;
+      if (target !== bookKey || windowX === undefined || windowY === undefined) return false;
+      if (!hitTest(windowX, windowY)) return false;
       setEnabled(true);
       return true;
     };

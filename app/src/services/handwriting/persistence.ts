@@ -31,22 +31,53 @@ const inkJson = (value: unknown) =>
       : v,
   );
 
-export const loadInkEditor = (notes: BookNote[], fixedLayout: boolean): HandwritingEditor => {
+// Stroke arrays are immutable until edited, so their canonical JSON can be
+// reused across commits instead of re-serializing every drawing in the book.
+const inkJsonCache = new WeakMap<object, string>();
+const inkJsonOf = (value: unknown): string => {
+  if (!value || typeof value !== 'object') return inkJson(value);
+  const cached = inkJsonCache.get(value);
+  if (cached !== undefined) return cached;
+  const json = inkJson(value);
+  inkJsonCache.set(value, json);
+  return json;
+};
+
+export const loadInkEditor = (
+  notes: BookNote[],
+  fixedLayout: boolean,
+  /** Drawings are private: shared notes from other readers are not loaded. */
+  ownerId?: string,
+): HandwritingEditor => {
   const pages: Record<string, InkPage> = {};
+  const loadedNoteIds = new Set<string>();
   for (const note of notes) {
     if (note.type !== 'ink' || note.deletedAt || !note.ink?.length) continue;
+    if (ownerId && note.userId && note.userId !== ownerId) continue;
+    // Place every stroke or none: rewriting a note from a partial load would
+    // drop the strokes whose anchor this reader could not resolve.
+    const placed: { key: string; stroke: InkStroke }[] = [];
     for (const stroke of note.ink) {
       const index = fixedLayout
         ? (stroke.page ?? sectionOf(note.cfi))
         : sectionOf(stroke.anchor ?? note.cfi);
-      if (index === null) continue;
-      const key = fixedLayout ? fixedPageKey(index) : sectionPageKey(index);
+      if (index === null) {
+        placed.length = 0;
+        break;
+      }
+      placed.push({ key: fixedLayout ? fixedPageKey(index) : sectionPageKey(index), stroke });
+    }
+    if (!placed.length) continue;
+    loadedNoteIds.add(note.id);
+    for (const { key, stroke } of placed) {
       const page = (pages[key] ??= { strokes: [], updatedAt: note.updatedAt });
       page.strokes.push({ ...stroke, session: note.id });
       page.updatedAt = Math.max(page.updatedAt, note.updatedAt);
     }
   }
-  return new HandwritingEditor(pages);
+  const editor = new HandwritingEditor(pages);
+  editor.loadedNoteIds = loadedNoteIds;
+  return editor;
 };
 
 export interface InkNoteContext {
@@ -76,7 +107,17 @@ export const withInkNotes = (
       const id = session ?? `ink-${stroke.id}`;
       let group = sessions.get(id);
       if (!group) {
-        const cfi = !fixed && stroke.anchor ? stroke.anchor : cfiOf(parsed.index);
+        let cfi = !fixed && stroke.anchor ? stroke.anchor : '';
+        if (!cfi) {
+          try {
+            cfi = cfiOf(parsed.index);
+          } catch {
+            // A stale page index (or a teardown race) must not abort the save;
+            // the fake CFI still locates the section.
+            cfi = '';
+          }
+          if (!cfi) cfi = CFI.fake.fromIndex(parsed.index);
+        }
         group = { strokes: [], cfi, ...(fixed ? { page: parsed.index + 1 } : {}) };
         sessions.set(id, group);
       }
@@ -89,11 +130,14 @@ export const withInkNotes = (
   for (const [id, { strokes, cfi, page }] of sessions) {
     const prev = previous.get(id);
     previous.delete(id);
-    if (prev && !prev.deletedAt && inkJson(prev.ink) === inkJson(strokes)) {
+    if (prev && !prev.deletedAt && inkJsonOf(prev.ink) === inkJsonOf(strokes)) {
       result.push(prev);
       continue;
     }
     result.push({
+      // Keep ownership and book fields a pulled note carries: rewriting a
+      // note must not turn someone else's drawing into this user's own.
+      ...prev,
       id,
       type: 'ink',
       cfi,
@@ -105,7 +149,16 @@ export const withInkNotes = (
       updatedAt: now,
     });
   }
+  const loaded = editor.loadedNoteIds;
   for (const gone of previous.values()) {
+    // Only ink this editor actually loaded can be inferred deleted. A note
+    // that arrived while the editor was open, or one whose strokes could not
+    // be placed, is preserved untouched (tombstoning it would delete it on
+    // every device through sync).
+    if (loaded && !loaded.has(gone.id)) {
+      result.push(gone);
+      continue;
+    }
     result.push(gone.deletedAt ? gone : { ...gone, ink: [], deletedAt: now, updatedAt: now });
   }
   return result;
@@ -117,10 +170,9 @@ export const withInkNotes = (
  * reloading for that would drop the stroke being drawn and the undo history.
  */
 export const inkSignature = (notes: BookNote[] | undefined) =>
-  inkJson(
-    (notes ?? [])
-      .filter((n) => n.type === 'ink')
-      // Sync moves the notes it returns to the end of the list.
-      .sort((a, b) => (a.id < b.id ? -1 : 1))
-      .map((n) => [n.id, n.deletedAt ?? 0, n.ink]),
-  );
+  (notes ?? [])
+    .filter((n) => n.type === 'ink')
+    // Sync moves the notes it returns to the end of the list.
+    .sort((a, b) => (a.id < b.id ? -1 : 1))
+    .map((n) => `${n.id}|${n.deletedAt ?? 0}|${inkJsonOf(n.ink)}`)
+    .join('\n');

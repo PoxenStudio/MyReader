@@ -132,6 +132,76 @@ describe('ink notes', () => {
     };
     expect(loadInkEditor([highlight, deleted], false).pageKeys()).toEqual([]);
   });
+
+  it('keeps ownership and book fields when rewriting a pulled drawing', () => {
+    const owned: BookNote = {
+      id: 'ink-s1',
+      type: 'ink',
+      cfi: WORDS,
+      bookHash: 'book-hash',
+      metaHash: 'meta-hash',
+      userId: '7',
+      author: { nickname: 'reader', avatar: 'a.png' },
+      text: 'marked words',
+      note: 'a note',
+      ink: [stroke('a', 'ink-s1', WORDS)],
+      createdAt: 10,
+      updatedAt: 10,
+    };
+    const editor = loadInkEditor([owned], false, '7');
+    editor.addStroke('sec:3', stroke('b', 'ink-s1', OTHER));
+    const [note] = write([owned], editor, 200);
+    expect(note).toMatchObject({
+      id: 'ink-s1',
+      userId: '7',
+      author: { nickname: 'reader', avatar: 'a.png' },
+      bookHash: 'book-hash',
+      metaHash: 'meta-hash',
+      note: 'a note',
+      createdAt: 10,
+      updatedAt: 200,
+    });
+  });
+
+  it('leaves a drawing that arrived after the editor loaded untouched', () => {
+    const editor = loadInkEditor([], false, '7');
+    const pulled: BookNote = {
+      ...highlight,
+      id: 'ink-new',
+      type: 'ink',
+      text: '',
+      ink: [stroke('a', 'ink-new', WORDS)],
+      updatedAt: 50,
+    };
+    const notes = write([pulled], editor, 200);
+    expect(notes[0]).toBe(pulled);
+  });
+
+  it("does not load another reader's drawings even when shared notes are shown", () => {
+    const foreign: BookNote = {
+      ...highlight,
+      id: 'ink-f',
+      type: 'ink',
+      userId: '9',
+      text: '',
+      ink: [stroke('a', 'ink-f', WORDS)],
+    };
+    expect(loadInkEditor([foreign], false, '7').pageKeys()).toEqual([]);
+  });
+
+  it('does not rewrite a drawing whose strokes this reader cannot place', () => {
+    const broken: BookNote = {
+      ...highlight,
+      id: 'ink-broken',
+      type: 'ink',
+      cfi: 'not-a-cfi',
+      text: '',
+      ink: [stroke('a', 'ink-broken', 'also-not-a-cfi')],
+    };
+    const editor = loadInkEditor([broken], false, '7');
+    expect(editor.pageKeys()).toEqual([]);
+    expect(write([broken], editor, 200)[0]).toBe(broken);
+  });
 });
 
 // Postgres jsonb stores object keys shortest first.

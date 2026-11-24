@@ -1,6 +1,6 @@
 import type { Insets } from '@/types/misc';
 
-// The drawing dock (h-13); see HandwritingBars.
+// The drawing dock (h-[52px]); see HandwritingBars.
 const DOCK_HEIGHT = 52;
 const GAP = 8;
 

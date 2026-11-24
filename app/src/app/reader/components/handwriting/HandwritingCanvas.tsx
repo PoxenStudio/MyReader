@@ -30,14 +30,30 @@ const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
   detach,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Last painted backing size and whether it was empty, so a page turn in a
+  // book with no ink does not clear/repaint the cell on every render.
+  const paintedRef = useRef<{ width: number; height: number; empty: boolean } | null>(null);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    canvas.width = Math.max(1, Math.round(cellRect.width * dpr));
-    canvas.height = Math.max(1, Math.round(cellRect.height * dpr));
+    const width = Math.max(1, Math.round(cellRect.width * dpr));
+    const height = Math.max(1, Math.round(cellRect.height * dpr));
+    const empty = layers.every((layer) => layer.strokes.length === 0);
+    const painted = paintedRef.current;
+    if (
+      !interactive &&
+      empty &&
+      painted?.empty &&
+      painted.width === width &&
+      painted.height === height
+    ) {
+      return;
+    }
+    canvas.width = width;
+    canvas.height = height;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cellRect.width, cellRect.height);
     for (const { strokes, rect } of layers) {
@@ -53,7 +69,8 @@ const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
         false,
       );
     }
-  }, [layers, cellRect, dpr]);
+    paintedRef.current = { width, height, empty };
+  }, [layers, cellRect, dpr, interactive]);
 
   useEffect(() => {
     if (!interactive) return;
@@ -74,7 +91,13 @@ const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
   return (
     <div
       ref={overlayRef}
-      className='pointer-events-none absolute inset-0'
+      // Above the page and its hover header band while drawing (the dock sits
+      // at z-30 over this); idle ink stays below all chrome.
+      className={
+        interactive
+          ? 'pointer-events-none absolute inset-0 z-20'
+          : 'pointer-events-none absolute inset-0'
+      }
       style={{
         touchAction: interactive ? 'none' : undefined,
         visibility: idle ? 'hidden' : undefined,

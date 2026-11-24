@@ -303,12 +303,15 @@ export const useNativeSync = (bookKey: string) => {
             updatedAt: now,
           },
         ],
+        // Spread first, stamps last: a pulled note may still carry the
+        // snake-case stamps of an older pull, which would otherwise win over
+        // the fresh values the server compares.
         notes: ownNotes.map((note) => ({
+          ...note,
           book_hash: book.hash,
           meta_hash: book.metaHash,
           updated_at: note.updatedAt,
           deleted_at: note.deletedAt ?? null,
-          ...note,
         })),
         ...(readingSecondsPayload.length > 0 && { reading_seconds: readingSecondsPayload }),
       });
@@ -445,19 +448,18 @@ export const useNativeSync = (bookKey: string) => {
       const remoteConfig = result.configs?.[0];
       const remoteNotes = result.notes ?? [];
 
-      const localUpdatedAt = config.updatedAt ?? 0;
-      const remoteUpdatedAt = remoteConfig?.updatedAt ?? remoteConfig?.updated_at ?? 0;
-      const remoteWins = !!remoteConfig && remoteUpdatedAt > localUpdatedAt;
-
-      // The comparison above (and everything derived from it) is computed
-      // against `config`, a snapshot taken *before* the network await. If a
-      // local write landed on this book while the request was in flight,
-      // that write is invisible here — and the wholesale `setConfig` below
-      // still overwrites the (now fresher) live config with a value built
-      // on top of this stale snapshot, silently reverting it.
+      // Everything below must merge into the *live* config, not the snapshot
+      // taken before the network await: strokes/notes committed while the
+      // request was in flight are only in the live config, and rebuilding
+      // booknotes from the stale snapshot would drop them.
       const liveConfigNow = getConfig(bookKey);
+      const baseConfig = liveConfigNow ?? config;
       const localChangedDuringFlight =
         !!liveConfigNow && liveConfigNow.location !== config.location;
+
+      const localUpdatedAt = baseConfig.updatedAt ?? 0;
+      const remoteUpdatedAt = remoteConfig?.updatedAt ?? remoteConfig?.updated_at ?? 0;
+      const remoteWins = !!remoteConfig && remoteUpdatedAt > localUpdatedAt;
 
       syncLog(bookKey, 'pull:response', {
         elapsedMs,
@@ -478,13 +480,13 @@ export const useNativeSync = (bookKey: string) => {
 
       const mergedConfig: BookConfig = remoteWins
         ? {
-            ...config,
-            progress: remoteConfig.progress ?? config.progress,
-            location: remoteConfig.location ?? config.location,
-            xpointer: remoteConfig.xpointer ?? config.xpointer,
+            ...baseConfig,
+            progress: remoteConfig.progress ?? baseConfig.progress,
+            location: remoteConfig.location ?? baseConfig.location,
+            xpointer: remoteConfig.xpointer ?? baseConfig.xpointer,
             updatedAt: remoteUpdatedAt,
           }
-        : { ...config };
+        : { ...baseConfig };
       mergedConfig.lastSyncedAtConfig = now;
 
       // `pullSync` is always called with since=0 (see above), so `remoteNotes`
@@ -506,10 +508,10 @@ export const useNativeSync = (bookKey: string) => {
       // scope for that query and must be left alone.
       const currentUserId = useMyBooksStatusStore.getState().currentUserId;
       const remoteNoteIds = new Set(remoteNotes.map((n) => n.id));
-      const syncWatermark = config.lastSyncedAtNotes ?? 0;
+      const syncWatermark = baseConfig.lastSyncedAtNotes ?? 0;
 
       const byId = new Map<string, BookNote>();
-      for (const n of config.booknotes ?? []) {
+      for (const n of baseConfig.booknotes ?? []) {
         const isOwn = !n.userId || n.userId === String(currentUserId);
         const inScope = showOtherAnnotations || isOwn;
         const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
@@ -525,6 +527,9 @@ export const useNativeSync = (bookKey: string) => {
           byId.set(remote.id, {
             ...local,
             ...remote,
+            // A row without strokes must not wipe local ink: servers with a
+            // nullable column may hand back `ink: null`.
+            ...(remote.ink == null && local?.ink ? { ink: local.ink } : {}),
             // The wire field is `uid` (a number), not `user_id` — see
             // `BookDataRecord.uid`'s doc comment.
             userId: remote.uid !== undefined ? String(remote.uid) : undefined,
@@ -558,8 +563,8 @@ export const useNativeSync = (bookKey: string) => {
       // The remote config landing here doesn't otherwise reach the already-
       // rendered view (it only opens at `config.location` once, at mount),
       // so without this the pulled position is silently ignored on screen.
-      if (remoteWins && mergedConfig.location && mergedConfig.location !== config.location) {
-        syncLog(bookKey, 'pull:goTo', { from: config.location, to: mergedConfig.location });
+      if (remoteWins && mergedConfig.location && mergedConfig.location !== baseConfig.location) {
+        syncLog(bookKey, 'pull:goTo', { from: baseConfig.location, to: mergedConfig.location });
         void applyRemoteLocation(mergedConfig.location).catch((e) =>
           syncWarn(bookKey, 'pull:goTo-error', { error: String(e) }),
         );
