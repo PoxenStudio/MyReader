@@ -942,9 +942,10 @@ const FoliateViewer: React.FC<{
       const safeBottomPadding = appService?.hasSafeAreaInset ? gridInsets.bottom * 0.33 : 0;
       const footerBarHeight = safeBottomPadding + viewSettings.marginBottomPx;
       const scrollTop = headerVisible ? gridInsets.top + viewSettings.marginTopPx : 0;
-      const scrollBottom = footerVisible
-        ? Math.max(footerBarHeight, miniPlayerClearance)
-        : miniPlayerClearance;
+      const scrollBottom = Math.max(
+        footerVisible ? Math.max(footerBarHeight, miniPlayerClearance) : miniPlayerClearance,
+        drawingDock?.bottom ?? 0,
+      );
       setScrollMargins({ top: bookData?.isFixedLayout ? 0 : scrollTop, bottom: scrollBottom });
     } else {
       setScrollMargins({ top: 0, bottom: 0 });
