@@ -343,7 +343,10 @@ export const useNativeSync = (bookKey: string) => {
         const synced: BookConfig = {
           ...latest,
           lastSyncedAtConfig: now,
-          lastSyncedAtNotes: now,
+          // If a change landed during this push, its note was not in the
+          // payload: hold the watermark until the follow-up push covers it.
+          lastSyncedAtNotes:
+            mutationSeqRef.current === pushSeq ? now : (latest.lastSyncedAtNotes ?? 0),
           pendingReadingSeconds: tracker.getPending(),
         };
         lastPersistedPendingRef.current = JSON.stringify(synced.pendingReadingSeconds);
