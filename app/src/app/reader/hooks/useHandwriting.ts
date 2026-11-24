@@ -90,14 +90,16 @@ export function useHandwriting(bookKey: string) {
   const getViewSettings = useReaderStore((s) => s.getViewSettings);
   const settings = useSettingsStore((s) => s.settings);
   const currentUserId = useMyBooksStatusStore((s) => s.currentUserId);
+  // Strict privacy: a drawing stamped with an author is only this reader's
+  // when the id matches. Unknown identity (null) therefore means "not ours",
+  // so foreign/shared drawings are never loaded into the editor or painted.
+  const ownerId = typeof currentUserId === 'number' ? String(currentUserId) : null;
   // This reader's own ink only: a shared drawing from another account must
   // not reload the editor (and drop a live stroke) when it arrives.
   const ownBooknotes = useCallback(
     (notes: BookNote[] | undefined) =>
-      notes?.filter(
-        (note) => note.type !== 'ink' || !note.userId || note.userId === String(currentUserId),
-      ),
-    [currentUserId],
+      notes?.filter((note) => note.type !== 'ink' || !note.userId || note.userId === ownerId),
+    [ownerId],
   );
   const { envConfig } = useEnv();
   const isFixedLayout = !!useBookDataStore((s) => s.getBookData(bookKey)?.isFixedLayout);
@@ -133,12 +135,8 @@ export function useHandwriting(bookKey: string) {
   const loadEditor = useCallback(() => {
     const booknotes = ownBooknotes(getConfig(bookKey)?.booknotes);
     inkSignatureRef.current = inkSignature(booknotes);
-    editorRef.current = loadInkEditor(
-      booknotes ?? [],
-      isFixedLayout,
-      currentUserId !== null ? String(currentUserId) : undefined,
-    );
-  }, [bookKey, ownBooknotes, currentUserId, getConfig, isFixedLayout]);
+    editorRef.current = loadInkEditor(booknotes ?? [], isFixedLayout, ownerId ?? undefined);
+  }, [bookKey, ownBooknotes, ownerId, getConfig, isFixedLayout]);
 
   if (!editorRef.current) loadEditor();
 

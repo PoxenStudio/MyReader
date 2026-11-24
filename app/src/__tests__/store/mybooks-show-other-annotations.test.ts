@@ -24,6 +24,19 @@ describe('mybooksStatusStore — showOtherAnnotations / currentUserId', () => {
     useMyBooksStatusStore.getState().setCurrentUserId(42);
     expect(useMyBooksStatusStore.getState().currentUserId).toBe(42);
   });
+
+  it('ignores a missing id instead of clobbering the known one', () => {
+    // `/user/info` has no `id` field, so runtime callers can pass undefined.
+    useMyBooksStatusStore.getState().setCurrentUserId(42);
+    useMyBooksStatusStore.getState().setCurrentUserId(undefined as unknown as number);
+    expect(useMyBooksStatusStore.getState().currentUserId).toBe(42);
+  });
+
+  it('clears the id on an explicit null', () => {
+    useMyBooksStatusStore.getState().setCurrentUserId(42);
+    useMyBooksStatusStore.getState().setCurrentUserId(null);
+    expect(useMyBooksStatusStore.getState().currentUserId).toBeNull();
+  });
 });
 
 describe('useIsOwnBooknote', () => {

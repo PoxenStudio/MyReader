@@ -14,6 +14,7 @@ import type { FoliateView } from '@/types/view';
 import * as CFI from 'foliate-js/epubcfi.js';
 import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
+import { ensureCurrentUserId } from '@/services/mybooksService';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
 import {
   ActiveReadingTracker,
@@ -192,8 +193,34 @@ export const useNativeSync = (bookKey: string) => {
   const { getConfig, setConfig, getBookData, saveConfig } = useBookDataStore();
   const isSyncAllowed = useMyBooksSyncAllowed();
   const progress = getProgress(bookKey);
+  const currentUserId = useMyBooksStatusStore((s) => s.currentUserId);
 
-  const isReady = ENABLE_SYNC_FEATURE && status === 'logged_in' && !isGuest && isSyncAllowed;
+  // Ownership checks are strict (see mybooksStatusStore.useIsOwnBooknote):
+  // a note stamped with a `userId` is treated as someone else's unless it
+  // matches this reader's id. Sync must therefore not start before the id is
+  // known — a pull stamps `userId` onto the reader's own notes, and if the id
+  // were still unknown those drawings (and notes) would vanish from the
+  // canvas/sidebar and stop being pushed.
+  const ownerId = typeof currentUserId === 'number' ? String(currentUserId) : null;
+  const identityKnown = ownerId !== null;
+
+  const isReady =
+    ENABLE_SYNC_FEATURE && status === 'logged_in' && !isGuest && isSyncAllowed && identityKnown;
+
+  // `/user/info` does not carry the id, so ask `/user/whoami` while the
+  // reader is logged in and retry until it lands (offline start, NAS still
+  // booting, ...). Sync's own effects are gated on `isReady`, so this is the
+  // only thing that runs until identity is resolved.
+  useEffect(() => {
+    if (!ENABLE_SYNC_FEATURE || status !== 'logged_in' || isGuest || !isSyncAllowed) return;
+    if (typeof useMyBooksStatusStore.getState().currentUserId === 'number') return;
+    void ensureCurrentUserId();
+    const timer = setInterval(() => {
+      if (typeof useMyBooksStatusStore.getState().currentUserId === 'number') return;
+      void ensureCurrentUserId();
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [status, isGuest, isSyncAllowed, currentUserId]);
 
   useNativeSyncEvents(isReady);
 
@@ -287,12 +314,13 @@ export const useNativeSync = (bookKey: string) => {
     const sentReadingSeconds = tracker.getPending();
     const readingSecondsPayload = tracker.toReadingSecondsPayload(book.hash);
     try {
-      const currentUserId = useMyBooksStatusStore.getState().currentUserId;
       // Never push back a note that belongs to someone else — it can only be
       // here because it was pulled in via showOtherAnnotations, and pushing
       // it would re-store it under this account's own records server-side.
+      // An unknown identity (should not happen: pushes are gated on it) is
+      // treated as "not ours", keeping foreign ink out of this account.
       const ownNotes = (config.booknotes ?? []).filter(
-        (note) => !note.userId || note.userId === String(currentUserId),
+        (note) => !note.userId || (ownerId !== null && note.userId === ownerId),
       );
       await pushSync({
         configs: [
@@ -367,6 +395,7 @@ export const useNativeSync = (bookKey: string) => {
     }
   }, [
     isReady,
+    ownerId,
     bookKey,
     getConfig,
     getBookData,
@@ -524,13 +553,12 @@ export const useNativeSync = (bookKey: string) => {
       // `own=1` pulls only cover this account's own notes, so a note pulled
       // in earlier from another user (via showOtherAnnotations) is out of
       // scope for that query and must be left alone.
-      const currentUserId = useMyBooksStatusStore.getState().currentUserId;
       const remoteNoteIds = new Set(remoteNotes.map((n) => n.id));
       const syncWatermark = baseConfig.lastSyncedAtNotes ?? 0;
 
       const byId = new Map<string, BookNote>();
       for (const n of baseConfig.booknotes ?? []) {
-        const isOwn = !n.userId || n.userId === String(currentUserId);
+        const isOwn = !n.userId || (ownerId !== null && n.userId === ownerId);
         const inScope = showOtherAnnotations || isOwn;
         const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
         // Handwriting is never swept for being absent from a server snapshot:
@@ -557,8 +585,14 @@ export const useNativeSync = (bookKey: string) => {
             // client may push the note without the field.
             ...(remoteLostInk ? { ink: local.ink } : {}),
             // The wire field is `uid` (a number), not `user_id` — see
-            // `BookDataRecord.uid`'s doc comment.
-            userId: remote.uid !== undefined ? String(remote.uid) : undefined,
+            // `BookDataRecord.uid`'s doc comment. Keep the previous stamp when
+            // the row carries no usable uid, rather than turning a pulled own
+            // note into "unowned" (which the strict ownership checks would
+            // then treat as a fresh local note).
+            userId:
+              typeof remote.uid === 'number'
+                ? String(remote.uid)
+                : (remote.userId ?? local?.userId),
             author: remote.author,
           } as BookNote);
         }
@@ -571,7 +605,7 @@ export const useNativeSync = (bookKey: string) => {
       // must not pin the watermark that governs the other note types.
       const hasUnpushedLocalNotes = (baseConfig.booknotes ?? []).some((n) => {
         if (n.type === 'ink') return false;
-        const isOwn = !n.userId || n.userId === String(currentUserId);
+        const isOwn = !n.userId || (ownerId !== null && n.userId === ownerId);
         const inScope = showOtherAnnotations || isOwn;
         const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
         return inScope && !remoteNoteIds.has(n.id) && ts > syncWatermark;
@@ -627,6 +661,7 @@ export const useNativeSync = (bookKey: string) => {
     }
   }, [
     isReady,
+    ownerId,
     bookKey,
     getConfig,
     getBookData,

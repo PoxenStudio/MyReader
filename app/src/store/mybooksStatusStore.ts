@@ -85,7 +85,19 @@ export const useMyBooksStatusStore = create<MyBooksStatusState>((set) => ({
     set({ showOtherAnnotations });
   },
   currentUserId: readCachedCurrentUserId(),
-  setCurrentUserId: (currentUserId) => set({ currentUserId }),
+  setCurrentUserId: (currentUserId) => {
+    // `/user/info` does not carry the reader id (see mybooksService's
+    // ensureCurrentUserId), so callers may hand us `undefined` at runtime.
+    // Never let that clobber a known id: ownership checks treat an unknown id
+    // as "someone else's", which would hide the reader's own drawings.
+    if (currentUserId === null) {
+      set({ currentUserId: null });
+      return;
+    }
+    if (typeof currentUserId === 'number' && Number.isFinite(currentUserId)) {
+      set({ currentUserId });
+    }
+  },
 }));
 
 export const useMyBooksConnectionStatus = (): MyBooksConnectionStatus => {

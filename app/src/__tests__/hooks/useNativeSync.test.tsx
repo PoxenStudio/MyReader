@@ -10,7 +10,10 @@ const h = vi.hoisted(() => {
   };
   const makeStore = <T,>(state: T): MockStore<T> => {
     const listeners = new Set<() => void>();
-    const store = (() => state) as MockStore<T>;
+    // Selector-aware like zustand's hook: the sync hook reads `currentUserId`
+    // through `useMyBooksStatusStore((s) => s.currentUserId)`.
+    const store = ((selector?: (state: T) => unknown) =>
+      selector ? selector(state) : state) as MockStore<T>;
     store.getState = () => state;
     store.subscribe = (listener) => {
       listeners.add(listener);
@@ -65,8 +68,9 @@ const h = vi.hoisted(() => {
     setConfigMock: vi.fn(),
     saveConfigMock: vi.fn(async () => {}),
     goToMock: vi.fn(),
+    ensureCurrentUserIdMock: vi.fn(async (): Promise<number | null> => 1),
     mybooksStatus: {
-      currentUserId: 1,
+      currentUserId: 1 as number | null,
       showOtherAnnotations: true,
       sysInfo: null as { timezone?: string | null } | null,
     },
@@ -117,6 +121,10 @@ vi.mock('@/services/mybooks/syncClient', () => ({
   SyncApiError: class SyncApiError extends Error {},
 }));
 
+vi.mock('@/services/mybooksService', () => ({
+  ensureCurrentUserId: () => h.ensureCurrentUserIdMock(),
+}));
+
 vi.mock('../hooks/useWindowActiveChanged', () => ({
   useWindowActiveChanged: () => {},
 }));
@@ -148,6 +156,8 @@ beforeEach(() => {
   h.mybooksStatus.currentUserId = 1;
   h.mybooksStatus.showOtherAnnotations = true;
   h.mybooksStatus.sysInfo = null;
+  h.ensureCurrentUserIdMock.mockClear();
+  h.ensureCurrentUserIdMock.mockResolvedValue(1);
 });
 
 afterEach(() => {
@@ -169,6 +179,28 @@ const flushMicrotasks = async () => {
 };
 
 describe('useNativeSync', () => {
+  test('holds sync until the reader identity is resolved', async () => {
+    // A pull stamps `userId` onto the reader's own notes. Ownership checks are
+    // strict, so without the numeric id those notes (notably drawings) become
+    // invisible and stop being pushed. Sync therefore must not start before
+    // `/user/whoami` (via ensureCurrentUserId) has resolved the identity.
+    h.mybooksStatus.currentUserId = null;
+    h.ensureCurrentUserIdMock.mockResolvedValue(null);
+
+    const { rerender } = renderHook(() => useNativeSync('book-key'));
+    await flushPushDebounce();
+
+    expect(h.ensureCurrentUserIdMock).toHaveBeenCalled();
+    expect(h.pullSyncMock).not.toHaveBeenCalled();
+    expect(h.pushSyncMock).not.toHaveBeenCalled();
+
+    h.mybooksStatus.currentUserId = 1;
+    rerender();
+    await flushMicrotasks();
+
+    expect(h.pullSyncMock).toHaveBeenCalled();
+  });
+
   test('does not push before the initial pull-on-open has resolved', async () => {
     // Bug: opening a book fires the pull-once effect and the auto-push effect
     // in the same render (both keyed off progress?.location). If pushNow isn't

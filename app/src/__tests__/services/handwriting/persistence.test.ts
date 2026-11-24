@@ -223,6 +223,28 @@ describe('ink notes', () => {
     expect(loadInkEditor([foreign], false, '7').pageKeys()).toEqual([]);
   });
 
+  it('loads no authored drawing while the owner is unknown (strict isolation)', () => {
+    // Identity unresolved is not "everyone's ink is mine": a stamped note is
+    // someone's drawing and stays out of the editor until the owner is known.
+    const stamped: BookNote = {
+      ...highlight,
+      id: 'ink-s',
+      type: 'ink',
+      userId: '7',
+      text: '',
+      ink: [stroke('a', 'ink-s', WORDS)],
+    };
+    const local: BookNote = {
+      ...highlight,
+      id: 'ink-local',
+      type: 'ink',
+      text: '',
+      ink: [stroke('b', 'ink-local', WORDS)],
+    };
+    expect(loadInkEditor([stamped], false).pageKeys()).toEqual([]);
+    expect(loadInkEditor([stamped, local], false).pageKeys()).toEqual(['sec:3']);
+  });
+
   it('does not rewrite a drawing whose strokes this reader cannot place', () => {
     const broken: BookNote = {
       ...highlight,

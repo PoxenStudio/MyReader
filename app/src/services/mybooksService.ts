@@ -229,6 +229,9 @@ export interface MyBooksResponse<T = unknown> {
   pins?: MyBooksMetaItem[];
   folders?: MyBooksFolderNode[];
   user?: MyBooksUserInfo | MyBooksUserDetailInfo;
+  // /user/whoami — the only endpoint that returns the reader's numeric id
+  // (`/user/info` does not; see ensureCurrentUserId below).
+  userId?: number;
   sys?: MyBooksSysInfo;
   avatar_url?: string;
   book_id?: number;
@@ -822,10 +825,79 @@ function updateSysInfo(sys?: MyBooksSysInfo): void {
 function updateUserPrefs(user?: MyBooksUserInfo): void {
   if (!user?.is_login) return;
   const store = useMyBooksStatusStore.getState();
-  store.setCurrentUserId(user.id);
+  // `/user/info` does not include `id` (the server's user dict has no id
+  // field), so at runtime this is usually undefined. Keep the known id
+  // instead of overwriting it — ensureCurrentUserId fills the gap from
+  // `/user/whoami`.
+  if (typeof user.id === 'number' && Number.isFinite(user.id)) {
+    store.setCurrentUserId(user.id);
+  }
   if (user.show_other_annotations !== undefined) {
     store.setShowOtherAnnotations(user.show_other_annotations);
   }
+}
+
+function readCachedUserInfo(): MyBooksUserInfo | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(MYBOOKS_USER_INFO_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as MyBooksUserInfo) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Cache `/user/info`'s user object while keeping the id known from whoami. */
+function writeCachedUserInfo(user: MyBooksUserInfo, id?: number): void {
+  if (typeof window === 'undefined') return;
+  const knownId = typeof user.id === 'number' ? user.id : id;
+  localStorage.setItem(
+    MYBOOKS_USER_INFO_CACHE_KEY,
+    JSON.stringify(knownId !== undefined ? { ...user, id: knownId } : user),
+  );
+}
+
+let currentUserIdRequest: Promise<number | null> | null = null;
+let lastCurrentUserIdAttemptAt = 0;
+// Offline / old servers (no /user/whoami) must not turn every status poll into
+// a fresh request; the reader's retry loop calls this about once a minute.
+const CURRENT_USER_ID_RETRY_MS = 30_000;
+
+/**
+ * Resolve the signed-in reader's numeric id.
+ *
+ * `/user/info` does not carry it, and `/user/sign_in` only returns `err`, so
+ * the id has to come from `/user/whoami` (`{userId}`). Ownership checks are
+ * strict: a note stamped with a `userId` is foreign unless it matches this
+ * id, so without it every pulled drawing (and highlight edit) would look like
+ * someone else's and disappear from the canvas/sidebar. Resolves to null when
+ * the request fails; callers retry later.
+ */
+export async function ensureCurrentUserId(): Promise<number | null> {
+  const cached = useMyBooksStatusStore.getState().currentUserId;
+  if (typeof cached === 'number') return cached;
+  if (currentUserIdRequest) return currentUserIdRequest;
+  if (Date.now() - lastCurrentUserIdAttemptAt < CURRENT_USER_ID_RETRY_MS) return null;
+  lastCurrentUserIdAttemptAt = Date.now();
+  currentUserIdRequest = (async () => {
+    try {
+      const response = await fetchMyBooks('/user/whoami');
+      const id = response.userId;
+      if (typeof id === 'number' && Number.isFinite(id)) {
+        useMyBooksStatusStore.getState().setCurrentUserId(id);
+        const known = readCachedUserInfo();
+        if (known) writeCachedUserInfo(known, id);
+        return id;
+      }
+      return null;
+    } catch (e) {
+      console.warn('[MyBooks] whoami failed:', e instanceof Error ? e.message : String(e));
+      return null;
+    } finally {
+      currentUserIdRequest = null;
+    }
+  })();
+  return currentUserIdRequest;
 }
 
 export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
@@ -836,10 +908,15 @@ export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
     updateUserPrefs(user);
     if (typeof window !== 'undefined') {
       if (user?.is_login || user?.is_guest) {
-        localStorage.setItem(MYBOOKS_USER_INFO_CACHE_KEY, JSON.stringify(user));
+        const knownId = useMyBooksStatusStore.getState().currentUserId;
+        writeCachedUserInfo(user, typeof knownId === 'number' ? knownId : undefined);
       } else {
         localStorage.removeItem(MYBOOKS_USER_INFO_CACHE_KEY);
       }
+    }
+    if (user?.is_login && typeof user.id !== 'number') {
+      // Fill `currentUserId` from the only endpoint that exposes it.
+      void ensureCurrentUserId();
     }
     if (!user?.is_login && !user?.is_guest) return null;
     return user;
@@ -848,10 +925,9 @@ export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
     // explicit error) — trust that over a possibly stale cache.
     if (error instanceof MyBooksApiError) throw error;
 
-    const cached =
-      typeof window !== 'undefined' ? localStorage.getItem(MYBOOKS_USER_INFO_CACHE_KEY) : null;
+    const cached = readCachedUserInfo();
     if (cached) {
-      return JSON.parse(cached) as MyBooksUserInfo;
+      return cached;
     }
     throw error;
   }
@@ -972,6 +1048,9 @@ export async function getUserDetailInfo(): Promise<MyBooksUserDetailResult | nul
   const response = await fetchMyBooks('/user/info', { detail: 1 });
   updateSysInfo(response.sys);
   updateUserPrefs(response.user);
+  if (response.user?.is_login && typeof response.user.id !== 'number') {
+    void ensureCurrentUserId();
+  }
   if (!response.user?.is_login && !response.user?.is_guest) return null;
   const result = { user: response.user as MyBooksUserDetailInfo, sys: response.sys ?? null };
   if (typeof window !== 'undefined') {

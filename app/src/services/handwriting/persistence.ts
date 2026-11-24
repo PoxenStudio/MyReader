@@ -46,14 +46,18 @@ const inkJsonOf = (value: unknown): string => {
 export const loadInkEditor = (
   notes: BookNote[],
   fixedLayout: boolean,
-  /** Drawings are private: shared notes from other readers are not loaded. */
+  /**
+   * Drawings are private: an ink note stamped with an author is loaded only
+   * when that author is `ownerId`. An unknown owner (undefined) therefore
+   * loads unstamped local ink only — strict isolation, never fail-open.
+   */
   ownerId?: string,
 ): HandwritingEditor => {
   const pages: Record<string, InkPage> = {};
   const loadedNoteIds = new Set<string>();
   for (const note of notes) {
     if (note.type !== 'ink' || note.deletedAt || !note.ink?.length) continue;
-    if (ownerId && note.userId && note.userId !== ownerId) continue;
+    if (note.userId && note.userId !== ownerId) continue;
     // Place every stroke or none: rewriting a note from a partial load would
     // drop the strokes whose anchor this reader could not resolve.
     const placed: { key: string; stroke: InkStroke }[] = [];

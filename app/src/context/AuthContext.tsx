@@ -150,6 +150,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem('token', newToken);
     localStorage.setItem('user', JSON.stringify(newUser));
     localStorage.removeItem('mybooks_is_guest');
+    // A different account (or a fresh login on the same one) must re-resolve
+    // the numeric reader id from `/user/whoami`; a stale id would make the
+    // strict ownership checks treat the new account's notes as someone else's.
+    useMyBooksStatusStore.getState().setCurrentUserId(null);
     if (newHost) {
       setHost(newHost);
       localStorage.setItem('mybooks_host', newHost);
@@ -170,6 +174,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem('mybooks_is_guest', 'true');
     localStorage.setItem('mybooks_host', newHost);
     useMyBooksStatusStore.getState().setHost(newHost);
+    // Guests have no synced notes; drop any id left over from a previous login.
+    useMyBooksStatusStore.getState().setCurrentUserId(null);
   }, []);
 
   const logout = useCallback(async () => {
@@ -191,6 +197,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsGuest(false);
     setIsAdmin(false);
     setHost(null);
+    // Forget the reader id too: the next login must resolve its own (strict
+    // ownership checks otherwise keep trusting the signed-out account's id).
+    useMyBooksStatusStore.getState().setCurrentUserId(null);
     // Local state is already reset; the remote auth sign-out must not block it.
     try {
       await supabase.auth.refreshSession();
