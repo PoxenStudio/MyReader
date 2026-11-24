@@ -24,10 +24,8 @@ const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
   { tool: 'marker', label: 'Marker', Icon: RiMarkPenLine },
 ];
 
-// Narrow phones cannot fit nine 32px buttons; let the dock scroll sideways
-// rather than clip Save/Close off the edge.
 const BAR =
-  'eink-bordered bg-base-100 border-base-300/50 absolute inset-x-0 z-30 flex items-center overflow-x-auto';
+  'eink-bordered bg-base-100 border-base-300/50 absolute inset-x-0 z-30 flex items-center';
 
 interface HandwritingDockProps {
   erasing: boolean;
@@ -93,87 +91,91 @@ export const HandwritingDock: React.FC<HandwritingDockProps> = ({
           />
         </div>
       )}
-      <div className='flex shrink-0 items-center gap-2'>
-        {TOOLS.map(({ tool: value, label, Icon }) => {
-          const active = !erasing && tool === value;
-          return (
-            <button
-              key={value}
-              type='button'
-              aria-label={_(label)}
-              aria-pressed={active}
-              aria-expanded={active ? optionsOpen : undefined}
-              onClick={() => {
-                if (active) {
-                  setOptionsOpen((open) => !open);
-                } else {
-                  setOptionsOpen(false);
-                  onSelectTool(value);
-                }
-              }}
-              className={clsx(
-                'relative flex h-8 min-h-8 w-8 items-center justify-center rounded-md p-0',
-                active ? 'bg-base-300 eink:border' : 'not-eink:hover:bg-base-200',
-              )}
-            >
-              <Icon />
-              {/* The active tool's ink color, like the band on a Notes tool. */}
-              {active && (
-                <span
-                  className='absolute bottom-1 h-0.5 w-3.5 rounded-full'
-                  style={{ backgroundColor: penColor }}
-                />
-              )}
-            </button>
-          );
-        })}
-        <div className={clsx('rounded-md', erasing && 'bg-base-300 eink:border')}>
+      {/* The scroll container is inside the popover's containing block: an
+          `overflow-x-auto` dock would clip the options panel above it. */}
+      <div className='flex min-w-0 flex-1 items-center justify-between gap-2 overflow-x-auto'>
+        <div className='flex shrink-0 items-center gap-2'>
+          {TOOLS.map(({ tool: value, label, Icon }) => {
+            const active = !erasing && tool === value;
+            return (
+              <button
+                key={value}
+                type='button'
+                aria-label={_(label)}
+                aria-pressed={active}
+                aria-expanded={active ? optionsOpen : undefined}
+                onClick={() => {
+                  if (active) {
+                    setOptionsOpen((open) => !open);
+                  } else {
+                    setOptionsOpen(false);
+                    onSelectTool(value);
+                  }
+                }}
+                className={clsx(
+                  'relative flex h-8 min-h-8 w-8 items-center justify-center rounded-md p-0',
+                  active ? 'bg-base-300 eink:border' : 'not-eink:hover:bg-base-200',
+                )}
+              >
+                <Icon />
+                {/* The active tool's ink color, like the band on a Notes tool. */}
+                {active && (
+                  <span
+                    className='absolute bottom-1 h-0.5 w-3.5 rounded-full'
+                    style={{ backgroundColor: penColor }}
+                  />
+                )}
+              </button>
+            );
+          })}
+          <div className={clsx('rounded-md', erasing && 'bg-base-300 eink:border')}>
+            <AnnotationToolButton
+              showTooltip
+              tooltipText={_('Eraser')}
+              Icon={RiEraserLine}
+              onClick={onToggleErase}
+            />
+          </div>
           <AnnotationToolButton
             showTooltip
-            tooltipText={_('Eraser')}
-            Icon={RiEraserLine}
-            onClick={onToggleErase}
+            tooltipText={_('Undo')}
+            Icon={RiArrowGoBackLine}
+            onClick={onUndo}
+          />
+          <AnnotationToolButton
+            showTooltip
+            tooltipText={_('Redo')}
+            Icon={RiArrowGoForwardLine}
+            onClick={onRedo}
           />
         </div>
-        <AnnotationToolButton
-          showTooltip
-          tooltipText={_('Undo')}
-          Icon={RiArrowGoBackLine}
-          onClick={onUndo}
-        />
-        <AnnotationToolButton
-          showTooltip
-          tooltipText={_('Redo')}
-          Icon={RiArrowGoForwardLine}
-          onClick={onRedo}
-        />
-      </div>
-      {/* Pages turn by their on-screen side, like the reader's own buttons. */}
-      <div className='flex shrink-0 items-center gap-2' dir='ltr'>
-        <AnnotationToolButton
-          showTooltip
-          tooltipText={_('Previous Page')}
-          Icon={RiArrowLeftSLine}
-          onClick={onTurnLeft}
-        />
-        <AnnotationToolButton
-          showTooltip
-          tooltipText={_('Next Page')}
-          Icon={RiArrowRightSLine}
-          onClick={onTurnRight}
-        />
-        <AnnotationToolButton
-          showTooltip
-          tooltipText={_('Save')}
-          Icon={RiSave3Line}
-          onClick={onSave}
-        />
-        <AnnotationToolButton
-          showTooltip
-          tooltipText={_('Close')}
-          Icon={RiCloseLine}
-          onClick={onClose}
-        />
+        {/* Pages turn by their on-screen side, like the reader's own buttons. */}
+        <div className='flex shrink-0 items-center gap-2' dir='ltr'>
+          <AnnotationToolButton
+            showTooltip
+            tooltipText={_('Previous Page')}
+            Icon={RiArrowLeftSLine}
+            onClick={onTurnLeft}
+          />
+          <AnnotationToolButton
+            showTooltip
+            tooltipText={_('Next Page')}
+            Icon={RiArrowRightSLine}
+            onClick={onTurnRight}
+          />
+          <AnnotationToolButton
+            showTooltip
+            tooltipText={_('Save')}
+            Icon={RiSave3Line}
+            onClick={onSave}
+          />
+          <AnnotationToolButton
+            showTooltip
+            tooltipText={_('Close')}
+            Icon={RiCloseLine}
+            onClick={onClose}
+          />
+        </div>
       </div>
     </div>
   );

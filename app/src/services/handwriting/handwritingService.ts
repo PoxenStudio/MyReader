@@ -386,12 +386,15 @@ export class HandwritingService {
       const path = this.eraseTail ? [this.eraseTail, ...points] : points;
       if (path.length) {
         const target = this.targetOf(path);
-        this.editor.erase(
+        const removed = this.editor.erase(
           target.page,
           target.points,
           this.options.eraseRadiusFraction * target.scale,
           this.placeWith(target.anchoring),
         );
+        // Undo/redo follow the page that was actually changed — erasing on
+        // the sibling page of a spread must not undo the current page.
+        if (removed > 0) this.page = target.page;
       }
       this.eraseTail = kind === 'end' ? null : (path[path.length - 1] ?? null);
       this.live = [];

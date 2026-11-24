@@ -84,6 +84,7 @@ export const useWebDAVSync = (bookKey: string) => {
    * book without reading) so mobile doesn't burn a PUT for no reason.
    */
   const dirtyRef = useRef(false);
+  const mutationSeqRef = useRef(0);
   /** Last successful pull timestamp; gates window-focus and open-book pulls. */
   const lastPulledAtRef = useRef(0);
   const hasPulledOnce = useRef(false);
@@ -159,6 +160,7 @@ export const useWebDAVSync = (bookKey: string) => {
     const wantNotes = settings.webdav?.syncNotes ?? true;
     if (!wantProgress && !wantNotes) return;
 
+    const pushSeq = mutationSeqRef.current;
     const config = getConfig(bookKey);
     const book = getBookData(bookKey)?.book;
     if (!config || !book) return;
@@ -169,7 +171,9 @@ export const useWebDAVSync = (bookKey: string) => {
       // fields the local writer applies on pull. This keeps the wire
       // schema stable across users with different toggle combinations.
       await pushBookConfig(settings.webdav!, book, config, deviceId);
-      dirtyRef.current = false;
+      // Keep dirty when a stroke/annotation landed during the PUT; the
+      // scheduled debounce then pushes the newer snapshot.
+      if (mutationSeqRef.current === pushSeq) dirtyRef.current = false;
       await updateLastSyncedAt(Date.now());
     } catch (e) {
       if (e instanceof WebDAVRequestError && e.code === 'AUTH_FAILED') {
@@ -434,6 +438,7 @@ export const useWebDAVSync = (bookKey: string) => {
    * dirty bit.
    */
   const markDirtyAndSchedule = useCallback(() => {
+    mutationSeqRef.current += 1;
     dirtyRef.current = true;
     debouncedPush();
   }, [debouncedPush]);

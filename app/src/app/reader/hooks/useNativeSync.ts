@@ -198,6 +198,10 @@ export const useNativeSync = (bookKey: string) => {
   useNativeSyncEvents(isReady);
 
   const dirtyRef = useRef(false);
+  // Bumped on every local change; a push only clears `dirtyRef` if no change
+  // landed while its request was in flight (otherwise that change would sit
+  // unpushed until the next edit).
+  const mutationSeqRef = useRef(0);
   const lastPulledAtRef = useRef(0);
   const hasPulledOnce = useRef(false);
   const initialPullDoneRef = useRef(false);
@@ -264,6 +268,7 @@ export const useNativeSync = (bookKey: string) => {
       return;
     }
 
+    const pushSeq = mutationSeqRef.current;
     const config = getConfig(bookKey);
     const book = getBookData(bookKey)?.book;
     if (!config || !book) return;
@@ -315,9 +320,19 @@ export const useNativeSync = (bookKey: string) => {
         })),
         ...(readingSecondsPayload.length > 0 && { reading_seconds: readingSecondsPayload }),
       });
-      dirtyRef.current = false;
-      pendingSinceRef.current = 0;
-      debounceResetCountRef.current = 0;
+      if (mutationSeqRef.current === pushSeq) {
+        dirtyRef.current = false;
+        pendingSinceRef.current = 0;
+        debounceResetCountRef.current = 0;
+      } else {
+        // A stroke/annotation landed while this push was in flight: keep the
+        // dirty flag so the scheduled debounce pushes the newer snapshot.
+        syncLog(bookKey, 'push:done-with-newer-local', {
+          elapsedMs: Date.now() - now,
+          localSeq: mutationSeqRef.current,
+          pushedSeq: pushSeq,
+        });
+      }
       syncLog(bookKey, 'push:done', { elapsedMs: Date.now() - now });
       if (readingSecondsPayload.length > 0) {
         tracker.clearSent(sentReadingSeconds);
@@ -538,7 +553,16 @@ export const useNativeSync = (bookKey: string) => {
         }
       }
       mergedConfig.booknotes = Array.from(byId.values());
-      mergedConfig.lastSyncedAtNotes = now;
+      // Do not move the "safe to sweep" watermark past notes the server has
+      // never seen: a local edit that has not been pushed yet would be swept
+      // as stale on the next pull (silent data loss).
+      const hasUnpushedLocalNotes = (baseConfig.booknotes ?? []).some((n) => {
+        const isOwn = !n.userId || n.userId === String(currentUserId);
+        const inScope = showOtherAnnotations || isOwn;
+        const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
+        return inScope && !remoteNoteIds.has(n.id) && ts > syncWatermark;
+      });
+      mergedConfig.lastSyncedAtNotes = hasUnpushedLocalNotes ? syncWatermark : now;
 
       setConfig(bookKey, mergedConfig);
       const latest = getConfig(bookKey);
@@ -641,6 +665,7 @@ export const useNativeSync = (bookKey: string) => {
       pendingSinceRef.current = Date.now();
       debounceResetCountRef.current = 0;
     }
+    mutationSeqRef.current += 1;
     dirtyRef.current = true;
     debouncedPush();
   }, [debouncedPush, bookKey]);

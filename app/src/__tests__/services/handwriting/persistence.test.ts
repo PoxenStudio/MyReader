@@ -163,6 +163,16 @@ describe('ink notes', () => {
     });
   });
 
+  it('tombstones a drawing drawn and then erased in the same session', () => {
+    const editor = loadInkEditor([], false, '7');
+    editor.addStroke('sec:3', stroke('a', 'ink-new', WORDS));
+    const first = write([], editor, 100);
+    expect(first[0]).toMatchObject({ id: 'ink-new', type: 'ink', updatedAt: 100 });
+    editor.clear('sec:3');
+    const [gone] = write(first, editor, 200);
+    expect(gone).toMatchObject({ id: 'ink-new', deletedAt: 200, updatedAt: 200, ink: [] });
+  });
+
   it('resurrects a tombstoned drawing that is drawn on again', () => {
     const gone: BookNote = {
       id: 'ink-s1',

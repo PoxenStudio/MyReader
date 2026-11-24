@@ -35,6 +35,7 @@ const HandwritingOverlay: React.FC<HandwritingOverlayProps> = ({ bookKey, gridIn
     setHoveredBookKey(null);
     setErasing(false);
     setAutoScrollEnabled(bookKey, false);
+    eventDispatcher.dispatch('autoscroll-stop', { bookKey });
     eventDispatcher.dispatch('tts-stop', { bookKey });
   }, [bookKey, enabled, setHoveredBookKey, setErasing, setAutoScrollEnabled]);
 

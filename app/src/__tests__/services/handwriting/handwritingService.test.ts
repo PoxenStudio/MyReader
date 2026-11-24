@@ -38,6 +38,32 @@ describe('HandwritingService page scoping', () => {
     expect(service.strokesForRender().map((s) => s.id)).toEqual(['b']);
   });
 
+  it('undoes the page the eraser changed, not the current page', () => {
+    const editor = new HandwritingEditor();
+    editor.addStroke('page:1', {
+      id: 'a',
+      color: '#000',
+      width: 0.004,
+      points: [[0.5, 0.5]],
+    });
+    editor.addStroke('page:2', {
+      id: 'b',
+      color: '#000',
+      width: 0.004,
+      points: [[0.5, 0.5]],
+    });
+    const service = new HandwritingService(editor, 'page:1', rect);
+    service.setRouter(() => ({ page: 'page:2', rect, anchoring: null }));
+    const input = service as unknown as {
+      onBatch: (points: InkPoint[], kind: string, erase: boolean) => void;
+    };
+    input.onBatch([[0.5, 0.5]], 'end', true);
+    expect(editor.strokes('page:2')).toHaveLength(0);
+    service.undo();
+    expect(editor.strokes('page:2')).toHaveLength(1);
+    expect(editor.strokes('page:1')).toHaveLength(1);
+  });
+
   it('notifies listeners on a page change so the canvas repaints', () => {
     const editor = new HandwritingEditor();
     editor.addStroke('pdf:1', { id: 'a', color: '#000', width: 0.004, points: [[0.1, 0.1]] });

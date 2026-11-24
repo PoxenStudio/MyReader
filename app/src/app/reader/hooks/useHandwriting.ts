@@ -367,6 +367,33 @@ export function useHandwriting(bookKey: string) {
     });
   };
 
+  /**
+   * Every visible reflowable section gets its own layer: a paginated spread
+   * can show the next section in the facing column, and each section's ink is
+   * pinned to that section's text. The in-progress stroke is drawn separately
+   * above these.
+   */
+  const reflowSectionLayers = (): InkLayer[] => {
+    if (isFixedLayout || scrolled || sectionIndex === undefined) return [];
+    const view = getView(bookKey);
+    const editor = editorRef.current;
+    if (!view || !editor || !cellRect.width) return [];
+    const seen = new Set<number>();
+    return view.renderer.getContents().flatMap(({ index }): InkLayer[] => {
+      if (index === undefined || seen.has(index)) return [];
+      seen.add(index);
+      const strokes = editor.strokes(sectionPageKey(index));
+      if (!strokes.length) return [];
+      const anchoring = createInkAnchoring(view, index, cellRect);
+      const placed = strokes.flatMap((stroke) =>
+        stroke.anchor
+          ? (anchoring?.place(stroke) ?? []).map((points) => ({ ...stroke, points }))
+          : [stroke],
+      );
+      return [{ strokes: placed, rect: cellRect }];
+    });
+  };
+
   useEffect(() => {
     if (!serviceRef.current) {
       serviceRef.current = new HandwritingService(editorRef.current!, pageKey, pageRect, {
@@ -450,7 +477,11 @@ export function useHandwriting(bookKey: string) {
   useEffect(() => {
     const service = serviceRef.current;
     if (!service) return;
-    if (!scrolled && !isFixedLayout) {
+    // Reflowable spreads put the next section in the facing column, so a
+    // stroke there must be pinned to that section. A single visible section
+    // needs no routing (and pays no per-stroke anchoring cost).
+    const visibleEntries = getView(bookKey)?.renderer.getContents() ?? [];
+    if (!scrolled && !isFixedLayout && visibleEntries.length <= 1) {
       service.setRouter(null);
       return;
     }
@@ -482,7 +513,7 @@ export function useHandwriting(bookKey: string) {
             anchoring: createInkAnchoring(view, best.index, cellRect),
           };
     });
-  }, [scrolled, isFixedLayout, cellRect, getView, bookKey]);
+  }, [scrolled, isFixedLayout, cellRect, getView, bookKey, sectionIndex, location]);
 
   const detach = useCallback(async () => {
     await serviceRef.current?.detach();
@@ -530,7 +561,10 @@ export function useHandwriting(bookKey: string) {
           ...fixedFrameLayers(),
           ...(liveStrokes.length ? [{ strokes: liveStrokes, rect: pageRect }] : []),
         ]
-      : [{ strokes: serviceRef.current?.strokesForRender() ?? [], rect: pageRect }];
+      : [
+          ...reflowSectionLayers(),
+          ...(liveStrokes.length ? [{ strokes: liveStrokes, rect: pageRect }] : []),
+        ];
 
   return {
     layers,

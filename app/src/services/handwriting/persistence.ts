@@ -130,6 +130,9 @@ export const withInkNotes = (
   for (const [id, { strokes, cfi, page }] of sessions) {
     const prev = previous.get(id);
     previous.delete(id);
+    // A session this editor wrote is now "known" to it: when its ink is later
+    // erased away, the missing note is a local deletion and must tombstone.
+    editor.loadedNoteIds?.add(id);
     if (prev && !prev.deletedAt && inkJsonOf(prev.ink) === inkJsonOf(strokes)) {
       result.push(prev);
       continue;
