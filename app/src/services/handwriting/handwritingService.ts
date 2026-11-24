@@ -333,6 +333,9 @@ export class HandwritingService {
 
   /** Whether a screen point (CSS px) lands on ink shown on this page. */
   hitTest(x: number, y: number): boolean {
+    // Before the first measurement there is no page to hit (and the slop
+    // radius would divide by zero).
+    if (this.rect.width <= 0 || this.rect.height <= 0) return false;
     const p = screenToPage({ x, y }, this.rect);
     if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return false;
     return this.editor.hits(this.page, [p.x, p.y], HIT_SLOP_PX / this.rect.width, this.place);
