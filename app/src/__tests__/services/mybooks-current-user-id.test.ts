@@ -27,6 +27,8 @@ describe('ensureCurrentUserId', () => {
     vi.resetModules();
     localStorage.clear();
     localStorage.setItem('mybooks_host', 'http://mybooks.local');
+    // A logged-in client session is a precondition of identity resolution.
+    localStorage.setItem('token', 'test-session-token');
     vi.restoreAllMocks();
   });
 
@@ -64,18 +66,71 @@ describe('ensureCurrentUserId', () => {
   });
 
   it('verifies a cached id against whoami once, then short-circuits', async () => {
+    vi.useFakeTimers();
+    try {
+      localStorage.setItem('mybooks_user_info', JSON.stringify({ id: 7, is_login: true }));
+      const fetchSpy = vi
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(jsonResponse({ err: 'ok', userId: 7 }));
+      const { ensureCurrentUserId, isCurrentUserIdVerified } = await import(
+        '@/services/mybooksService'
+      );
+      const { useMyBooksStatusStore } = await import('@/store/mybooksStatusStore');
+      // Restored from the cache at module init, but not yet verified.
+      expect(useMyBooksStatusStore.getState().currentUserId).toBe(7);
+      expect(isCurrentUserIdVerified()).toBe(false);
+
+      expect(await ensureCurrentUserId()).toBe(7);
+      expect(isCurrentUserIdVerified()).toBe(true);
+
+      // Past the retry throttle: verification memory, not the backoff, is
+      // what keeps this from re-requesting.
+      vi.advanceTimersByTime(31_000);
+      expect(await ensureCurrentUserId()).toBe(7);
+      expect(countWhoamiCalls(fetchSpy)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the cached id and stays unverified when whoami is unreachable', async () => {
     localStorage.setItem('mybooks_user_info', JSON.stringify({ id: 7, is_login: true }));
-    const fetchSpy = vi
-      .spyOn(global, 'fetch')
-      .mockResolvedValue(jsonResponse({ err: 'ok', userId: 7 }));
-    const { ensureCurrentUserId } = await import('@/services/mybooksService');
+    vi.spyOn(global, 'fetch').mockRejectedValue(new Error('network down'));
+    const { ensureCurrentUserId, isCurrentUserIdVerified } = await import(
+      '@/services/mybooksService'
+    );
     const { useMyBooksStatusStore } = await import('@/store/mybooksStatusStore');
-    // Restored from the cache at module init, but not yet verified.
-    expect(useMyBooksStatusStore.getState().currentUserId).toBe(7);
 
     expect(await ensureCurrentUserId()).toBe(7);
-    await ensureCurrentUserId();
-    expect(countWhoamiCalls(fetchSpy)).toBe(1);
+    expect(useMyBooksStatusStore.getState().currentUserId).toBe(7);
+    // Not verified: the reader still retries (offline start must self-heal).
+    expect(isCurrentUserIdVerified()).toBe(false);
+  });
+
+  it('does not commit a whoami answer that lands after a reset', async () => {
+    let resolveFetch!: (value: Response) => void;
+    vi.spyOn(global, 'fetch').mockImplementation(
+      () => new Promise<Response>((resolve) => (resolveFetch = resolve)),
+    );
+    const { ensureCurrentUserId, resetCurrentUserId } = await import('@/services/mybooksService');
+    const { useMyBooksStatusStore } = await import('@/store/mybooksStatusStore');
+
+    const pending = ensureCurrentUserId();
+    await Promise.resolve();
+    resetCurrentUserId();
+    resolveFetch(jsonResponse({ err: 'ok', userId: 7 }));
+
+    expect(await pending).toBeNull();
+    expect(useMyBooksStatusStore.getState().currentUserId).toBeNull();
+  });
+
+  it('does not resolve an identity without a logged-in client session', async () => {
+    localStorage.removeItem('token');
+    const fetchSpy = vi.spyOn(global, 'fetch');
+    const { ensureCurrentUserId } = await import('@/services/mybooksService');
+
+    expect(await ensureCurrentUserId()).toBeNull();
+    expect(countWhoamiCalls(fetchSpy)).toBe(0);
   });
 
   it('returns null and keeps the store unchanged when the lookup fails', async () => {
@@ -119,6 +174,22 @@ describe('ensureCurrentUserId', () => {
     expect(useMyBooksStatusStore.getState().currentUserId).toBeNull();
     // The cache must not be poisoned with the sentinel either.
     expect(JSON.parse(localStorage.getItem('mybooks_user_info')!)).toMatchObject({ id: 1 });
+  });
+
+  it('keeps a previously cached id when the server only offers the guest sentinel', async () => {
+    // A dead session can degrade to guest; that must not erase the id the
+    // reader's own (offline) notes are already shown under.
+    localStorage.setItem('mybooks_user_info', JSON.stringify({ id: 7, is_login: true }));
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse({ err: 'ok', userId: 999999, is_guest: true }),
+    );
+    const { ensureCurrentUserId } = await import('@/services/mybooksService');
+    const { useMyBooksStatusStore } = await import('@/store/mybooksStatusStore');
+    expect(useMyBooksStatusStore.getState().currentUserId).toBe(7);
+
+    expect(await ensureCurrentUserId()).toBe(7);
+    expect(useMyBooksStatusStore.getState().currentUserId).toBe(7);
+    expect(JSON.parse(localStorage.getItem('mybooks_user_info')!)).toMatchObject({ id: 7 });
   });
 
   it('rejects an id that is not a positive safe integer', async () => {

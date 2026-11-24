@@ -14,7 +14,11 @@ import type { FoliateView } from '@/types/view';
 import * as CFI from 'foliate-js/epubcfi.js';
 import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
-import { ensureCurrentUserId } from '@/services/mybooksService';
+import {
+  ensureCurrentUserId,
+  isCurrentUserIdSettled,
+  isCurrentUserIdVerified,
+} from '@/services/mybooksService';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
 import {
   ActiveReadingTracker,
@@ -221,14 +225,21 @@ export const useNativeSync = (bookKey: string) => {
   // the ownership checks that hide authored ink are not sync-gated either, so
   // a reader-only entry (or a site with sync disabled) still needs the id to
   // see its own notes. The mount call also verifies an id restored from the
-  // cache (ensureCurrentUserId verifies once per process); the interval only
-  // keeps retrying while no id is known at all.
+  // cache; the interval keeps retrying while the id is unknown OR the cache
+  // hasn't been verified yet (an offline start must repair itself when the
+  // network returns).
   useEffect(() => {
     if (status !== 'logged_in' || isGuest) return;
     void ensureCurrentUserId();
-    if (typeof useMyBooksStatusStore.getState().currentUserId === 'number') return;
+    const idKnown = typeof useMyBooksStatusStore.getState().currentUserId === 'number';
+    if (idKnown && isCurrentUserIdVerified()) return;
     const timer = setInterval(() => {
-      if (typeof useMyBooksStatusStore.getState().currentUserId === 'number') return;
+      if (
+        typeof useMyBooksStatusStore.getState().currentUserId === 'number' &&
+        isCurrentUserIdVerified()
+      ) {
+        return;
+      }
       void ensureCurrentUserId();
     }, 30_000);
     return () => clearInterval(timer);
@@ -295,6 +306,15 @@ export const useNativeSync = (bookKey: string) => {
 
   const pushNow = useCallback(async () => {
     if (!isReady) return;
+    // Notes are pushed filtered by owner; a cached-but-unverified id could
+    // filter them with the wrong account and let the server stamp them with
+    // the current session's uid. Wait for the first whoami attempt to settle
+    // (success, guest or failure) — a failed attempt still lets old servers
+    // without /user/whoami push, as before.
+    if (!isCurrentUserIdSettled()) {
+      syncLog(bookKey, 'push:skip', { reason: 'identity-unverified' });
+      return;
+    }
     // Never push before the initial pull-on-open has resolved: pushing local
     // progress before the pull's remote merge lands would overwrite whatever
     // newer progress the server holds.

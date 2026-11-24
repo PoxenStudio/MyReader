@@ -89,6 +89,11 @@ describe('isOwnBooknoteId (strict, no fail-open on unknown identity)', () => {
     expect(isOwnBooknoteId('null', null)).toBe(false);
     expect(isOwnBooknoteId('undefined', undefined)).toBe(false);
   });
+
+  it('never treats the pulled "foreign" author sentinel as own', () => {
+    expect(isOwnBooknoteId('foreign', 42)).toBe(false);
+    expect(isOwnBooknoteId('foreign', null)).toBe(false);
+  });
 });
 
 describe('cached currentUserId', () => {

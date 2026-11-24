@@ -69,6 +69,8 @@ const h = vi.hoisted(() => {
     saveConfigMock: vi.fn(async () => {}),
     goToMock: vi.fn(),
     ensureCurrentUserIdMock: vi.fn(async (): Promise<number | null> => 1),
+    identityVerified: true,
+    identitySettled: true,
     mybooksStatus: {
       currentUserId: 1 as number | null,
       showOtherAnnotations: true,
@@ -123,6 +125,8 @@ vi.mock('@/services/mybooks/syncClient', () => ({
 
 vi.mock('@/services/mybooksService', () => ({
   ensureCurrentUserId: () => h.ensureCurrentUserIdMock(),
+  isCurrentUserIdVerified: () => h.identityVerified,
+  isCurrentUserIdSettled: () => h.identitySettled,
 }));
 
 vi.mock('../hooks/useWindowActiveChanged', () => ({
@@ -158,6 +162,8 @@ beforeEach(() => {
   h.mybooksStatus.sysInfo = null;
   h.ensureCurrentUserIdMock.mockClear();
   h.ensureCurrentUserIdMock.mockResolvedValue(1);
+  h.identityVerified = true;
+  h.identitySettled = true;
 });
 
 afterEach(() => {
@@ -880,6 +886,28 @@ describe('useNativeSync', () => {
       'book-key',
       expect.objectContaining({ pendingReadingSeconds: expect.anything() }),
     );
+  });
+
+  test('does not push while the identity is still unverified', async () => {
+    // A cached-but-unverified id could filter notes with the wrong account and
+    // let the server stamp them under the current session; pushes wait for the
+    // first whoami attempt to settle.
+    h.identitySettled = false;
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+
+    const { rerender } = renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    await flushPushDebounce();
+
+    expect(h.pushSyncMock).not.toHaveBeenCalled();
+
+    // A later local change (after identity settled) pushes normally.
+    h.identitySettled = true;
+    h.state.progress = { location: 'second-loc' };
+    rerender();
+    await flushPushDebounce();
+
+    expect(h.pushSyncMock).toHaveBeenCalled();
   });
 
   test('does not push back a note that belongs to another user', async () => {

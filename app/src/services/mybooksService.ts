@@ -866,7 +866,14 @@ function writeCachedUserInfo(user: MyBooksUserInfo, id?: number): void {
 function writeCachedUserId(id: number): void {
   if (typeof window === 'undefined') return;
   const known = readCachedUserInfo();
-  if (known) localStorage.setItem(MYBOOKS_USER_INFO_CACHE_KEY, JSON.stringify({ ...known, id }));
+  // No cache (e.g. the embedded reader opens without /user/info): keep a
+  // minimal entry so the next cold start can show the reader's own notes
+  // before the network comes up. `readCachedCurrentUserId` requires
+  // `is_login: true`.
+  localStorage.setItem(
+    MYBOOKS_USER_INFO_CACHE_KEY,
+    JSON.stringify(known ? { ...known, id } : { id, is_login: true }),
+  );
 }
 
 let currentUserIdRequest: Promise<number | null> | null = null;
@@ -875,9 +882,28 @@ let lastCurrentUserIdAttemptAt = 0;
 let currentUserIdEpoch = 0;
 /** True only after whoami confirmed the id in this process (cache is not proof). */
 let currentUserIdVerified = false;
+/**
+ * True once a whoami attempt finished for the current epoch (success, guest
+ * or failure). Pushes wait for this so they cannot be filtered with a stale
+ * cached id — while an old server that lacks /user/whoami still gets pushes
+ * after its first failed attempt.
+ */
+let currentUserIdSettled = false;
 // Offline / old servers (no /user/whoami) must not turn every status poll into
 // a fresh request; the reader's retry loop calls this about once a minute.
 const CURRENT_USER_ID_RETRY_MS = 30_000;
+
+const hasClientSession = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const token = localStorage.getItem('token');
+  return !!token && token !== 'guest' && localStorage.getItem('mybooks_is_guest') !== 'true';
+};
+
+/** Whether whoami has confirmed the current id in this process. */
+export const isCurrentUserIdVerified = (): boolean => currentUserIdVerified;
+
+/** Whether identity resolution finished for the current session (even if it failed). */
+export const isCurrentUserIdSettled = (): boolean => currentUserIdSettled;
 
 /**
  * Forget the resolved reader id (login/logout/account switch).
@@ -892,6 +918,7 @@ export function resetCurrentUserId(): void {
   currentUserIdRequest = null;
   lastCurrentUserIdAttemptAt = 0;
   currentUserIdVerified = false;
+  currentUserIdSettled = false;
   useMyBooksStatusStore.getState().setCurrentUserId(null);
   if (typeof window !== 'undefined') {
     localStorage.removeItem(MYBOOKS_USER_INFO_CACHE_KEY);
@@ -912,12 +939,16 @@ export function resetCurrentUserId(): void {
  * from another session cannot permanently mis-own the reader's notes. While
  * the server is unreachable the cached id is kept, so offline reading still
  * shows the reader's own ink. Guest answers (`{userId: 999999, is_guest:
- * true}`) are never adopted.
+ * true}`) are never adopted. A late response for a signed-out client session
+ * (logout raced /user/info) cannot repopulate the id.
  */
 export async function ensureCurrentUserId(): Promise<number | null> {
   const cached = useMyBooksStatusStore.getState().currentUserId;
   const hasCached = isValidUserId(cached);
   if (hasCached && currentUserIdVerified) return cached;
+  // Never (re)establish an identity for a client session that isn't logged in;
+  // logout clears the store id, and an in-flight /user/info must not undo that.
+  if (!hasClientSession()) return hasCached ? (cached as number) : null;
   if (currentUserIdRequest) return currentUserIdRequest;
   const keepCached = () => (hasCached ? (cached as number) : null);
   if (Date.now() - lastCurrentUserIdAttemptAt < CURRENT_USER_ID_RETRY_MS) return keepCached();
@@ -945,7 +976,10 @@ export async function ensureCurrentUserId(): Promise<number | null> {
       // Unreachable server: a previously known id is better than none.
       return keepCached();
     } finally {
-      if (epoch === currentUserIdEpoch) currentUserIdRequest = null;
+      if (epoch === currentUserIdEpoch) {
+        currentUserIdSettled = true;
+        currentUserIdRequest = null;
+      }
     }
   })();
   return currentUserIdRequest;
