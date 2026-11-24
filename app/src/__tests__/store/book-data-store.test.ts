@@ -258,6 +258,54 @@ describe('bookDataStore', () => {
       expect(result).toBeUndefined();
     });
 
+    test('keeps a drawing that a stale caller list omits', () => {
+      const ink = makeBookNote({
+        id: 'ink1',
+        type: 'ink',
+        cfi: 'epubcfi(/6/10)',
+        note: '',
+        updatedAt: 2000,
+        ink: [{ id: 's1', color: '#000', width: 0.004, points: [[0.1, 0.1]] }],
+      });
+      const data = makeBookData('book1', { booknotes: [ink] });
+      useBookDataStore.setState({ booksData: { book1: data } });
+
+      // A handler that rendered before the drawing was committed writes its
+      // list back: the drawing must survive.
+      useBookDataStore
+        .getState()
+        .updateBooknotes('book1', [makeBookNote({ id: 'h1', cfi: 'epubcfi(/6/12)' })]);
+
+      const ids = useBookDataStore
+        .getState()
+        .getConfig('book1')!
+        .booknotes!.map((n) => n.id);
+      expect(ids).toContain('ink1');
+      expect(ids).toContain('h1');
+    });
+
+    test('keeps the newer drawing when a stale caller passes an older revision', () => {
+      const ink = makeBookNote({
+        id: 'ink1',
+        type: 'ink',
+        cfi: 'epubcfi(/6/10)',
+        note: '',
+        updatedAt: 3000,
+        ink: [{ id: 's2', color: '#000', width: 0.004, points: [[0.2, 0.2]] }],
+      });
+      const data = makeBookData('book1', { booknotes: [ink] });
+      useBookDataStore.setState({ booksData: { book1: data } });
+
+      useBookDataStore.getState().updateBooknotes('book1', [{ ...ink, updatedAt: 1000, ink: [] }]);
+
+      const stored = useBookDataStore
+        .getState()
+        .getConfig('book1')!
+        .booknotes!.find((n) => n.id === 'ink1')!;
+      expect(stored.updatedAt).toBe(3000);
+      expect(stored.ink).toHaveLength(1);
+    });
+
     test('extracts id from "id-suffix" key format', () => {
       const data = makeBookData('book1', { booknotes: [] });
       useBookDataStore.setState({ booksData: { book1: data } });

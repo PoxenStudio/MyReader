@@ -25,6 +25,7 @@ const h = vi.hoisted(() => {
       location: string;
       updatedAt: number;
       booknotes?: BookNote[];
+      lastSyncedAtNotes?: number;
       pendingReadingSeconds?: Record<string, number>;
     },
     progress: { location: 'local-loc' } as { location: string } | null,
@@ -816,5 +817,58 @@ describe('useNativeSync', () => {
     expect(h.pushSyncMock).toHaveBeenCalled();
     const payload = h.pushSyncMock.mock.calls[0]![0] as { notes: { id: string }[] };
     expect(payload.notes.map((n) => n.id)).toEqual(['mine', 'local']);
+  });
+
+  test('never sweeps a local drawing that the remote snapshot lacks', async () => {
+    const ink: BookNote = {
+      id: 'ink1',
+      type: 'ink',
+      cfi: 'epubcfi(/6/10)',
+      note: '',
+      createdAt: 1000,
+      updatedAt: 1500,
+      ink: [{ id: 's1', color: '#000', width: 0.004, points: [[0.1, 0.1]] }],
+    };
+    h.state.config = {
+      location: 'local-loc',
+      updatedAt: 1000,
+      lastSyncedAtNotes: 999_999, // older than the drawing, so the old sweep would drop it
+      booknotes: [ink],
+    };
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: [] });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const merged = h.setConfigMock.mock.calls
+      .map((call) => call[1] as { booknotes?: BookNote[] })
+      .find((config) => config?.booknotes);
+    expect(merged?.booknotes?.some((note) => note.id === 'ink1')).toBe(true);
+  });
+
+  test('keeps local strokes when a live remote row carries no ink', async () => {
+    const ink: BookNote = {
+      id: 'ink1',
+      type: 'ink',
+      cfi: 'epubcfi(/6/10)',
+      note: '',
+      createdAt: 1000,
+      updatedAt: 1000,
+      ink: [{ id: 's1', color: '#000', width: 0.004, points: [[0.1, 0.1]] }],
+    };
+    h.state.config = { location: 'local-loc', updatedAt: 1000, booknotes: [ink] };
+    h.pullSyncMock.mockResolvedValue({
+      configs: null,
+      notes: [{ ...ink, updatedAt: 5000, ink: [] }],
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const merged = h.setConfigMock.mock.calls
+      .map((call) => call[1] as { booknotes?: BookNote[] })
+      .find((config) => config?.booknotes);
+    const stored = merged?.booknotes?.find((note) => note.id === 'ink1');
+    expect(stored?.ink).toHaveLength(1);
   });
 });

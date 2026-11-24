@@ -533,7 +533,12 @@ export const useNativeSync = (bookKey: string) => {
         const isOwn = !n.userId || n.userId === String(currentUserId);
         const inScope = showOtherAnnotations || isOwn;
         const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
-        const staleOnServer = inScope && !remoteNoteIds.has(n.id) && ts <= syncWatermark;
+        // Handwriting is never swept for being absent from a server snapshot:
+        // ink is expensive to recreate, deletions always arrive as tombstones,
+        // and an absent ink row means "not pushed yet" far more often than
+        // "deleted elsewhere". A full server wipe must not erase local drawings.
+        const staleOnServer =
+          inScope && n.type !== 'ink' && !remoteNoteIds.has(n.id) && ts <= syncWatermark;
         if (staleOnServer) continue;
         byId.set(n.id, n);
       }
@@ -542,12 +547,15 @@ export const useNativeSync = (bookKey: string) => {
         const remoteTs = Math.max(remote.updatedAt ?? 0, remote.deletedAt ?? 0);
         const localTs = local ? Math.max(local.updatedAt ?? 0, local.deletedAt ?? 0) : -1;
         if (remoteTs >= localTs) {
+          const remoteLostInk =
+            !!local?.ink?.length && !remote.deletedAt && (!remote.ink || remote.ink.length === 0);
           byId.set(remote.id, {
             ...local,
             ...remote,
-            // A row without strokes must not wipe local ink: servers with a
-            // nullable column may hand back `ink: null`.
-            ...(remote.ink == null && local?.ink ? { ink: local.ink } : {}),
+            // A live row without strokes must not wipe local ink: servers with
+            // a nullable column may hand back `ink: null` / `[]`, and an old
+            // client may push the note without the field.
+            ...(remoteLostInk ? { ink: local.ink } : {}),
             // The wire field is `uid` (a number), not `user_id` — see
             // `BookDataRecord.uid`'s doc comment.
             userId: remote.uid !== undefined ? String(remote.uid) : undefined,
@@ -559,7 +567,10 @@ export const useNativeSync = (bookKey: string) => {
       // Do not move the "safe to sweep" watermark past notes the server has
       // never seen: a local edit that has not been pushed yet would be swept
       // as stale on the next pull (silent data loss).
+      // Ink is excluded: it is never swept for being absent remotely, so it
+      // must not pin the watermark that governs the other note types.
       const hasUnpushedLocalNotes = (baseConfig.booknotes ?? []).some((n) => {
+        if (n.type === 'ink') return false;
         const isOwn = !n.userId || n.userId === String(currentUserId);
         const inScope = showOtherAnnotations || isOwn;
         const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);

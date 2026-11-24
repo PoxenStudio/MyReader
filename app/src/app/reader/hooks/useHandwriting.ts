@@ -243,10 +243,6 @@ export function useHandwriting(bookKey: string) {
   // The rects last measured. An unchanged rect sets no state: right after a
   // render React can't drop an equal update unseen, and each took a commit.
   const rectsRef = useRef({ cell: EMPTY_RECT, page: EMPTY_RECT });
-  // Fixed-layout frames as last measured, keyed by section index. Kept here
-  // so sibling pages in a spread can be painted without reading layout on
-  // every render (live drawing repaints on each animation frame).
-  const frameRectsRef = useRef<Map<number, PageRect>>(new Map());
   const measure = useCallback(() => {
     if (!cellEl) return;
     const cell = toRect(cellEl.getBoundingClientRect());
@@ -254,14 +250,6 @@ export function useHandwriting(bookKey: string) {
     // stroke is routed to the page it is drawn over.
     const page =
       (isFixedLayout && !scrolled && measureFixedPage(getView(bookKey), sectionIndex)) || cell;
-    if (isFixedLayout) {
-      const frames = new Map<number, PageRect>();
-      for (const { doc, index } of getView(bookKey)?.renderer.getContents() ?? []) {
-        const frame = doc?.defaultView?.frameElement;
-        if (index !== undefined && frame) frames.set(index, toRect(frame.getBoundingClientRect()));
-      }
-      frameRectsRef.current = frames;
-    }
     const rects = rectsRef.current;
     if (!sameRect(rects.cell, cell)) setCellRect((rects.cell = cell));
     if (!sameRect(rects.page, page)) setPageRect((rects.page = page));
@@ -376,9 +364,13 @@ export function useHandwriting(bookKey: string) {
     const view = getView(bookKey);
     const editor = editorRef.current;
     if (!view || !editor || !cellRect.width) return [];
-    return view.renderer.getContents().flatMap(({ index }): InkLayer[] => {
+    return view.renderer.getContents().flatMap(({ doc, index }): InkLayer[] => {
       if (index === undefined) return [];
-      const rect = index === sectionIndex ? pageRect : frameRectsRef.current.get(index);
+      // Always use the frame's current on-screen rect, never a possibly stale
+      // pageRect: after a page turn the measured page can lag while frames are
+      // re-created, and committed ink must stay aligned to its own page.
+      const frame = doc?.defaultView?.frameElement;
+      const rect = frame ? toRect(frame.getBoundingClientRect()) : undefined;
       const strokes = editor.strokes(fixedPageKey(index));
       if (!rect?.width || !strokes.length) return [];
       return [{ strokes: [...strokes], rect }];
