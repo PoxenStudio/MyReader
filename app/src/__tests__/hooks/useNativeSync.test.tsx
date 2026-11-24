@@ -185,16 +185,22 @@ describe('useNativeSync', () => {
     // invisible and stop being pushed. Sync therefore must not start before
     // `/user/whoami` (via ensureCurrentUserId) has resolved the identity.
     h.mybooksStatus.currentUserId = null;
-    h.ensureCurrentUserIdMock.mockResolvedValue(null);
+    // Resolve through the same store the hook reads, i.e. what the real
+    // ensureCurrentUserId does, rather than poking the field by hand.
+    h.ensureCurrentUserIdMock.mockImplementation(async () => {
+      h.mybooksStatus.currentUserId = 1;
+      return 1;
+    });
 
     const { rerender } = renderHook(() => useNativeSync('book-key'));
     await flushPushDebounce();
 
     expect(h.ensureCurrentUserIdMock).toHaveBeenCalled();
+    // The mocked store doesn't re-render the hook by itself; the render after
+    // the id lands is what makes it sync-ready.
     expect(h.pullSyncMock).not.toHaveBeenCalled();
     expect(h.pushSyncMock).not.toHaveBeenCalled();
 
-    h.mybooksStatus.currentUserId = 1;
     rerender();
     await flushMicrotasks();
 
@@ -703,6 +709,54 @@ describe('useNativeSync', () => {
         ],
       }),
     );
+  });
+
+  test('coerces a numeric-string uid instead of treating the note as foreign', async () => {
+    h.pullSyncMock.mockResolvedValue({
+      configs: null,
+      notes: [
+        {
+          id: 'n1',
+          book_hash: 'book-hash',
+          uid: '1',
+          updatedAt: 10,
+          note: 'mine',
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof h.pullSyncMock>>);
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const merged = h.setConfigMock.mock.calls
+      .map((call) => call[1] as { booknotes?: BookNote[] })
+      .find((config) => config?.booknotes);
+    expect(merged?.booknotes?.[0]).toMatchObject({ id: 'n1', userId: '1' });
+  });
+
+  test('treats an author-tagged row without a uid as foreign, never unowned', async () => {
+    // A row that carries author info is someone else's by definition; letting
+    // it land as "no userId" would make the strict ownership checks adopt it.
+    h.pullSyncMock.mockResolvedValue({
+      configs: null,
+      notes: [
+        {
+          id: 'n1',
+          book_hash: 'book-hash',
+          author: { nickname: 'Alice' },
+          updatedAt: 10,
+          note: 'theirs',
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof h.pullSyncMock>>);
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const merged = h.setConfigMock.mock.calls
+      .map((call) => call[1] as { booknotes?: BookNote[] })
+      .find((config) => config?.booknotes);
+    expect(merged?.booknotes?.[0]).toMatchObject({ id: 'n1', userId: 'foreign' });
   });
 
   test('drops a locally-cached note the server no longer returns, once it was already synced', async () => {

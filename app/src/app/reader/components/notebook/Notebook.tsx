@@ -13,7 +13,7 @@ import { NotebookTab } from '@/store/notebookStore';
 import { useAIChatStore } from '@/store/aiChatStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useThemeStore } from '@/store/themeStore';
-import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
+import { isOwnBooknoteId, useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useEnv } from '@/context/EnvContext';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
 import { usePanelResize } from '@/hooks/usePanelResize';
@@ -84,7 +84,7 @@ const Notebook: React.FC = ({}) => {
   const effectivePinned = isNotebookPinned && !isCompanionTab;
   const currentUserId = useMyBooksStatusStore((state) => state.currentUserId);
   const isOwnNote = useCallback(
-    (note: BookNote) => !note.userId || note.userId === String(currentUserId),
+    (note: BookNote) => isOwnBooknoteId(note.userId, currentUserId),
     [currentUserId],
   );
 

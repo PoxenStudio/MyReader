@@ -7,7 +7,7 @@ import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSidebarStore } from '@/store/sidebarStore';
-import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
+import { isOwnBooknoteId, useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { getMyBooksAvatarUrl } from '@/services/mybooksService';
 import UserAvatar from '@/components/UserAvatar';
@@ -41,8 +41,7 @@ const AnnotationNotes: React.FC<AnnotationNotesProps> = ({
   const config = getConfig(bookKey);
   const maxSize = useResponsiveSize(250);
 
-  const isOwnNote = (note: BookNote) =>
-    !note.userId || (currentUserId !== null && note.userId === String(currentUserId));
+  const isOwnNote = (note: BookNote) => isOwnBooknoteId(note.userId, currentUserId);
 
   const sortedNotes = useMemo(() => {
     return [...notes].sort((a, b) => b.updatedAt - a.updatedAt);

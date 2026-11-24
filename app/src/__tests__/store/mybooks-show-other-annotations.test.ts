@@ -1,6 +1,10 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useMyBooksStatusStore, useIsOwnBooknote } from '@/store/mybooksStatusStore';
+import {
+  isOwnBooknoteId,
+  useMyBooksStatusStore,
+  useIsOwnBooknote,
+} from '@/store/mybooksStatusStore';
 
 describe('mybooksStatusStore — showOtherAnnotations / currentUserId', () => {
   beforeEach(() => {
@@ -63,5 +67,64 @@ describe('useIsOwnBooknote', () => {
     useMyBooksStatusStore.setState({ currentUserId: null });
     const { result } = renderHook(() => useIsOwnBooknote('99'));
     expect(result.current).toBe(false);
+  });
+});
+
+describe('isOwnBooknoteId (strict, no fail-open on unknown identity)', () => {
+  it('treats unstamped notes as own', () => {
+    expect(isOwnBooknoteId(undefined, null)).toBe(true);
+    expect(isOwnBooknoteId(undefined, 42)).toBe(true);
+  });
+
+  it('matches only when a numeric identity is known', () => {
+    expect(isOwnBooknoteId('42', 42)).toBe(true);
+    expect(isOwnBooknoteId('42', null)).toBe(false);
+    expect(isOwnBooknoteId('42', undefined)).toBe(false);
+    expect(isOwnBooknoteId('99', 42)).toBe(false);
+  });
+
+  it('never treats the literal "null"/"undefined" stamp as own', () => {
+    // Legacy payloads could stringify a null uid; `String(currentUserId)`
+    // would then match. The helper must require a real numeric identity.
+    expect(isOwnBooknoteId('null', null)).toBe(false);
+    expect(isOwnBooknoteId('undefined', undefined)).toBe(false);
+  });
+});
+
+describe('cached currentUserId', () => {
+  const loadStore = async () => {
+    vi.resetModules();
+    return (await import('@/store/mybooksStatusStore')).useMyBooksStatusStore;
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('restores a logged-in numeric id from mybooks_user_info', async () => {
+    localStorage.setItem('mybooks_user_info', JSON.stringify({ id: 42, is_login: true }));
+    const store = await loadStore();
+    expect(store.getState().currentUserId).toBe(42);
+  });
+
+  it('ignores a cached id from a logged-out session', async () => {
+    localStorage.setItem('mybooks_user_info', JSON.stringify({ id: 42, is_login: false }));
+    const store = await loadStore();
+    expect(store.getState().currentUserId).toBeNull();
+  });
+
+  it('ignores a guest cache', async () => {
+    localStorage.setItem(
+      'mybooks_user_info',
+      JSON.stringify({ id: 999999, is_login: false, is_guest: true }),
+    );
+    const store = await loadStore();
+    expect(store.getState().currentUserId).toBeNull();
+  });
+
+  it('ignores a non-integer id', async () => {
+    localStorage.setItem('mybooks_user_info', JSON.stringify({ id: 4.2, is_login: true }));
+    const store = await loadStore();
+    expect(store.getState().currentUserId).toBeNull();
   });
 });

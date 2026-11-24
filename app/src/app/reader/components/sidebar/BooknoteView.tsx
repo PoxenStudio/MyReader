@@ -9,7 +9,7 @@ import { RiBookmark3Line, RiBookmarkLine } from 'react-icons/ri';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSidebarStore } from '@/store/sidebarStore';
-import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
+import { isOwnBooknoteId, useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { findTocItemBS } from '@/services/nav';
 import { findNearestCfi } from '@/utils/cfi';
 import { TOCItem } from '@/libs/document';
@@ -54,7 +54,7 @@ const BooknoteView: React.FC<{
           !note.deletedAt &&
           // Drawings are private to their author even when shared highlights
           // are enabled for the book.
-          (note.type !== 'ink' || !note.userId || note.userId === String(currentUserId)),
+          (note.type !== 'ink' || isOwnBooknoteId(note.userId, currentUserId)),
       ),
     [allNotes, type, currentUserId],
   );

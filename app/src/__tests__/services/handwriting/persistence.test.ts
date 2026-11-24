@@ -242,7 +242,11 @@ describe('ink notes', () => {
       ink: [stroke('b', 'ink-local', WORDS)],
     };
     expect(loadInkEditor([stamped], false).pageKeys()).toEqual([]);
-    expect(loadInkEditor([stamped, local], false).pageKeys()).toEqual(['sec:3']);
+    const editor = loadInkEditor([stamped, local], false);
+    expect(editor.pageKeys()).toEqual(['sec:3']);
+    // Only the unstamped local drawing made it in — assert the session, not
+    // just the page key (both notes share sec:3).
+    expect(editor.strokes('sec:3').map((stroke) => stroke.session)).toEqual(['ink-local']);
   });
 
   it('does not rewrite a drawing whose strokes this reader cannot place', () => {

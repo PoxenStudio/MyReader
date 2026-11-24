@@ -29,12 +29,31 @@ const readCachedCurrentUserId = (): number | null => {
   try {
     const cached = localStorage.getItem('mybooks_user_info');
     if (!cached) return null;
-    const user = JSON.parse(cached) as { id?: number };
-    return typeof user.id === 'number' ? user.id : null;
+    const user = JSON.parse(cached) as {
+      id?: number;
+      is_login?: boolean;
+      is_guest?: boolean;
+    };
+    // Only a logged-in reader's cache may lend out an id: a guest session or
+    // a logged-out cache can belong to a previous account, and trusting its
+    // id would make the current account's notes look foreign.
+    if (user.is_login !== true || user.is_guest === true) return null;
+    return Number.isSafeInteger(user.id) && (user.id as number) > 0 ? (user.id as number) : null;
   } catch {
     return null;
   }
 };
+
+/**
+ * Whether `note`'s author stamp (`BookNote.userId`) belongs to the given
+ * logged-in reader. Unstamped notes are local/not-yet-synced and therefore
+ * the reader's own; an authored note is only own when the id is known and
+ * matches. Unknown identity (null/undefined) is never a match.
+ */
+export const isOwnBooknoteId = (
+  userId: string | undefined,
+  currentUserId: number | null | undefined,
+): boolean => !userId || (typeof currentUserId === 'number' && userId === String(currentUserId));
 
 interface MyBooksStatusState {
   // True once a request to the configured MyBooks host has failed to reach
@@ -94,7 +113,7 @@ export const useMyBooksStatusStore = create<MyBooksStatusState>((set) => ({
       set({ currentUserId: null });
       return;
     }
-    if (typeof currentUserId === 'number' && Number.isFinite(currentUserId)) {
+    if (Number.isSafeInteger(currentUserId) && (currentUserId as number) > 0) {
       set({ currentUserId });
     }
   },
@@ -134,5 +153,5 @@ export const useMyBooksSidebarItems = (): string[] | undefined =>
 // with no `userId` are local/not-yet-synced and treated as the user's own.
 export const useIsOwnBooknote = (userId: string | undefined): boolean => {
   const currentUserId = useMyBooksStatusStore((state) => state.currentUserId);
-  return !userId || (currentUserId !== null && userId === String(currentUserId));
+  return isOwnBooknoteId(userId, currentUserId);
 };

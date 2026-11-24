@@ -230,8 +230,10 @@ export interface MyBooksResponse<T = unknown> {
   folders?: MyBooksFolderNode[];
   user?: MyBooksUserInfo | MyBooksUserDetailInfo;
   // /user/whoami — the only endpoint that returns the reader's numeric id
-  // (`/user/info` does not; see ensureCurrentUserId below).
+  // (`/user/info` does not; see ensureCurrentUserId below). Guest/share
+  // access answers with a sentinel id plus `is_guest: true`.
   userId?: number;
+  is_guest?: boolean;
   sys?: MyBooksSysInfo;
   avatar_url?: string;
   book_id?: number;
@@ -829,13 +831,16 @@ function updateUserPrefs(user?: MyBooksUserInfo): void {
   // field), so at runtime this is usually undefined. Keep the known id
   // instead of overwriting it — ensureCurrentUserId fills the gap from
   // `/user/whoami`.
-  if (typeof user.id === 'number' && Number.isFinite(user.id)) {
+  if (isValidUserId(user.id)) {
     store.setCurrentUserId(user.id);
   }
   if (user.show_other_annotations !== undefined) {
     store.setShowOtherAnnotations(user.show_other_annotations);
   }
 }
+
+const isValidUserId = (id: unknown): id is number =>
+  typeof id === 'number' && Number.isSafeInteger(id) && id > 0;
 
 function readCachedUserInfo(): MyBooksUserInfo | null {
   if (typeof window === 'undefined') return null;
@@ -850,18 +855,48 @@ function readCachedUserInfo(): MyBooksUserInfo | null {
 /** Cache `/user/info`'s user object while keeping the id known from whoami. */
 function writeCachedUserInfo(user: MyBooksUserInfo, id?: number): void {
   if (typeof window === 'undefined') return;
-  const knownId = typeof user.id === 'number' ? user.id : id;
+  const knownId = isValidUserId(user.id) ? user.id : id;
   localStorage.setItem(
     MYBOOKS_USER_INFO_CACHE_KEY,
     JSON.stringify(knownId !== undefined ? { ...user, id: knownId } : user),
   );
 }
 
+/** Persist an authoritatively resolved id, overriding any cached one. */
+function writeCachedUserId(id: number): void {
+  if (typeof window === 'undefined') return;
+  const known = readCachedUserInfo();
+  if (known) localStorage.setItem(MYBOOKS_USER_INFO_CACHE_KEY, JSON.stringify({ ...known, id }));
+}
+
 let currentUserIdRequest: Promise<number | null> | null = null;
 let lastCurrentUserIdAttemptAt = 0;
+/** Bumped by resetCurrentUserId so an in-flight whoami cannot commit. */
+let currentUserIdEpoch = 0;
+/** True only after whoami confirmed the id in this process (cache is not proof). */
+let currentUserIdVerified = false;
 // Offline / old servers (no /user/whoami) must not turn every status poll into
 // a fresh request; the reader's retry loop calls this about once a minute.
 const CURRENT_USER_ID_RETRY_MS = 30_000;
+
+/**
+ * Forget the resolved reader id (login/logout/account switch).
+ *
+ * Clears the in-memory id, the cached user info (it belongs to the previous
+ * session and its id would otherwise be re-adopted), and the throttle, and
+ * invalidates any in-flight `/user/whoami` so a slow response for the old
+ * account cannot land after the switch.
+ */
+export function resetCurrentUserId(): void {
+  currentUserIdEpoch += 1;
+  currentUserIdRequest = null;
+  lastCurrentUserIdAttemptAt = 0;
+  currentUserIdVerified = false;
+  useMyBooksStatusStore.getState().setCurrentUserId(null);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(MYBOOKS_USER_INFO_CACHE_KEY);
+  }
+}
 
 /**
  * Resolve the signed-in reader's numeric id.
@@ -870,31 +905,47 @@ const CURRENT_USER_ID_RETRY_MS = 30_000;
  * the id has to come from `/user/whoami` (`{userId}`). Ownership checks are
  * strict: a note stamped with a `userId` is foreign unless it matches this
  * id, so without it every pulled drawing (and highlight edit) would look like
- * someone else's and disappear from the canvas/sidebar. Resolves to null when
- * the request fails; callers retry later.
+ * someone else's and disappear from the canvas/sidebar.
+ *
+ * The id cached at startup is not trusted as proof: it is verified against
+ * whoami once per process (and after a login switch), so a cache left over
+ * from another session cannot permanently mis-own the reader's notes. While
+ * the server is unreachable the cached id is kept, so offline reading still
+ * shows the reader's own ink. Guest answers (`{userId: 999999, is_guest:
+ * true}`) are never adopted.
  */
 export async function ensureCurrentUserId(): Promise<number | null> {
   const cached = useMyBooksStatusStore.getState().currentUserId;
-  if (typeof cached === 'number') return cached;
+  const hasCached = isValidUserId(cached);
+  if (hasCached && currentUserIdVerified) return cached;
   if (currentUserIdRequest) return currentUserIdRequest;
-  if (Date.now() - lastCurrentUserIdAttemptAt < CURRENT_USER_ID_RETRY_MS) return null;
+  const keepCached = () => (hasCached ? (cached as number) : null);
+  if (Date.now() - lastCurrentUserIdAttemptAt < CURRENT_USER_ID_RETRY_MS) return keepCached();
   lastCurrentUserIdAttemptAt = Date.now();
+  const epoch = currentUserIdEpoch;
   currentUserIdRequest = (async () => {
     try {
       const response = await fetchMyBooks('/user/whoami');
+      // Guest/share access answers with a sentinel id; that is not an
+      // identity and must never be adopted.
+      if (response.is_guest === true) return keepCached();
       const id = response.userId;
-      if (typeof id === 'number' && Number.isFinite(id)) {
-        useMyBooksStatusStore.getState().setCurrentUserId(id);
-        const known = readCachedUserInfo();
-        if (known) writeCachedUserInfo(known, id);
-        return id;
-      }
-      return null;
+      if (!isValidUserId(id)) return keepCached();
+      // A login/logout happened while the request was in flight.
+      if (epoch !== currentUserIdEpoch) return null;
+      useMyBooksStatusStore.getState().setCurrentUserId(id);
+      writeCachedUserId(id);
+      currentUserIdVerified = true;
+      return id;
     } catch (e) {
-      console.warn('[MyBooks] whoami failed:', e instanceof Error ? e.message : String(e));
-      return null;
+      console.warn(
+        '[MyBooks] whoami failed:',
+        e instanceof MyBooksApiError ? e.err : e instanceof Error ? e.message : String(e),
+      );
+      // Unreachable server: a previously known id is better than none.
+      return keepCached();
     } finally {
-      currentUserIdRequest = null;
+      if (epoch === currentUserIdEpoch) currentUserIdRequest = null;
     }
   })();
   return currentUserIdRequest;
@@ -909,12 +960,12 @@ export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
     if (typeof window !== 'undefined') {
       if (user?.is_login || user?.is_guest) {
         const knownId = useMyBooksStatusStore.getState().currentUserId;
-        writeCachedUserInfo(user, typeof knownId === 'number' ? knownId : undefined);
+        writeCachedUserInfo(user, isValidUserId(knownId) ? knownId : undefined);
       } else {
         localStorage.removeItem(MYBOOKS_USER_INFO_CACHE_KEY);
       }
     }
-    if (user?.is_login && typeof user.id !== 'number') {
+    if (user?.is_login && !isValidUserId(user.id)) {
       // Fill `currentUserId` from the only endpoint that exposes it.
       void ensureCurrentUserId();
     }

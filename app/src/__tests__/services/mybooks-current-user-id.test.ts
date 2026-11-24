@@ -63,14 +63,19 @@ describe('ensureCurrentUserId', () => {
     });
   });
 
-  it('returns the already-known id without another request', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch');
+  it('verifies a cached id against whoami once, then short-circuits', async () => {
+    localStorage.setItem('mybooks_user_info', JSON.stringify({ id: 7, is_login: true }));
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(jsonResponse({ err: 'ok', userId: 7 }));
     const { ensureCurrentUserId } = await import('@/services/mybooksService');
     const { useMyBooksStatusStore } = await import('@/store/mybooksStatusStore');
-    useMyBooksStatusStore.setState({ currentUserId: 3 });
+    // Restored from the cache at module init, but not yet verified.
+    expect(useMyBooksStatusStore.getState().currentUserId).toBe(7);
 
-    expect(await ensureCurrentUserId()).toBe(3);
-    expect(countWhoamiCalls(fetchSpy)).toBe(0);
+    expect(await ensureCurrentUserId()).toBe(7);
+    await ensureCurrentUserId();
+    expect(countWhoamiCalls(fetchSpy)).toBe(1);
   });
 
   it('returns null and keeps the store unchanged when the lookup fails', async () => {
@@ -94,5 +99,91 @@ describe('ensureCurrentUserId', () => {
     expect(await ensureCurrentUserId()).toBeNull();
     expect(await ensureCurrentUserId()).toBeNull();
     expect(countWhoamiCalls(fetchSpy)).toBe(1);
+  });
+
+  it('rejects the guest sentinel id', async () => {
+    // Share/guest access answers `{userId: 999999, is_guest: true}`. Adopting
+    // it would make the real account's own notes look foreign.
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse({ err: 'ok', userId: 999999, is_guest: true }),
+    );
+    const { ensureCurrentUserId } = await import('@/services/mybooksService');
+    const { useMyBooksStatusStore } = await import('@/store/mybooksStatusStore');
+    useMyBooksStatusStore.setState({ currentUserId: null });
+    localStorage.setItem(
+      'mybooks_user_info',
+      JSON.stringify({ id: 1, is_login: true, username: 'alice' }),
+    );
+
+    expect(await ensureCurrentUserId()).toBeNull();
+    expect(useMyBooksStatusStore.getState().currentUserId).toBeNull();
+    // The cache must not be poisoned with the sentinel either.
+    expect(JSON.parse(localStorage.getItem('mybooks_user_info')!)).toMatchObject({ id: 1 });
+  });
+
+  it('rejects an id that is not a positive safe integer', async () => {
+    const body = { err: 'ok', userId: 7.5 as unknown };
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockImplementation(async (input) =>
+        String(input).includes('/user/whoami') ? jsonResponse(body) : jsonResponse({}),
+      );
+    const { ensureCurrentUserId, resetCurrentUserId } = await import('@/services/mybooksService');
+
+    expect(await ensureCurrentUserId()).toBeNull();
+
+    resetCurrentUserId();
+    body.userId = '7';
+    expect(await ensureCurrentUserId()).toBeNull();
+    expect(countWhoamiCalls(fetchSpy)).toBe(2);
+  });
+
+  it('coalesces concurrent lookups into one request', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(jsonResponse({ err: 'ok', userId: 7 }));
+    const { ensureCurrentUserId } = await import('@/services/mybooksService');
+
+    const [a, b] = await Promise.all([ensureCurrentUserId(), ensureCurrentUserId()]);
+    expect([a, b]).toEqual([7, 7]);
+    expect(countWhoamiCalls(fetchSpy)).toBe(1);
+  });
+
+  it('lets the freshly resolved id win over a stale cached one', async () => {
+    // The cached `mybooks_user_info` may belong to a previous account; the
+    // whoami answer for the current session is authoritative.
+    localStorage.setItem(
+      'mybooks_user_info',
+      JSON.stringify({ id: 1, is_login: true, username: 'previous' }),
+    );
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({ err: 'ok', userId: 7 }));
+    const { ensureCurrentUserId } = await import('@/services/mybooksService');
+
+    expect(await ensureCurrentUserId()).toBe(7);
+    expect(JSON.parse(localStorage.getItem('mybooks_user_info')!)).toMatchObject({
+      id: 7,
+      username: 'previous',
+    });
+  });
+
+  it('resetCurrentUserId clears the id, the cache and the throttle', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(jsonResponse({ err: 'ok', userId: 7 }));
+    const { ensureCurrentUserId, resetCurrentUserId } = await import('@/services/mybooksService');
+    const { useMyBooksStatusStore } = await import('@/store/mybooksStatusStore');
+    localStorage.setItem(
+      'mybooks_user_info',
+      JSON.stringify({ id: 1, is_login: true, username: 'previous' }),
+    );
+
+    expect(await ensureCurrentUserId()).toBe(7);
+    resetCurrentUserId();
+    expect(useMyBooksStatusStore.getState().currentUserId).toBeNull();
+    expect(localStorage.getItem('mybooks_user_info')).toBeNull();
+
+    // No 30s throttle after a reset: a login switch resolves immediately.
+    expect(await ensureCurrentUserId()).toBe(7);
+    expect(countWhoamiCalls(fetchSpy)).toBe(2);
   });
 });

@@ -41,6 +41,14 @@ import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvent
 const PUSH_DEBOUNCE_MS = 15_000;
 const PUSH_MAX_WAIT_MS = 20_000;
 const PULL_COOLDOWN_MS = 60_000;
+
+/**
+ * Author stamp for a pulled note that carries author info but no usable uid
+ * (e.g. a row produced by an older serializer). It can never match a numeric
+ * reader id, so the strict ownership checks keep it foreign instead of
+ * accidentally adopting someone else's note.
+ */
+const UNKNOWN_FOREIGN_AUTHOR_UID = 'foreign';
 // A pulled position is applied to the live view by jumping to its CFI. Doing
 // that while the paginator is still laying out a section resolves the CFI
 // against a document that is not settled: the anchor fails, the view lands on
@@ -209,18 +217,22 @@ export const useNativeSync = (bookKey: string) => {
 
   // `/user/info` does not carry the id, so ask `/user/whoami` while the
   // reader is logged in and retry until it lands (offline start, NAS still
-  // booting, ...). Sync's own effects are gated on `isReady`, so this is the
-  // only thing that runs until identity is resolved.
+  // booting, ...). This deliberately does NOT depend on sync being enabled:
+  // the ownership checks that hide authored ink are not sync-gated either, so
+  // a reader-only entry (or a site with sync disabled) still needs the id to
+  // see its own notes. The mount call also verifies an id restored from the
+  // cache (ensureCurrentUserId verifies once per process); the interval only
+  // keeps retrying while no id is known at all.
   useEffect(() => {
-    if (!ENABLE_SYNC_FEATURE || status !== 'logged_in' || isGuest || !isSyncAllowed) return;
-    if (typeof useMyBooksStatusStore.getState().currentUserId === 'number') return;
+    if (status !== 'logged_in' || isGuest) return;
     void ensureCurrentUserId();
+    if (typeof useMyBooksStatusStore.getState().currentUserId === 'number') return;
     const timer = setInterval(() => {
       if (typeof useMyBooksStatusStore.getState().currentUserId === 'number') return;
       void ensureCurrentUserId();
     }, 30_000);
     return () => clearInterval(timer);
-  }, [status, isGuest, isSyncAllowed, currentUserId]);
+  }, [status, isGuest, currentUserId]);
 
   useNativeSyncEvents(isReady);
 
@@ -577,6 +589,18 @@ export const useNativeSync = (bookKey: string) => {
         if (remoteTs >= localTs) {
           const remoteLostInk =
             !!local?.ink?.length && !remote.deletedAt && (!remote.ink || remote.ink.length === 0);
+          // The wire field is `uid` (a number, but tolerate a numeric string
+          // from older serializers), not `user_id`. A row without a usable
+          // uid must not become unowned — that would make someone else's note
+          // look like ours; when it carries an author it is explicitly
+          // foreign, otherwise the note's previous stamp is kept.
+          const rawUid: unknown = remote.uid;
+          const remoteUid =
+            typeof rawUid === 'number'
+              ? rawUid
+              : typeof rawUid === 'string' && rawUid.trim() !== ''
+                ? Number(rawUid)
+                : NaN;
           byId.set(remote.id, {
             ...local,
             ...remote,
@@ -584,15 +608,12 @@ export const useNativeSync = (bookKey: string) => {
             // a nullable column may hand back `ink: null` / `[]`, and an old
             // client may push the note without the field.
             ...(remoteLostInk ? { ink: local.ink } : {}),
-            // The wire field is `uid` (a number), not `user_id` — see
-            // `BookDataRecord.uid`'s doc comment. Keep the previous stamp when
-            // the row carries no usable uid, rather than turning a pulled own
-            // note into "unowned" (which the strict ownership checks would
-            // then treat as a fresh local note).
             userId:
-              typeof remote.uid === 'number'
-                ? String(remote.uid)
-                : (remote.userId ?? local?.userId),
+              Number.isSafeInteger(remoteUid) && remoteUid > 0
+                ? String(remoteUid)
+                : remote.author
+                  ? UNKNOWN_FOREIGN_AUTHOR_UID
+                  : (remote.userId ?? local?.userId),
             author: remote.author,
           } as BookNote);
         }

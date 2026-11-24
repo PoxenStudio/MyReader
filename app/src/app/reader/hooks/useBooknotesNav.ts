@@ -4,7 +4,7 @@ import { useSidebarStore } from '@/store/sidebarStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useBookProgress } from '@/store/readerProgressStore';
 import { useBookDataStore } from '@/store/bookDataStore';
-import { useMyBooksStatusStore } from '@/store/mybooksStatusStore';
+import { isOwnBooknoteId, useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { createCfiLocationMatcher } from '@/utils/cfi';
 import { findTocItemBS } from '@/services/nav';
 import { BookNoteType } from '@/types/book';
@@ -40,7 +40,7 @@ export function useBooknotesNav(bookKey: string, toc: TOCItem[]) {
         (note) =>
           !note.deletedAt &&
           // Drawings stay private to their author, like the annotations list.
-          !(note.type === 'ink' && note.userId && note.userId !== String(currentUserId)),
+          !(note.type === 'ink' && !isOwnBooknoteId(note.userId, currentUserId)),
       ) || []
     );
   }, [bookKey, getConfig, currentUserId]);
