@@ -213,6 +213,10 @@ export function useHandwriting(bookKey: string) {
   // The rects last measured. An unchanged rect sets no state: right after a
   // render React can't drop an equal update unseen, and each took a commit.
   const rectsRef = useRef({ cell: EMPTY_RECT, page: EMPTY_RECT });
+  // Fixed-layout frames as last measured, keyed by section index. Kept here
+  // so sibling pages in a spread can be painted without reading layout on
+  // every render (live drawing repaints on each animation frame).
+  const frameRectsRef = useRef<Map<number, PageRect>>(new Map());
   const measure = useCallback(() => {
     if (!cellEl) return;
     const cell = toRect(cellEl.getBoundingClientRect());
@@ -220,6 +224,14 @@ export function useHandwriting(bookKey: string) {
     // stroke is routed to the page it is drawn over.
     const page =
       (isFixedLayout && !scrolled && measureFixedPage(getView(bookKey), sectionIndex)) || cell;
+    if (isFixedLayout) {
+      const frames = new Map<number, PageRect>();
+      for (const { doc, index } of getView(bookKey)?.renderer.getContents() ?? []) {
+        const frame = doc?.defaultView?.frameElement;
+        if (index !== undefined && frame) frames.set(index, toRect(frame.getBoundingClientRect()));
+      }
+      frameRectsRef.current = frames;
+    }
     const rects = rectsRef.current;
     if (!sameRect(rects.cell, cell)) setCellRect((rects.cell = cell));
     if (!sameRect(rects.page, page)) setPageRect((rects.page = page));
@@ -304,12 +316,12 @@ export function useHandwriting(bookKey: string) {
     const view = getView(bookKey);
     const editor = editorRef.current;
     if (!view || !editor || !cellRect.width) return [];
-    return view.renderer.getContents().flatMap(({ doc, index }): InkLayer[] => {
+    return view.renderer.getContents().flatMap(({ index }): InkLayer[] => {
       if (index === undefined || index === sectionIndex) return [];
-      const frame = doc?.defaultView?.frameElement;
+      const rect = frameRectsRef.current.get(index);
       const strokes = editor.strokes(fixedPageKey(index));
-      if (!frame || !strokes.length) return [];
-      return [{ strokes: [...strokes], rect: toRect(frame.getBoundingClientRect()) }];
+      if (!rect || !strokes.length) return [];
+      return [{ strokes: [...strokes], rect }];
     });
   };
 
