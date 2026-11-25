@@ -21,7 +21,13 @@ import {
 import type { FileSystem } from '@/types/system';
 import { isFeedBookUrl, parseFeedBookUrl } from '@/services/rss/feedBookUrl';
 import { openFeedBookDoc } from '@/services/rss/feedReader';
-import { BOOK_NAV_VERSION, computeBookNav, hydrateBookNav, updateToc } from '@/services/nav';
+import {
+  BOOK_NAV_VERSION,
+  computeBookNav,
+  findTocItemBS,
+  hydrateBookNav,
+  updateToc,
+} from '@/services/nav';
 import {
   formatAuthors,
   formatTitle,
@@ -58,6 +64,27 @@ const scheduleReadingStatus = (hash: string) => {
     }, READING_STATUS_DELAY_MS),
   );
 };
+
+const updateLibraryReadingProgress = (id: string, pageInfo: PageInfo) => {
+  const progress: [number, number] = [pageInfo.current + 1, pageInfo.total];
+  const progressPercentage = Math.round((progress[0] / progress[1]) * 100);
+  // Lightweight library update — O(1) lookup, no array copy, no refreshGroups
+  const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
+  const existingBook = getBookByHash(id);
+  if (!existingBook) return;
+  let newReadingStatus = existingBook.readingStatus;
+  if (existingBook.readingStatus === 'unread') {
+    scheduleReadingStatus(id);
+  }
+  if (progressPercentage >= 100 && existingBook.readingStatus !== 'finished') {
+    newReadingStatus = 'finished';
+  }
+  updateBookProgress(id, progress, newReadingStatus);
+};
+
+// TTS location updates resolve page data asynchronously; the token drops
+// out-of-order responses when a newer mark lands mid-flight.
+const progressLocationTokens = new Map<string, number>();
 
 const cancelReadingStatus = (hash: string) => {
   clearTimeout(readingStatusTimers.get(hash));
@@ -123,6 +150,7 @@ interface ReaderStore {
     range: Range,
     fraction: number,
   ) => void;
+  setProgressLocation: (key: string, location: string, range?: Range | null) => void;
   getProgress: (key: string) => BookProgress | null;
   setView: (key: string, view: FoliateView) => void;
   getView: (key: string | null) => FoliateView | null;
@@ -501,23 +529,12 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     const viewState = get().viewStates[key];
     if (!viewState || !bookData) return;
 
+    // Any real relocate invalidates an in-flight TTS CFI derivation; it would
+    // otherwise write the previous position back over the user's page turn.
+    progressLocationTokens.set(key, (progressLocationTokens.get(key) ?? 0) + 1);
     const pageInfo = bookData.isFixedLayout ? section : pageinfo;
     const progress: [number, number] = [pageInfo.current + 1, pageInfo.total];
-    const progressPercentage = Math.round((progress[0] / progress[1]) * 100);
-
-    // Lightweight library update — O(1) lookup, no array copy, no refreshGroups
-    const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
-    const existingBook = getBookByHash(id);
-    if (existingBook) {
-      let newReadingStatus = existingBook.readingStatus;
-      if (existingBook.readingStatus === 'unread') {
-        scheduleReadingStatus(id);
-      }
-      if (progressPercentage >= 100 && existingBook.readingStatus !== 'finished') {
-        newReadingStatus = 'finished';
-      }
-      updateBookProgress(id, progress, newReadingStatus);
-    }
+    updateLibraryReadingProgress(id, pageInfo);
 
     // Only the primary view persists progress into the shared bookData
     // config — secondary views in a parallel layout shouldn't overwrite
@@ -561,6 +578,111 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       range,
       page: pageInfo.current + 1,
     } as BookProgress);
+  },
+  // TTS sentence marks are the progress authority while listening; layout
+  // reflows must not overwrite the synced location with a page-start CFI.
+  setProgressLocation: (key: string, location: string, range?: Range | null) => {
+    const id = getBookHash(key);
+    const viewState = get().viewStates[key];
+    if (!viewState) return;
+    if (viewState.isPrimary) {
+      useBookDataStore.setState((state) => {
+        const existing = state.booksData[id];
+        if (!existing) return state;
+        return {
+          booksData: {
+            ...state.booksData,
+            [id]: {
+              ...existing,
+              config: {
+                ...existing.config,
+                location,
+              } as BookConfig,
+            },
+          },
+        };
+      });
+    }
+    const progress = getBookProgress(key);
+    if (progress) {
+      // Sentence CFIs are the location authority while listening, and the
+      // relocate path that normally refreshes the section fields is
+      // suppressed. Keep the chapter index/label in sync or the lock-screen
+      // title stays on the old chapter and the next TTS start pairs a
+      // new-chapter range with a stale section index.
+      const bookData = useBookDataStore.getState().booksData[id];
+      let index = progress.index;
+      try {
+        index = get().getView(key)?.resolveCFI(location)?.index ?? index;
+      } catch {
+        // Unresolvable CFI: keep the last known section index.
+      }
+      const tocItem = bookData?.bookDoc?.toc ? findTocItemBS(bookData.bookDoc.toc, location) : null;
+      setBookProgress(key, {
+        ...progress,
+        location,
+        range: range ?? progress.range,
+        index,
+        section:
+          progress.section != null ? { ...progress.section, current: index } : progress.section,
+        sectionLabel: tocItem?.label ?? progress.sectionLabel,
+        sectionHref: tocItem?.href ?? progress.sectionHref,
+      } as BookProgress);
+
+      // Listening never goes through the relocate path, so the library
+      // percentage (and the "finished" promotion) would otherwise stay at the
+      // pre-TTS page. Resolve the CFI to foliate's location units — the same
+      // domain as relocated page info — without touching the frozen footer.
+      const view = get().getView(key);
+      const cfiProgressPromise =
+        view && viewState.isPrimary ? view.getCFIProgress?.(location) : null;
+      if (cfiProgressPromise) {
+        const token = (progressLocationTokens.get(key) ?? 0) + 1;
+        progressLocationTokens.set(key, token);
+        void cfiProgressPromise
+          .then((cfiProgress) => {
+            if (!cfiProgress) return;
+            if (progressLocationTokens.get(key) !== token) return;
+            const current = getBookProgress(key);
+            if (!current) return;
+            // A relocate (user page turn / stop restore) moved the location
+            // while this was in flight; its write wins.
+            if (current.location !== location) return;
+            const isFixedLayout = bookData?.isFixedLayout ?? false;
+            const pageInfo = isFixedLayout ? cfiProgress.section : cfiProgress.location;
+            updateLibraryReadingProgress(id, pageInfo);
+            useBookDataStore.setState((state) => {
+              const existing = state.booksData[id];
+              if (!existing) return state;
+              return {
+                booksData: {
+                  ...state.booksData,
+                  [id]: {
+                    ...existing,
+                    config: {
+                      ...existing.config,
+                      progress: [pageInfo.current + 1, pageInfo.total],
+                      location,
+                    } as BookConfig,
+                  },
+                },
+              };
+            });
+            setBookProgress(key, {
+              ...current,
+              section: cfiProgress.section,
+              pageinfo: cfiProgress.location,
+              timeinfo: cfiProgress.time,
+              fraction: cfiProgress.fraction,
+              page: pageInfo.current + 1,
+            } as BookProgress);
+          })
+          .catch(() => {
+            // Progress derivation is best-effort; the sentence location is
+            // already persisted above.
+          });
+      }
+    }
   },
   setBookmarkRibbonVisibility: (key: string, visible: boolean) =>
     set((state) => ({

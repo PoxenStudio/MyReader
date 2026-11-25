@@ -120,7 +120,7 @@ const DesktopFooterBar: React.FC<FooterBarChildProps> = ({
         label={_('Go Forward')}
         disabled={!view?.history.canGoForward}
       />
-      {progressValid && (
+      {progressValid && !viewState?.ttsEnabled && (
         <span
           title={_('Reading Progress')}
           aria-label={`${_('Reading Progress')}: ${Math.round(progressFraction * 100)}%`}
@@ -137,6 +137,7 @@ const DesktopFooterBar: React.FC<FooterBarChildProps> = ({
         max={100}
         aria-label={_('Jump to Location')}
         value={progressValue}
+        disabled={!!viewState?.ttsEnabled}
         onChange={(e) => handleProgressChange(parseInt(e.target.value, 10))}
       />
       <Button
