@@ -701,6 +701,15 @@ const FoliateViewer: React.FC<{
 
       await view.open(bookDoc);
       const viewOpenedAt = performance.now();
+      // The reader can close while view.open() is pending. Cleanup has already
+      // removed the transform listeners, but this continuation would still
+      // register the view and run view.init(), loading raw (untransformed)
+      // sections into the cached BookDoc. Drop the doomed view instead.
+      if (unmountedRef.current) {
+        view.close?.();
+        view.remove();
+        return;
+      }
       // make sure we can listen renderer events after opening book
       viewRef.current = view;
       setFoliateView(bookKey, view);

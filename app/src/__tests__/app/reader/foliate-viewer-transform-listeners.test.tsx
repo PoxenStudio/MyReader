@@ -11,7 +11,7 @@ const { readerState, openGate } = vi.hoisted(() => {
       getViewState: () => ({}),
       getViewSettings: () => ({ writingMode: 'auto' }),
       getView: () => null,
-      setView: () => {},
+      setView: vi.fn(),
       setViewInited: () => {},
       setPreviewMode: () => {},
       getProgress: () => null,
@@ -193,9 +193,11 @@ function setup() {
 
 it('removes its transformTarget listeners when the reader closes', async () => {
   openGate.pending = null;
+  readerState.setView.mockClear();
   const { live, props } = setup();
   const { unmount } = render(<FoliateViewer {...props} />);
   await waitFor(() => expect(live.size).toBeGreaterThan(0));
+  expect(readerState.setView).toHaveBeenCalled();
   unmount();
   expect(live.size).toBe(0);
 });
@@ -206,6 +208,7 @@ it('leaves no transformTarget listeners when the reader closes while the book is
     finishOpen = resolve;
   });
   openGate.started = false;
+  readerState.setView.mockClear();
   const { live, props } = setup();
   const { unmount } = render(<FoliateViewer {...props} />);
   await waitFor(() => expect(openGate.started).toBe(true));
@@ -213,4 +216,6 @@ it('leaves no transformTarget listeners when the reader closes while the book is
   finishOpen();
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(live.size).toBe(0);
+  // The doomed continuation must not register the view or run view.init().
+  expect(readerState.setView).not.toHaveBeenCalled();
 });
