@@ -367,6 +367,12 @@ export const useWebDAVSync = (bookKey: string) => {
         toApply.progress = liveConfig.progress;
         toApply.location = liveConfig.location;
         toApply.xpointer = liveConfig.xpointer;
+        // The position the reader just produced keeps its own clock and
+        // anchor: pairing it with the pulled record's ones would describe a
+        // position this device no longer holds.
+        toApply.locationUpdatedAt = liveConfig.locationUpdatedAt;
+        toApply.rawAnchor = liveConfig.rawAnchor;
+        toApply.rawAnchorCleared = liveConfig.rawAnchorCleared;
       }
       if (!wantNotes) {
         toApply.booknotes = liveConfig.booknotes;
@@ -388,7 +394,10 @@ export const useWebDAVSync = (bookKey: string) => {
       // position. The clock is the remote record's own `updatedAt`, not the
       // local apply time: this device did not produce the position, and
       // stamping `now` would out-rank genuinely newer MyBooks records.
-      if (toApply.location && toApply.location !== config.location) {
+      // Only for a remote position: when the reader moved during the pull the
+      // location above is the local one, and re-stamping it with the remote
+      // clock would both mislabel it and drop the local anchor.
+      if (!localMovedDuringPull && toApply.location && toApply.location !== config.location) {
         toApply.locationUpdatedAt = toApply.updatedAt ?? config.locationUpdatedAt ?? Date.now();
         toApply.rawAnchor = undefined;
         toApply.rawAnchorCleared = true;

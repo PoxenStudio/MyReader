@@ -1,10 +1,18 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 
+// The gesture relay flips these to "the user is driving" through
+// `getState()` (see markUserInput), so the store mock needs that shape.
+const { readerState } = vi.hoisted(() => ({
+  readerState: {
+    hoveredBookKey: null,
+    getViewState: () => ({ progressSource: 'user' }),
+    setProgressSource: vi.fn(),
+  },
+}));
 vi.mock('@/store/readerStore', () => {
-  return {
-    useReaderStore: () => ({ hoveredBookKey: null }),
-  };
+  const useReaderStore = () => readerState;
+  return { useReaderStore: Object.assign(useReaderStore, { getState: () => readerState }) };
 });
 
 vi.mock('@/store/bookDataStore', () => {

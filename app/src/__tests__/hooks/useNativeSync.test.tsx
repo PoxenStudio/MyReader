@@ -30,7 +30,6 @@ const h = vi.hoisted(() => {
       booknotes?: BookNote[];
       lastSyncedAtNotes?: number;
       pendingReadingSeconds?: Record<string, number>;
-      lastSyncedAtNotes?: number;
       lastSyncedAtConfig?: number;
       locationUpdatedAt?: number;
       rawAnchor?: unknown;
@@ -999,9 +998,11 @@ describe('useNativeSync', () => {
 
     expect(h.pushSyncMock).not.toHaveBeenCalled();
 
-    // A later local change (after identity settled) pushes normally.
+    // A later local change (after identity settled) pushes normally. A user
+    // turn is what advances the position; a source-less relocate is
+    // display-only and must not push.
     h.identitySettled = true;
-    h.state.progress = { location: 'second-loc' };
+    h.state.progress = { location: 'second-loc', source: 'user' };
     rerender();
     await flushPushDebounce();
 
