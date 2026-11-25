@@ -142,13 +142,23 @@ const FoliateViewer: React.FC<{
   const [scrollMargins, setScrollMargins] = useState({ top: 0, bottom: 0 });
   const docLoaded = useRef(false);
 
+  // The book document outlives this view: bookDataStore keeps it for the next
+  // open, so listeners left on its transformTarget would keep the closed view,
+  // its iframes and their listeners alive, one more set per open (#6710).
+  const removeTransformListenersRef = useRef<(() => void) | null>(null);
+  const unmountedRef = useRef(false);
+
   const autoScroll = useAutoScroll(bookKey, viewRef);
   const { registerSpeedListeners, overlayVisible: speedOverlayVisible } =
     useAutoScrollSpeedGesture(autoScroll);
 
   // A pending anti-flash timer must not fire setNavigating on an unmounted component.
   useEffect(() => {
+    unmountedRef.current = false;
     return () => {
+      unmountedRef.current = true;
+      removeTransformListenersRef.current?.();
+      removeTransformListenersRef.current = null;
       if (navSpinnerTimerRef.current) clearTimeout(navSpinnerTimerRef.current);
     };
   }, []);
@@ -697,7 +707,7 @@ const FoliateViewer: React.FC<{
 
       const { book } = view;
 
-      book.transformTarget?.addEventListener('load', async (event: Event) => {
+      const handleTransformLoad = async (event: Event) => {
         const { detail } = event as CustomEvent<{
           isScript: boolean;
           type: string;
@@ -723,12 +733,20 @@ const FoliateViewer: React.FC<{
             }
           });
         }
-      });
+      };
       const viewWidth = appService?.isMobile ? screen.width : window.innerWidth;
       const viewHeight = appService?.isMobile ? screen.height : window.innerHeight;
       const width = viewWidth - insets.left - insets.right;
       const height = viewHeight - insets.top - insets.bottom;
-      book.transformTarget?.addEventListener('data', getDocTransformHandler({ width, height }));
+      const handleTransformData = getDocTransformHandler({ width, height });
+      book.transformTarget?.addEventListener('load', handleTransformLoad);
+      book.transformTarget?.addEventListener('data', handleTransformData);
+      removeTransformListenersRef.current = () => {
+        book.transformTarget?.removeEventListener('load', handleTransformLoad);
+        book.transformTarget?.removeEventListener('data', handleTransformData);
+      };
+      // The reader can close while view.open() is pending; its cleanup has run.
+      if (unmountedRef.current) removeTransformListenersRef.current();
       view.renderer.setStyles?.(getStyles(viewSettings, undefined, getLoadedFonts()));
       applyTranslationStyle(viewSettings);
 
