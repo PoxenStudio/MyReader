@@ -67,7 +67,10 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   const sectionChangingTimestampRef = useRef(0);
   const previousSectionLabelRef = useRef<string | undefined>(undefined);
   const ttsControllerRef = useRef<TTSController | null>(null);
-  const isStartingTTSRef = useRef(false);
+  // Single-flight lock for TTS start/adoption. A token rather than a boolean:
+  // a start the user stopped mid-init must not clear a newer start's lock when
+  // it finally unwinds.
+  const pendingStartRef = useRef<object | null>(null);
   const ttsEpochRef = useRef(0);
   const startAbortRef = useRef<AbortController | null>(null);
   const restoreAbortRef = useRef<AbortController | null>(null);
@@ -365,10 +368,11 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
 
     let cancelled = false;
     const tryAdopt = async (): Promise<boolean> => {
-      if (cancelled || isStartingTTSRef.current) return false;
+      if (cancelled || pendingStartRef.current) return false;
       const view = getView(bookKey);
       if (!view) return false;
-      isStartingTTSRef.current = true;
+      const adoptToken = {};
+      pendingStartRef.current = adoptToken;
       try {
         const controller = session.controller;
         ttsControllerRef.current = controller;
@@ -407,7 +411,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       } catch (err) {
         console.warn('TTS session adoption failed:', err);
       } finally {
-        isStartingTTSRef.current = false;
+        if (pendingStartRef.current === adoptToken) pendingStartRef.current = null;
       }
       return true;
     };
@@ -482,7 +486,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         sectionChangingTimestampRef.current = Date.now();
         followingTTSLocationRef.current = true;
         if (!preview) setProgressLocation(bookKey, cfi, null);
-        markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
+        markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi, preview });
         view.goTo?.(cfi);
         return;
       }
@@ -507,7 +511,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       // non-primary iframe would mix iframe-local rects with paginator coords.
       if (!isPrimary) {
         if (!isRangeVisibleInContent(view.renderer, content, range)) {
-          markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
+          markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi, preview });
           view.goTo?.(cfi);
         }
         return;
@@ -515,7 +519,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
       if (!view.renderer.scrolled) {
         // scrollToAnchor relocates with reason 'navigation'/'scroll', which the
         // anchor-only suppression in FoliateViewer does not cover.
-        markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
+        markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi, preview });
         view.renderer.scrollToAnchor?.(range);
       } else {
         const rect = range.getBoundingClientRect();
@@ -532,7 +536,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
           rangeBottom > end - footerScrollOverlap - scrollingOverlap ||
           rangeTop < start + headerScrollOverlap + scrollingOverlap;
         if (outOfView) {
-          markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi });
+          markTtsNavigation(bookKey, { index: ttsSectionIndex, cfi, preview });
           view.renderer.scrollToAnchor?.(range);
         }
       }
@@ -798,6 +802,11 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
     async (bookKey: string) => {
       const ttsController = ttsControllerRef.current;
       const stopEpoch = ++ttsEpochRef.current;
+      // Release the start lock so a stop during a slow client init lets the
+      // user start again immediately. The interrupted start keeps its own
+      // epoch/ref checks, so it cannot resurrect the session — and because the
+      // lock is a token, its unwind no longer clears a newer start's lock.
+      pendingStartRef.current = null;
       startAbortRef.current?.abort();
       startAbortRef.current = null;
       // Reset all UI/session state up front — including the TTS toggle
@@ -855,10 +864,26 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
               .catch((error) => console.warn('TTS shutdown failed:', error))
           : Promise.resolve(),
         Promise.resolve()
-          .then(() => ttsMediaBridge.unbind())
+          .then(() => {
+            // A start that ran while this shutdown was in flight already owns
+            // the media session; unbinding here would silence its lock-screen
+            // controls.
+            if (ttsEpochRef.current === stopEpoch) ttsMediaBridge.unbind();
+          })
           .catch(() => {}),
       ]);
-      ttsSessionManager.release(getBookHashFromKey(bookKey));
+      // Same for the session slot: releasing unconditionally would deregister
+      // the newer controller (its state events, sleep timer, detach-on-close)
+      // while its audio keeps playing. A restart that never got as far as
+      // claiming leaves our controller in the slot, so release by identity as
+      // well as by epoch.
+      const bookHash = getBookHashFromKey(bookKey);
+      const ownsSlot = ttsController
+        ? ttsSessionManager.getSessionByHash(bookHash)?.controller === ttsController
+        : false;
+      if (ttsEpochRef.current === stopEpoch || ownsSlot) {
+        ttsSessionManager.release(bookHash);
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [appService],
@@ -871,8 +896,9 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
     // Guard against concurrent starts (e.g. rapid double-clicks on the TTS
     // icon). Without this, both invocations race past the `await`s below and
     // end up creating two TTSController instances that speak simultaneously.
-    if (isStartingTTSRef.current) return;
-    isStartingTTSRef.current = true;
+    if (pendingStartRef.current) return;
+    const startToken = {};
+    pendingStartRef.current = startToken;
     const sessionEpoch = ++ttsEpochRef.current;
     // A pending stop-restore would fight the new session for progress.
     restoreAbortRef.current?.abort();
@@ -1061,7 +1087,7 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
         console.error(error);
       }
     } finally {
-      isStartingTTSRef.current = false;
+      if (pendingStartRef.current === startToken) pendingStartRef.current = null;
     }
   };
 

@@ -4,6 +4,7 @@ import {
   findContentByIndex,
   isChunkDocument,
   isContentVisible,
+  isPreviewSettle,
   isRangeVisibleInContent,
   markTtsNavigation,
   relocateTargetOf,
@@ -102,20 +103,29 @@ describe('ttsContent', () => {
     markTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:10)' });
     // A user page turn inside the time window must keep writing progress:
     // different section, or a start position past the requested target.
-    expect(consumeTtsNavigation('book-guard', { index: 5, cfi: 'epubcfi(/6/12!/4/2:0)' })).toBe(
-      false,
-    );
-    expect(consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:40)' })).toBe(
-      false,
-    );
+    expect(
+      consumeTtsNavigation('book-guard', { index: 5, cfi: 'epubcfi(/6/12!/4/2:0)' }),
+    ).toBeNull();
+    expect(
+      consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:40)' }),
+    ).toBeNull();
     // The TTS relocate lands on the page that contains the target.
-    expect(consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:2)' })).toBe(
-      true,
-    );
+    expect(consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:2)' })).toEqual({
+      index: 3,
+      cfi: 'epubcfi(/6/8!/4/2:10)',
+      preview: undefined,
+    });
     // One-shot: the guard must not swallow the next user relocate.
-    expect(consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:2)' })).toBe(
-      false,
-    );
+    expect(
+      consumeTtsNavigation('book-guard', { index: 3, cfi: 'epubcfi(/6/8!/4/2:2)' }),
+    ).toBeNull();
+  });
+
+  test('reports a preview guard so its page data is not committed', () => {
+    markTtsNavigation('book-preview', { index: 2, cfi: 'cfi-p', preview: true });
+    expect(consumeTtsNavigation('book-preview', { index: 2, cfi: 'cfi-p' })).toMatchObject({
+      preview: true,
+    });
   });
 
   test('reads the spine index from view-level relocate details', () => {
@@ -137,6 +147,18 @@ describe('ttsContent', () => {
     vi.setSystemTime(new Date(0));
     markTtsNavigation('book-expired', { index: 2 });
     vi.setSystemTime(new Date(6000));
-    expect(consumeTtsNavigation('book-expired', { index: 2 })).toBe(false);
+    expect(consumeTtsNavigation('book-expired', { index: 2 })).toBeNull();
+  });
+
+  test('swallows only the settle relocate of a preview page flip', () => {
+    const pending = { at: 1000 };
+    // The debounced settle of the same flip.
+    expect(isPreviewSettle(pending, 'container-scroll', 1300)).toBe(true);
+    // A user page turn is not a settle.
+    expect(isPreviewSettle(pending, 'page', 1300)).toBe(false);
+    expect(isPreviewSettle(pending, undefined, 1300)).toBe(false);
+    // Stale previews must not swallow later settles.
+    expect(isPreviewSettle(pending, 'container-scroll', 5000)).toBe(false);
+    expect(isPreviewSettle(null, 'container-scroll', 1300)).toBe(false);
   });
 });

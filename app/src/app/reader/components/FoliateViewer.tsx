@@ -63,7 +63,7 @@ import { getMaxInlineSize } from '@/utils/config';
 import { getDirFromUILanguage } from '@/utils/rtl';
 import { isTauriAppPlatform } from '@/services/environment';
 import { transformBookContent } from '@/libs/bookContentTransform';
-import { consumeTtsNavigation, relocateTargetOf } from '@/services/tts/ttsContent';
+import { consumeTtsNavigation, isPreviewSettle, relocateTargetOf } from '@/services/tts/ttsContent';
 import { lockScreenOrientation, setTextSelectionSuppressed } from '@/utils/bridge';
 import { useTextTranslation } from '../hooks/useTextTranslation';
 import { manageSyntaxHighlighting } from '@/utils/highlightjs';
@@ -116,6 +116,7 @@ const FoliateViewer: React.FC<{
   const setFoliateView = useReaderStore((s) => s.setView);
   const setViewInited = useReaderStore((s) => s.setViewInited);
   const setProgress = useReaderStore((s) => s.setProgress);
+  const setProgressPageInfo = useReaderStore((s) => s.setProgressPageInfo);
   const setPreviewMode = useReaderStore((s) => s.setPreviewMode);
   const getViewState = useReaderStore((s) => s.getViewState);
   const getProgress = useReaderStore((s) => s.getProgress);
@@ -147,6 +148,10 @@ const FoliateViewer: React.FC<{
   // Set when a navigation-ish renderer relocate arrives before the rAF commit;
   // an anchor commit that swallowed it may then drop a leftover TTS guard.
   const sawNavRelocateRef = useRef(false);
+  // A preview seek's page flip settles with a debounced 'container-scroll'
+  // relocate after the immediate (consumed) navigation one; swallow that
+  // settle too, or the preview position becomes real progress.
+  const pendingPreviewSettleRef = useRef<{ at: number } | null>(null);
 
   const autoScroll = useAutoScroll(bookKey, viewRef);
   const { registerSpeedListeners, overlayVisible: speedOverlayVisible } =
@@ -214,7 +219,35 @@ const FoliateViewer: React.FC<{
     // CFI with the page-start position. Only the relocate that matches the
     // requested target is consumed; a user page turn still commits progress.
     // Anchor relocates are reflows and belong to the anchor/skip handling.
-    if (reason !== 'anchor' && consumeTtsNavigation(bookKey, relocateTargetOf(detail))) return;
+    // Consume before the location check below: a leftover guard would
+    // otherwise swallow a later user move.
+    const target = relocateTargetOf(detail);
+    const consumed = reason !== 'anchor' ? consumeTtsNavigation(bookKey, target) : null;
+    // A book format without section progress has no `location`; nothing to
+    // commit (and the old code never reached the destructure on the early
+    // return paths).
+    if (!detail.location) return;
+    const atEnd = viewRef.current?.renderer.atEnd || false;
+    const { current, next, total } = detail.location as PageInfo;
+    const currentPage = atEnd && total > 0 ? total - 1 : current;
+    const pageInfo = { current: currentPage, next, total };
+    if (consumed) {
+      // A scrubber preview only previews the position: it must not count as
+      // reading (or dragging to the end would promote the book to "finished").
+      // Its page flip still settles with a debounced 'container-scroll'
+      // relocate later; remember the target so that settle is swallowed too.
+      if (consumed.preview) {
+        pendingPreviewSettleRef.current = { at: Date.now() };
+      }
+      // The sentence CFI stays the location authority, but this relocate was
+      // measured on the rendered document like a normal page turn: take its
+      // page/section data so page info and the library percent keep advancing
+      // while listening, without re-deriving progress from a raw section copy.
+      if (getViewState(bookKey)?.ttsEnabled && !consumed.preview && total > 0) {
+        setProgressPageInfo(bookKey, detail.section, pageInfo, detail.time, detail.fraction);
+      }
+      return;
+    }
     if (reason === 'anchor') {
       // Resizing / re-pagination re-anchors to the same text position; its
       // page-start CFI must not become the synced progress. While listening,
@@ -232,10 +265,12 @@ const FoliateViewer: React.FC<{
         return;
       }
     }
-    const atEnd = viewRef.current?.renderer.atEnd || false;
-    const { current, next, total } = detail.location as PageInfo;
-    const currentPage = atEnd && total > 0 ? total - 1 : current;
-    const pageInfo = { current: currentPage, next, total };
+    const previewSettle = pendingPreviewSettleRef.current;
+    if (isPreviewSettle(previewSettle, reason)) {
+      // The debounced settle of a preview page flip — not a reading position.
+      pendingPreviewSettleRef.current = null;
+      return;
+    }
     setProgress(
       bookKey,
       detail.cfi,
@@ -247,7 +282,7 @@ const FoliateViewer: React.FC<{
       detail.range,
       detail.fraction,
     );
-  }, [bookKey, getViewState, setProgress]);
+  }, [bookKey, getViewState, setProgress, setProgressPageInfo]);
 
   const progressRelocateHandler = (event: Event) => {
     // Always stash the latest detail; if another rAF is already pending
