@@ -447,7 +447,9 @@ const FoliateViewer: React.FC<{
   const skipToReadingPosition = useCallback(() => {
     const view = getView(bookKey);
     const progress = getProgress(bookKey);
-    if (view && progress) {
+    // The range is dropped when a TTS section change moves the position
+    // without one; scrollToAnchor needs a real range.
+    if (view && progress?.range) {
       view.renderer.scrollToAnchor?.(progress.range);
     }
   }, [getView, getProgress, bookKey]);

@@ -665,7 +665,11 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       setBookProgress(key, {
         ...progress,
         location,
-        range: range ?? progress.range,
+        // A moved position with no range (the cross-section call) must not
+        // keep the previous section's range: the push path would build an
+        // anchor from that stale window and emit a wrong `approx` position.
+        // The next sentence carries a range again.
+        range: range ?? (progress.location === location ? progress.range : undefined),
         index,
         section:
           progress.section != null ? { ...progress.section, current: index } : progress.section,

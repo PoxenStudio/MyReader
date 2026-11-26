@@ -381,6 +381,42 @@ describe('readerStore', () => {
       clearBookProgress('book-1');
     });
 
+    test('drops the previous section range when a move comes without one', () => {
+      seedViewState('book-1');
+      const oldRange = new Range();
+      setBookProgress('book-1', {
+        location: 'cfi-chapter-2',
+        range: oldRange,
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 1, total: 5 },
+        index: 1,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'cfi-chapter-3', null);
+
+      // Keeping the old range would let the push path build an anchor from a
+      // window that belongs to the previous section.
+      expect(getBookProgress('book-1')?.range).toBeUndefined();
+      clearBookProgress('book-1');
+    });
+
+    test('keeps the range when the same position lands again without one', () => {
+      seedViewState('book-1');
+      const range = new Range();
+      setBookProgress('book-1', {
+        location: 'cfi-chapter-2',
+        range,
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 1, total: 5 },
+        index: 1,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'cfi-chapter-2', null);
+
+      expect(getBookProgress('book-1')?.range).toBe(range);
+      clearBookProgress('book-1');
+    });
+
     test('refreshes the section index and label from the spoken CFI', () => {
       seedViewState('book-1');
       useReaderStore.getState().setView('book-1', {
