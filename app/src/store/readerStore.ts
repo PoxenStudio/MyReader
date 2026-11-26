@@ -623,6 +623,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       useBookDataStore.setState((state) => {
         const existing = state.booksData[id];
         if (!existing) return state;
+        if (existing.config?.location === location) return state;
         return {
           booksData: {
             ...state.booksData,
@@ -631,6 +632,15 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
               config: {
                 ...existing.config,
                 location,
+                // Listening moves the reading position just like a page turn:
+                // advance the clock (MyBooks/WebDAV compare it against the
+                // last synced value to decide what to push) and drop the
+                // anchor that described the previous spot — the push path
+                // rebuilds one for this position instead of pairing a stale
+                // anchor with a newer CFI.
+                locationUpdatedAt: Date.now(),
+                rawAnchor: undefined,
+                rawAnchorCleared: true,
               } as BookConfig,
             },
           },
@@ -661,6 +671,9 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
           progress.section != null ? { ...progress.section, current: index } : progress.section,
         sectionLabel: tocItem?.label ?? progress.sectionLabel,
         sectionHref: tocItem?.href ?? progress.sectionHref,
+        // The sync hooks only push positions a reader actually produced;
+        // while listening that is the sentence follow, not a restore/reflow.
+        source: 'tts',
       } as BookProgress);
 
       // Listening never goes through the relocate path, so the library

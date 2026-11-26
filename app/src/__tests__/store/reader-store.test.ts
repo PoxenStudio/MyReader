@@ -313,6 +313,74 @@ describe('readerStore', () => {
       clearBookProgress('book-1');
     });
 
+    test('stamps the location clock and drops a stale anchor so the position can sync', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: {
+          [id]: {
+            config: {
+              location: 'old-cfi',
+              locationUpdatedAt: 1000,
+              rawAnchor: { v: 2, index: 0, rawOffset: 1, rawFraction: 0.1 },
+              rawAnchorCleared: false,
+            },
+          },
+        },
+      } as never);
+      setBookProgress('book-1', {
+        location: 'old-cfi',
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 0, total: 5 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'new-cfi', null);
+
+      const config = (
+        useBookDataStore.getState().booksData[id] as {
+          config: {
+            location: string;
+            locationUpdatedAt?: number;
+            rawAnchor?: unknown;
+            rawAnchorCleared?: boolean;
+          };
+        }
+      ).config;
+      expect(config.location).toBe('new-cfi');
+      // A listening position is a real reading position: the sync hooks only
+      // push configs whose clock advanced past the last synced value.
+      expect(config.locationUpdatedAt).toBeGreaterThan(1000);
+      // The old anchor described the previous spot; the push path rebuilds one.
+      expect(config.rawAnchor).toBeUndefined();
+      expect(config.rawAnchorCleared).toBe(true);
+      // Source-gated sync effects treat only user/tts positions as real.
+      expect(getBookProgress('book-1')?.source).toBe('tts');
+      clearBookProgress('book-1');
+    });
+
+    test('does not advance the location clock when the sentence CFI did not move', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: { [id]: { config: { location: 'same-cfi', locationUpdatedAt: 1234 } } },
+      } as never);
+      setBookProgress('book-1', {
+        location: 'same-cfi',
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 0, total: 5 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'same-cfi', null);
+
+      const config = (
+        useBookDataStore.getState().booksData[id] as { config: { locationUpdatedAt?: number } }
+      ).config;
+      expect(config.locationUpdatedAt).toBe(1234);
+      clearBookProgress('book-1');
+    });
+
     test('refreshes the section index and label from the spoken CFI', () => {
       seedViewState('book-1');
       useReaderStore.getState().setView('book-1', {

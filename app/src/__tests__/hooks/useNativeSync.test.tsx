@@ -1670,6 +1670,35 @@ describe('useNativeSync', () => {
     expect(payload.configs?.[0]?.updated_at).toBe(3000);
   });
 
+  test('pushes a TTS sentence follow as a config change', async () => {
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+    const { rerender } = renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    await flushPushDebounce();
+    h.pushSyncMock.mockClear();
+
+    // `setProgressLocation` advances the clock and tags the record 'tts'.
+    // A listening position is a real position: configs must be pushed even
+    // though no page turn happened.
+    const spokenLocation = 'epubcfi(/6/4!/4/2/1:9)';
+    h.state.config = {
+      location: spokenLocation,
+      updatedAt: 3000,
+      locationUpdatedAt: 5000,
+      lastSyncedAtConfig: 3000,
+    };
+    h.state.progress = { location: spokenLocation, source: 'tts' };
+    rerender();
+    await flushMicrotasks();
+    await flushPushDebounce();
+
+    const payload = h.pushSyncMock.mock.calls.at(-1)![0] as {
+      configs?: { location: string; updated_at: number }[];
+    };
+    expect(payload.configs?.[0]?.location).toBe(spokenLocation);
+    expect(payload.configs?.[0]?.updated_at).toBe(5000);
+  });
+
   test('an unverified landing is not promoted to a user position and is reverted', async () => {
     h.pullSyncMock.mockResolvedValue({
       configs: [
