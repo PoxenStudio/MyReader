@@ -72,9 +72,11 @@ vi.mock('@/store/readerStore', () => {
     hoveredBookKey: null,
     bookKeys: ['book-1'],
     getView: () => mockView,
+    getViewState: () => ({ ttsEnabled: false }),
     getProgress: () => mockProgress,
     getViewSettings: () => mockViewSettings,
     setViewSettings: vi.fn(),
+    setProgressLocation: vi.fn(),
     setTTSEnabled: vi.fn(),
   };
   // Production code uses per-field selectors; mock must apply them.
@@ -137,6 +139,7 @@ vi.mock('@/services/tts', () => ({
       setLang: vi.fn(),
       setRate: vi.fn(),
       setSentenceGap: vi.fn(),
+      setParagraphGap: vi.fn(),
       supportsGapControl: vi.fn().mockReturnValue(false),
       setVoice: vi.fn(),
       setTargetLang: vi.fn(),
@@ -155,6 +158,8 @@ vi.mock('@/services/tts', () => ({
       getPlaybackInfo: vi.fn().mockReturnValue(null),
       seekToTime: vi.fn().mockResolvedValue(undefined),
       detachView: vi.fn(),
+      setDocumentProvider: vi.fn(),
+      anchorRangeInTtsDoc: vi.fn((range: Range) => range),
       attachView: vi.fn().mockResolvedValue(undefined),
       getSpeakingLang: vi.fn().mockReturnValue('en'),
       terminated: false,
@@ -237,6 +242,7 @@ vi.mock('@/utils/ttsTime', () => ({
 
 // Imports must come AFTER vi.mock calls so they pick up the mocked modules.
 import { useTTSControl } from '@/app/reader/hooks/useTTSControl';
+import { consumeTtsNavigation } from '@/services/tts/ttsContent';
 import { ttsMediaBridge } from '@/services/tts/ttsMediaBridge';
 import { eventDispatcher } from '@/utils/event';
 import { useReaderStore } from '@/store/readerStore';
@@ -287,6 +293,113 @@ describe('useTTSControl concurrent tts-speak events', () => {
       while (pendingInitResolvers.length > 0) pendingInitResolvers.shift()!();
       await Promise.all([p1, p2]);
     });
+  });
+});
+
+describe('useTTSControl stop during start', () => {
+  beforeEach(() => {
+    ttsControllerInstances.length = 0;
+    pendingInitResolvers.length = 0;
+    mockSessionManager.release.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('tears down the interrupted controller and never speaks', async () => {
+    render(<Harness />);
+
+    let speakDone: Promise<unknown> | undefined;
+    await act(async () => {
+      speakDone = eventDispatcher.dispatch('tts-speak', { bookKey: 'book-1' });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(ttsControllerInstances.length).toBe(1);
+    });
+
+    await act(async () => {
+      await eventDispatcher.dispatch('tts-stop', { bookKey: 'book-1' });
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+
+    await act(async () => {
+      while (pendingInitResolvers.length > 0) pendingInitResolvers.shift()!();
+      await speakDone;
+    });
+
+    const controller = ttsControllerInstances[0] as {
+      shutdown: ReturnType<typeof vi.fn>;
+      speak: ReturnType<typeof vi.fn>;
+    };
+    // The stop owns the shutdown; the interrupted start must not resurrect
+    // the session or tear the controller down a second time.
+    expect(controller.shutdown).toHaveBeenCalledTimes(1);
+    expect(controller.speak).not.toHaveBeenCalled();
+    expect(mockSessionManager.release).toHaveBeenCalled();
+  });
+});
+
+describe('useTTSControl restart while the interrupted stop is unwinding', () => {
+  beforeEach(() => {
+    ttsControllerInstances.length = 0;
+    pendingInitResolvers.length = 0;
+    mockSessionManager.release.mockClear();
+    mockSessionManager.claim.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('does not release the session the new start claimed', async () => {
+    render(<Harness />);
+
+    await act(async () => {
+      void eventDispatcher.dispatch('tts-speak', { bookKey: 'book-1' });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(ttsControllerInstances.length).toBe(1);
+    });
+
+    const first = ttsControllerInstances[0] as {
+      shutdown: ReturnType<typeof vi.fn>;
+      speak: ReturnType<typeof vi.fn>;
+    };
+    let resolveShutdown!: () => void;
+    first.shutdown.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveShutdown = resolve;
+        }),
+    );
+
+    // Stop while the client init is still in flight: the start lock is
+    // released up front, so the user can start again immediately.
+    await act(async () => {
+      void eventDispatcher.dispatch('tts-stop', { bookKey: 'book-1' });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+    expect(resolveShutdown).toBeTypeOf('function');
+
+    await act(async () => {
+      void eventDispatcher.dispatch('tts-speak', { bookKey: 'book-1' });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(ttsControllerInstances.length).toBe(2);
+    });
+    const second = ttsControllerInstances[1] as { speak: ReturnType<typeof vi.fn> };
+    mockSessionManager.release.mockClear();
+
+    // The interrupted shutdown finally resolves; both inits settle after it.
+    await act(async () => {
+      resolveShutdown();
+      while (pendingInitResolvers.length > 0) pendingInitResolvers.shift()!();
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    });
+
+    // The late stop tail must not deregister the newer session (its state
+    // events, sleep timer, and detach-on-close all live in that slot), and
+    // the restart must keep speaking.
+    expect(mockSessionManager.release).not.toHaveBeenCalled();
+    expect(second.speak).toHaveBeenCalled();
   });
 });
 
@@ -492,6 +605,9 @@ describe('useTTSControl handleHighlightMark cross-section navigation', () => {
 
     expect(mockView.goTo).toHaveBeenCalledWith('epubcfi(/6/8!/4/2)');
     expect(mockView.renderer.scrollToAnchor).not.toHaveBeenCalled();
+    // The relocate this goTo triggers must be treated as TTS-driven so the
+    // page-start CFI does not overwrite the spoken location.
+    expect(consumeTtsNavigation('book-1', { index: 1, cfi: 'epubcfi(/6/8!/4/2)' })).not.toBeNull();
   });
 
   it('keeps in-section behaviour: scrolls via renderer without navigating', async () => {
@@ -505,6 +621,9 @@ describe('useTTSControl handleHighlightMark cross-section navigation', () => {
 
     expect(mockView.renderer.scrollToAnchor).toHaveBeenCalledTimes(1);
     expect(mockView.goTo).not.toHaveBeenCalled();
+    // Follow-scrolling relocates as 'navigation'/'scroll', not 'anchor'; the
+    // guard is what keeps its page-start CFI from overwriting the sentence.
+    expect(consumeTtsNavigation('book-1', { index: 0, cfi: 'epubcfi(/6/4!/4/2)' })).not.toBeNull();
   });
 
   it('does not throw when the renderer has no loaded contents (READEST-19)', async () => {
@@ -653,6 +772,8 @@ describe('useTTSControl background session lifecycle', () => {
       isViewAttached: false,
       shutdown: vi.fn(),
       detachView: vi.fn(),
+      setDocumentProvider: vi.fn(),
+      anchorRangeInTtsDoc: vi.fn((range: Range) => range),
       attachView: vi.fn().mockResolvedValue(undefined),
       getSpeakingLang: vi.fn().mockReturnValue('en'),
       getCurrentHighlightCfi: vi.fn().mockReturnValue(null),

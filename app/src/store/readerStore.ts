@@ -21,7 +21,13 @@ import {
 import type { FileSystem } from '@/types/system';
 import { isFeedBookUrl, parseFeedBookUrl } from '@/services/rss/feedBookUrl';
 import { openFeedBookDoc } from '@/services/rss/feedReader';
-import { BOOK_NAV_VERSION, computeBookNav, hydrateBookNav, updateToc } from '@/services/nav';
+import {
+  BOOK_NAV_VERSION,
+  computeBookNav,
+  findTocItemBS,
+  hydrateBookNav,
+  updateToc,
+} from '@/services/nav';
 import {
   formatAuthors,
   formatTitle,
@@ -57,6 +63,23 @@ const scheduleReadingStatus = (hash: string) => {
       }
     }, READING_STATUS_DELAY_MS),
   );
+};
+
+const updateLibraryReadingProgress = (id: string, pageInfo: PageInfo) => {
+  const progress: [number, number] = [pageInfo.current + 1, pageInfo.total];
+  const progressPercentage = Math.round((progress[0] / progress[1]) * 100);
+  // Lightweight library update — O(1) lookup, no array copy, no refreshGroups
+  const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
+  const existingBook = getBookByHash(id);
+  if (!existingBook) return;
+  let newReadingStatus = existingBook.readingStatus;
+  if (existingBook.readingStatus === 'unread') {
+    scheduleReadingStatus(id);
+  }
+  if (progressPercentage >= 100 && existingBook.readingStatus !== 'finished') {
+    newReadingStatus = 'finished';
+  }
+  updateBookProgress(id, progress, newReadingStatus);
 };
 
 const cancelReadingStatus = (hash: string) => {
@@ -121,6 +144,14 @@ interface ReaderStore {
     pageinfo: PageInfo,
     timeinfo: TimeInfo,
     range: Range,
+    fraction: number,
+  ) => void;
+  setProgressLocation: (key: string, location: string, range?: Range | null) => void;
+  setProgressPageInfo: (
+    key: string,
+    section: PageInfo,
+    pageinfo: PageInfo,
+    timeinfo: TimeInfo,
     fraction: number,
   ) => void;
   getProgress: (key: string) => BookProgress | null;
@@ -503,21 +534,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
 
     const pageInfo = bookData.isFixedLayout ? section : pageinfo;
     const progress: [number, number] = [pageInfo.current + 1, pageInfo.total];
-    const progressPercentage = Math.round((progress[0] / progress[1]) * 100);
-
-    // Lightweight library update — O(1) lookup, no array copy, no refreshGroups
-    const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
-    const existingBook = getBookByHash(id);
-    if (existingBook) {
-      let newReadingStatus = existingBook.readingStatus;
-      if (existingBook.readingStatus === 'unread') {
-        scheduleReadingStatus(id);
-      }
-      if (progressPercentage >= 100 && existingBook.readingStatus !== 'finished') {
-        newReadingStatus = 'finished';
-      }
-      updateBookProgress(id, progress, newReadingStatus);
-    }
+    updateLibraryReadingProgress(id, pageInfo);
 
     // Only the primary view persists progress into the shared bookData
     // config — secondary views in a parallel layout shouldn't overwrite
@@ -559,6 +576,113 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       fraction,
       index: section.current,
       range,
+      page: pageInfo.current + 1,
+    } as BookProgress);
+  },
+  // TTS sentence marks are the progress authority while listening; layout
+  // reflows must not overwrite the synced location with a page-start CFI.
+  setProgressLocation: (key: string, location: string, range?: Range | null) => {
+    const id = getBookHash(key);
+    const viewState = get().viewStates[key];
+    if (!viewState) return;
+    if (viewState.isPrimary) {
+      useBookDataStore.setState((state) => {
+        const existing = state.booksData[id];
+        if (!existing) return state;
+        return {
+          booksData: {
+            ...state.booksData,
+            [id]: {
+              ...existing,
+              config: {
+                ...existing.config,
+                location,
+              } as BookConfig,
+            },
+          },
+        };
+      });
+    }
+    const progress = getBookProgress(key);
+    if (progress) {
+      // Sentence CFIs are the location authority while listening, and the
+      // relocate path that normally refreshes the section fields is
+      // suppressed. Keep the chapter index/label in sync or the lock-screen
+      // title stays on the old chapter and the next TTS start pairs a
+      // new-chapter range with a stale section index.
+      const bookData = useBookDataStore.getState().booksData[id];
+      let index = progress.index;
+      try {
+        index = get().getView(key)?.resolveCFI(location)?.index ?? index;
+      } catch {
+        // Unresolvable CFI: keep the last known section index.
+      }
+      const tocItem = bookData?.bookDoc?.toc ? findTocItemBS(bookData.bookDoc.toc, location) : null;
+      setBookProgress(key, {
+        ...progress,
+        location,
+        range: range ?? progress.range,
+        index,
+        section:
+          progress.section != null ? { ...progress.section, current: index } : progress.section,
+        sectionLabel: tocItem?.label ?? progress.sectionLabel,
+        sectionHref: tocItem?.href ?? progress.sectionHref,
+      } as BookProgress);
+    }
+  },
+  // Listening keeps the sentence CFI as the location authority, so the page
+  // fields come from the TTS follow navigation's own relocate instead. That
+  // relocate is measured on the rendered (transformed) document — the same
+  // basis as a normal page turn — so page info and the library percent stay
+  // current without re-deriving progress from foliate's raw section copy
+  // (`getCFIProgress` parses a fresh section DOM per cold chapter, ~100–300ms,
+  // and its CFI paths do not line up with the transformed text).
+  setProgressPageInfo: (
+    key: string,
+    section: PageInfo,
+    pageinfo: PageInfo,
+    timeinfo: TimeInfo,
+    fraction: number,
+  ) => {
+    const id = getBookHash(key);
+    const viewState = get().viewStates[key];
+    if (!viewState) return;
+    const progress = getBookProgress(key);
+    if (!progress) return;
+    const bookData = useBookDataStore.getState().booksData[id];
+    const pageInfo = bookData?.isFixedLayout ? section : pageinfo;
+    // A relocate with no page total would make the percentage divide by zero
+    // and wrongly promote the book to "finished".
+    if (!pageInfo || !(pageInfo.total > 0)) return;
+    updateLibraryReadingProgress(id, pageInfo);
+
+    // Mirror setProgress: only the primary view persists into the shared
+    // bookData config.
+    if (viewState.isPrimary) {
+      useBookDataStore.setState((state) => {
+        const existing = state.booksData[id];
+        if (!existing) return state;
+        return {
+          booksData: {
+            ...state.booksData,
+            [id]: {
+              ...existing,
+              config: {
+                ...existing.config,
+                progress: [pageInfo.current + 1, pageInfo.total],
+              } as BookConfig,
+            },
+          },
+        };
+      });
+    }
+
+    setBookProgress(key, {
+      ...progress,
+      section,
+      pageinfo,
+      timeinfo,
+      fraction,
       page: pageInfo.current + 1,
     } as BookProgress);
   },

@@ -40,7 +40,7 @@ vi.mock('@/utils/misc', () => ({
 }));
 
 // These are transitive imports needed by readerStore
-vi.mock('@/services/nav', () => ({ updateToc: vi.fn() }));
+vi.mock('@/services/nav', () => ({ updateToc: vi.fn(), findTocItemBS: vi.fn(() => null) }));
 vi.mock('@/utils/book', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/utils/book')>();
   return {
@@ -74,6 +74,11 @@ vi.mock('@/services/rss/feedReader', () => ({
 
 import { useReaderStore } from '@/store/readerStore';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { useLibraryStore } from '@/store/libraryStore';
+import { clearBookProgress, getBookProgress, setBookProgress } from '@/store/readerProgressStore';
+import { findTocItemBS } from '@/services/nav';
+import { getBookHash } from '@/utils/book';
+import type { BookProgress } from '@/types/book';
 
 /**
  * Helper to seed a minimal ViewState in the store for a given key.
@@ -270,6 +275,234 @@ describe('readerStore', () => {
 
       useReaderStore.getState().setTTSEnabled('book-1', false);
       expect(useReaderStore.getState().viewStates['book-1']!.ttsEnabled).toBe(false);
+    });
+  });
+
+  describe('setProgressLocation', () => {
+    test('updates location and range without touching page info', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: {
+          [id]: { config: { location: 'old-cfi' } },
+        },
+      } as never);
+      const oldRange = new Range();
+      const range = new Range();
+      setBookProgress('book-1', {
+        location: 'old-cfi',
+        range: oldRange,
+        pageinfo: { current: 2, total: 10 },
+        section: { current: 0, total: 5 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'new-cfi', range);
+
+      expect(
+        (useBookDataStore.getState().booksData[id] as { config: { location: string } }).config
+          .location,
+      ).toBe('new-cfi');
+      expect(getBookProgress('book-1')).toMatchObject({
+        location: 'new-cfi',
+        range,
+        pageinfo: { current: 2, total: 10 },
+      });
+      clearBookProgress('book-1');
+    });
+
+    test('refreshes the section index and label from the spoken CFI', () => {
+      seedViewState('book-1');
+      useReaderStore.getState().setView('book-1', {
+        resolveCFI: vi.fn(() => ({ index: 4 })),
+      } as unknown as FoliateView);
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: {
+          [id]: {
+            config: { location: 'old-cfi' },
+            bookDoc: { toc: [{ id: 0, label: 'Chapter 5', href: 'c5.xhtml', index: 4 }] },
+          },
+        },
+      } as never);
+      vi.mocked(findTocItemBS).mockReturnValue({
+        id: 0,
+        label: 'Chapter 5',
+        href: 'c5.xhtml',
+        index: 4,
+      });
+      setBookProgress('book-1', {
+        location: 'old-cfi',
+        section: { current: 0, total: 9 },
+        index: 0,
+        sectionLabel: 'Chapter 1',
+        sectionHref: 'c1.xhtml',
+        pageinfo: { current: 2, total: 10 },
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'epubcfi(/6/10!/4/2/2:5)', null);
+
+      expect(getBookProgress('book-1')).toMatchObject({
+        index: 4,
+        section: { current: 4, total: 9 },
+        sectionLabel: 'Chapter 5',
+        sectionHref: 'c5.xhtml',
+        pageinfo: { current: 2, total: 10 },
+      });
+      expect(findTocItemBS).toHaveBeenCalledWith(expect.any(Array), 'epubcfi(/6/10!/4/2/2:5)');
+      clearBookProgress('book-1');
+    });
+  });
+
+  describe('setProgressPageInfo', () => {
+    test('updates page info and library progress without moving the sentence location', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: { [id]: { config: { location: 'sentence-cfi', progress: [2, 10] } } },
+      } as never);
+      const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
+      vi.mocked(getBookByHash).mockReturnValue({ readingStatus: 'reading' } as never);
+      vi.mocked(updateBookProgress).mockClear();
+      const range = new Range();
+      setBookProgress('book-1', {
+        location: 'sentence-cfi',
+        range,
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 2, total: 9 },
+        index: 2,
+      } as unknown as BookProgress);
+
+      useReaderStore
+        .getState()
+        .setProgressPageInfo(
+          'book-1',
+          { current: 3, total: 9 },
+          { current: 4, next: 5, total: 100 },
+          { section: 20, total: 200 } as never,
+          0.42,
+        );
+
+      // The sentence CFI stays the location authority; only the page-derived
+      // fields move.
+      expect(getBookProgress('book-1')).toMatchObject({
+        location: 'sentence-cfi',
+        range,
+        section: { current: 3, total: 9 },
+        pageinfo: { current: 4, next: 5, total: 100 },
+        fraction: 0.42,
+        page: 5,
+        index: 2,
+      });
+      expect(updateBookProgress).toHaveBeenCalledWith(id, [5, 100], 'reading');
+      expect(
+        (
+          useBookDataStore.getState().booksData[id] as {
+            config: { location: string; progress: number[] };
+          }
+        ).config,
+      ).toMatchObject({ location: 'sentence-cfi', progress: [5, 100] });
+      clearBookProgress('book-1');
+    });
+
+    test('uses the section pages for fixed-layout books', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: { [id]: { config: {}, isFixedLayout: true } },
+      } as never);
+      const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
+      vi.mocked(getBookByHash).mockReturnValue({ readingStatus: 'reading' } as never);
+      vi.mocked(updateBookProgress).mockClear();
+      setBookProgress('book-1', {
+        location: 'cfi',
+        pageinfo: { current: 0, total: 20 },
+        section: { current: 0, total: 5 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore
+        .getState()
+        .setProgressPageInfo(
+          'book-1',
+          { current: 2, total: 5 },
+          { current: 0, next: 1, total: 20 },
+          { section: 1, total: 2 } as never,
+          0.5,
+        );
+
+      expect(updateBookProgress).toHaveBeenCalledWith(id, [3, 5], 'reading');
+      expect(getBookProgress('book-1')).toMatchObject({
+        page: 3,
+        pageinfo: { current: 0, next: 1, total: 20 },
+      });
+      clearBookProgress('book-1');
+    });
+
+    test('ignores a relocate with no page total', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({ booksData: { [id]: { config: {} } } } as never);
+      const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
+      vi.mocked(getBookByHash).mockReturnValue({ readingStatus: 'reading' } as never);
+      vi.mocked(updateBookProgress).mockClear();
+      setBookProgress('book-1', {
+        location: 'cfi',
+        pageinfo: { current: 0, total: 10 },
+        section: { current: 0, total: 5 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore
+        .getState()
+        .setProgressPageInfo(
+          'book-1',
+          { current: 0, total: 0 },
+          { current: 0, next: 0, total: 0 },
+          { section: 0, total: 0 } as never,
+          0,
+        );
+
+      // Dividing by a zero total would promote the book to "finished".
+      expect(updateBookProgress).not.toHaveBeenCalled();
+      expect(getBookProgress('book-1')).toMatchObject({ pageinfo: { current: 0, total: 10 } });
+      clearBookProgress('book-1');
+    });
+
+    test('does not persist page info from a non-primary view', () => {
+      seedViewState('book-1', { isPrimary: false });
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: { [id]: { config: { location: 'sentence-cfi', progress: [2, 10] } } },
+      } as never);
+      const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
+      vi.mocked(getBookByHash).mockReturnValue({ readingStatus: 'reading' } as never);
+      vi.mocked(updateBookProgress).mockClear();
+      setBookProgress('book-1', {
+        location: 'sentence-cfi',
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 2, total: 9 },
+        index: 2,
+      } as unknown as BookProgress);
+
+      useReaderStore
+        .getState()
+        .setProgressPageInfo(
+          'book-1',
+          { current: 3, total: 9 },
+          { current: 4, next: 5, total: 100 },
+          { section: 20, total: 200 } as never,
+          0.42,
+        );
+
+      expect(
+        (
+          useBookDataStore.getState().booksData[id] as {
+            config: { location: string; progress: number[] };
+          }
+        ).config,
+      ).toMatchObject({ location: 'sentence-cfi', progress: [2, 10] });
+      clearBookProgress('book-1');
     });
   });
 
