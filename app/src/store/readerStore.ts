@@ -86,10 +86,6 @@ const updateLibraryReadingProgress = (id: string, pageInfo: PageInfo, persistabl
   updateBookProgress(id, progress, newReadingStatus);
 };
 
-// TTS location updates resolve page data asynchronously; the token drops
-// out-of-order responses when a newer mark lands mid-flight.
-const progressLocationTokens = new Map<string, number>();
-
 const cancelReadingStatus = (hash: string) => {
   clearTimeout(readingStatusTimers.get(hash));
   readingStatusTimers.delete(hash);
@@ -164,6 +160,13 @@ interface ReaderStore {
     source?: ProgressSource,
   ) => void;
   setProgressLocation: (key: string, location: string, range?: Range | null) => void;
+  setProgressPageInfo: (
+    key: string,
+    section: PageInfo,
+    pageinfo: PageInfo,
+    timeinfo: TimeInfo,
+    fraction: number,
+  ) => void;
   getProgress: (key: string) => BookProgress | null;
   setView: (key: string, view: FoliateView) => void;
   getView: (key: string | null) => FoliateView | null;
@@ -551,9 +554,6 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     if (!viewState || !bookData) return;
     const persistable = source === 'user' || source === 'tts';
 
-    // Any real relocate invalidates an in-flight TTS CFI derivation; it would
-    // otherwise write the previous position back over the user's page turn.
-    progressLocationTokens.set(key, (progressLocationTokens.get(key) ?? 0) + 1);
     const pageInfo = bookData.isFixedLayout ? section : pageinfo;
     const progress: [number, number] = [pageInfo.current + 1, pageInfo.total];
     updateLibraryReadingProgress(id, pageInfo, persistable);
@@ -679,61 +679,63 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
         // while listening that is the sentence follow, not a restore/reflow.
         source: 'tts',
       } as BookProgress);
-
-      // Listening never goes through the relocate path, so the library
-      // percentage (and the "finished" promotion) would otherwise stay at the
-      // pre-TTS page. Resolve the CFI to foliate's location units — the same
-      // domain as relocated page info — without touching the frozen footer.
-      const view = get().getView(key);
-      const cfiProgressPromise =
-        view && viewState.isPrimary ? view.getCFIProgress?.(location) : null;
-      if (cfiProgressPromise) {
-        const token = (progressLocationTokens.get(key) ?? 0) + 1;
-        progressLocationTokens.set(key, token);
-        void cfiProgressPromise
-          .then((cfiProgress) => {
-            if (!cfiProgress) return;
-            if (progressLocationTokens.get(key) !== token) return;
-            const current = getBookProgress(key);
-            if (!current) return;
-            // A relocate (user page turn / stop restore) moved the location
-            // while this was in flight; its write wins.
-            if (current.location !== location) return;
-            const isFixedLayout = bookData?.isFixedLayout ?? false;
-            const pageInfo = isFixedLayout ? cfiProgress.section : cfiProgress.location;
-            updateLibraryReadingProgress(id, pageInfo);
-            useBookDataStore.setState((state) => {
-              const existing = state.booksData[id];
-              if (!existing) return state;
-              return {
-                booksData: {
-                  ...state.booksData,
-                  [id]: {
-                    ...existing,
-                    config: {
-                      ...existing.config,
-                      progress: [pageInfo.current + 1, pageInfo.total],
-                      location,
-                    } as BookConfig,
-                  },
-                },
-              };
-            });
-            setBookProgress(key, {
-              ...current,
-              section: cfiProgress.section,
-              pageinfo: cfiProgress.location,
-              timeinfo: cfiProgress.time,
-              fraction: cfiProgress.fraction,
-              page: pageInfo.current + 1,
-            } as BookProgress);
-          })
-          .catch(() => {
-            // Progress derivation is best-effort; the sentence location is
-            // already persisted above.
-          });
-      }
     }
+  },
+  // Listening keeps the sentence CFI as the location authority, so the page
+  // fields come from the TTS follow navigation's own relocate instead. That
+  // relocate is measured on the rendered (transformed) document — the same
+  // basis as a normal page turn — so page info and the library percent stay
+  // current without re-deriving progress from foliate's raw section copy
+  // (`getCFIProgress` parses a fresh section DOM per cold chapter, ~100–300ms,
+  // and its CFI paths do not line up with the transformed text).
+  setProgressPageInfo: (
+    key: string,
+    section: PageInfo,
+    pageinfo: PageInfo,
+    timeinfo: TimeInfo,
+    fraction: number,
+  ) => {
+    const id = getBookHash(key);
+    const viewState = get().viewStates[key];
+    if (!viewState) return;
+    const progress = getBookProgress(key);
+    if (!progress) return;
+    const bookData = useBookDataStore.getState().booksData[id];
+    const pageInfo = bookData?.isFixedLayout ? section : pageinfo;
+    // A relocate with no page total would make the percentage divide by zero
+    // and wrongly promote the book to "finished".
+    if (!pageInfo || !(pageInfo.total > 0)) return;
+    updateLibraryReadingProgress(id, pageInfo);
+
+    // Mirror setProgress: only the primary view persists into the shared
+    // bookData config.
+    if (viewState.isPrimary) {
+      useBookDataStore.setState((state) => {
+        const existing = state.booksData[id];
+        if (!existing) return state;
+        return {
+          booksData: {
+            ...state.booksData,
+            [id]: {
+              ...existing,
+              config: {
+                ...existing.config,
+                progress: [pageInfo.current + 1, pageInfo.total],
+              } as BookConfig,
+            },
+          },
+        };
+      });
+    }
+
+    setBookProgress(key, {
+      ...progress,
+      section,
+      pageinfo,
+      timeinfo,
+      fraction,
+      page: pageInfo.current + 1,
+    } as BookProgress);
   },
   setBookmarkRibbonVisibility: (key: string, visible: boolean) =>
     set((state) => ({

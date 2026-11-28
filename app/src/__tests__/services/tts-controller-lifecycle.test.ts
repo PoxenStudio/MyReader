@@ -144,6 +144,24 @@ describe('TTSController lifecycle', () => {
     expect(mockTtsInstances[0]!.next).toHaveBeenCalled();
   });
 
+  test('a late shutdown leaves a newer session on the same view alone', async () => {
+    // The user stopped during a slow init and started again; a newer
+    // controller now owns the shared view's mirror.
+    const newer = new TTSController(null, view);
+    await newer.init();
+    await newer.initViewTTS(0);
+    const newerTts = view.tts;
+    expect(newerTts).toBeTruthy();
+
+    // The old controller's shutdown resolves afterwards.
+    await controller.shutdown();
+
+    expect(view.tts).toBe(newerTts);
+    // Terminal from the first moment of shutdown: consumers must not adopt it
+    // while its client teardown is still in flight.
+    expect(controller.terminated).toBe(true);
+  });
+
   test('state changes dispatch tts-state-change once per actual change, on a microtask', async () => {
     const events: string[] = [];
     controller.addEventListener('tts-state-change', (e) => {

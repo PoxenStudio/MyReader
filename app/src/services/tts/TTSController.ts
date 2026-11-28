@@ -227,9 +227,11 @@ export class TTSController extends EventTarget {
   }
 
   // True once the session reached a terminal condition (end of content or
-  // unrecoverable error). Rate/voice/navigation restarts never set this.
+  // unrecoverable error), or while it is shutting down. Consumers (session
+  // reattach, close-book handling) must never adopt a controller that is on
+  // its way out, even before its client teardown finishes.
   get terminated(): boolean {
-    return this.#terminated;
+    return this.#terminated || this.#shuttingDown;
   }
 
   // The live text instance: prefer the view's mirror (the public surface
@@ -298,6 +300,10 @@ export class TTSController extends EventTarget {
   // forward() may have auto-advanced during prep, and a seed captured earlier
   // would replay the previous paragraph.
   async attachView(view: FoliateView, bindings: TTSViewBindings): Promise<void> {
+    // A shutdown already in progress (or finished) is terminal: a late
+    // adoption resolving here must not revive the controller or overwrite a
+    // newer session's view.tts mirror.
+    if (this.#shuttingDown) return;
     const epoch = ++this.#attachEpoch;
 
     // Prep (no controller state mutated): resolve the section document from
@@ -959,6 +965,11 @@ export class TTSController extends EventTarget {
     // boundary even though the UI still shows playback.
     for (let attempt = 0; attempt < 3; attempt++) {
       if (this.#shuttingDown) return;
+      // Back off so an in-flight attach (doc build + import) can finish
+      // before we conclude the transition is stuck.
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+      // A stop can land during the backoff sleep; do not terminate then.
+      if (this.#shuttingDown) return;
       const result = await initSection();
       if (result === 'superseded') continue;
       if (result === 'ok') {
@@ -975,10 +986,18 @@ export class TTSController extends EventTarget {
       }
       return;
     }
+    // Every retry was superseded. Failing closed beats leaving `state` at
+    // 'playing' with no audio and no further work scheduled.
+    if (this.#shuttingDown) return;
+    console.warn('[TTS] section change kept being superseded; ending the session');
+    this.#terminate('ended');
+    await this.stop();
   }
 
   async #resumeNextSectionAfterAttach(): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (this.#shuttingDown) return;
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
       if (this.#shuttingDown) return;
       const result = await this.#initTTSForNextSection();
       if (result === 'superseded') continue;
@@ -990,6 +1009,10 @@ export class TTSController extends EventTarget {
       }
       return;
     }
+    if (this.#shuttingDown) return;
+    console.warn('[TTS] section change kept being superseded after reattach; ending the session');
+    this.#terminate('ended');
+    await this.stop();
   }
 
   async preloadSSML(ssml: string | undefined, signal: AbortSignal) {
@@ -1049,6 +1072,9 @@ export class TTSController extends EventTarget {
   }
 
   async #speak(ssml: string | undefined | Promise<string>, oneTime = false) {
+    // A shut-down controller must not be revived (this also keeps the
+    // `#terminated = false` reset below from un-terminating it).
+    if (this.#shuttingDown) return;
     await this.stop();
     this.#terminated = false;
     this.#currentSpeakAbortController = new AbortController();
@@ -1571,7 +1597,15 @@ export class TTSController extends EventTarget {
     this.#attachEpoch++;
     stopAudioKeepAlive();
     await this.stop();
-    this.#clearAllHighlights();
+    // A newer session may already own this view (the user stopped during a
+    // slow init and started again before this shutdown finished). Only tear
+    // down the mirror/overlays while they are still ours, or the new session
+    // loses its TTS instance and highlight.
+    const tts = this.#tts;
+    if (this.view.tts === tts) {
+      this.#clearAllHighlights();
+      this.view.tts = null;
+    }
     this.#ttsSectionIndex = -1;
     this.#sectionTimeline = null;
     this.#timelineSectionIndex = -1;
@@ -1580,7 +1614,6 @@ export class TTSController extends EventTarget {
     this.#tts = null;
     this.#documentProvider?.clear();
     this.#documentProvider = null;
-    this.view.tts = null;
     if (this.ttsWebClient.initialized) {
       await this.ttsWebClient.shutdown();
     }
@@ -1590,5 +1623,9 @@ export class TTSController extends EventTarget {
     if (this.ttsNativeClient?.initialized) {
       await this.ttsNativeClient.shutdown();
     }
+    // Terminal: a shut-down controller must never be adopted again. Consumers
+    // (session reattach, close-book handling) gate on `terminated`, and a
+    // session slot that outlives the stop would otherwise look adoptable.
+    this.#terminated = true;
   }
 }
