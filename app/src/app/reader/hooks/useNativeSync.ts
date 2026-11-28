@@ -14,6 +14,11 @@ import type { FoliateView } from '@/types/view';
 import * as CFI from 'foliate-js/epubcfi.js';
 import { ENABLE_SYNC_FEATURE } from '@/services/mybooks/constants';
 import { pullSync, pushSync, SyncApiError } from '@/services/mybooks/syncClient';
+import {
+  ensureCurrentUserId,
+  isCurrentUserIdSettled,
+  isCurrentUserIdVerified,
+} from '@/services/mybooksService';
 import { syncLog, syncWarn } from '@/services/mybooks/syncLogger';
 import {
   ActiveReadingTracker,
@@ -40,6 +45,14 @@ import { useNativeSyncEvents, type SyncChangedEvent } from './useNativeSyncEvent
 const PUSH_DEBOUNCE_MS = 15_000;
 const PUSH_MAX_WAIT_MS = 20_000;
 const PULL_COOLDOWN_MS = 60_000;
+
+/**
+ * Author stamp for a pulled note that carries author info but no usable uid
+ * (e.g. a row produced by an older serializer). It can never match a numeric
+ * reader id, so the strict ownership checks keep it foreign instead of
+ * accidentally adopting someone else's note.
+ */
+const UNKNOWN_FOREIGN_AUTHOR_UID = 'foreign';
 // A pulled position is applied to the live view by jumping to its CFI. Doing
 // that while the paginator is still laying out a section resolves the CFI
 // against a document that is not settled: the anchor fails, the view lands on
@@ -192,12 +205,53 @@ export const useNativeSync = (bookKey: string) => {
   const { getConfig, setConfig, getBookData, saveConfig } = useBookDataStore();
   const isSyncAllowed = useMyBooksSyncAllowed();
   const progress = getProgress(bookKey);
+  const currentUserId = useMyBooksStatusStore((s) => s.currentUserId);
 
-  const isReady = ENABLE_SYNC_FEATURE && status === 'logged_in' && !isGuest && isSyncAllowed;
+  // Ownership checks are strict (see mybooksStatusStore.useIsOwnBooknote):
+  // a note stamped with a `userId` is treated as someone else's unless it
+  // matches this reader's id. Sync must therefore not start before the id is
+  // known — a pull stamps `userId` onto the reader's own notes, and if the id
+  // were still unknown those drawings (and notes) would vanish from the
+  // canvas/sidebar and stop being pushed.
+  const ownerId = typeof currentUserId === 'number' ? String(currentUserId) : null;
+  const identityKnown = ownerId !== null;
+
+  const isReady =
+    ENABLE_SYNC_FEATURE && status === 'logged_in' && !isGuest && isSyncAllowed && identityKnown;
+
+  // `/user/info` does not carry the id, so ask `/user/whoami` while the
+  // reader is logged in and retry until it lands (offline start, NAS still
+  // booting, ...). This deliberately does NOT depend on sync being enabled:
+  // the ownership checks that hide authored ink are not sync-gated either, so
+  // a reader-only entry (or a site with sync disabled) still needs the id to
+  // see its own notes. The mount call also verifies an id restored from the
+  // cache; the interval keeps retrying while the id is unknown OR the cache
+  // hasn't been verified yet (an offline start must repair itself when the
+  // network returns).
+  useEffect(() => {
+    if (status !== 'logged_in' || isGuest) return;
+    void ensureCurrentUserId();
+    const idKnown = typeof useMyBooksStatusStore.getState().currentUserId === 'number';
+    if (idKnown && isCurrentUserIdVerified()) return;
+    const timer = setInterval(() => {
+      if (
+        typeof useMyBooksStatusStore.getState().currentUserId === 'number' &&
+        isCurrentUserIdVerified()
+      ) {
+        return;
+      }
+      void ensureCurrentUserId();
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [status, isGuest, currentUserId]);
 
   useNativeSyncEvents(isReady);
 
   const dirtyRef = useRef(false);
+  // Bumped on every local change; a push only clears `dirtyRef` if no change
+  // landed while its request was in flight (otherwise that change would sit
+  // unpushed until the next edit).
+  const mutationSeqRef = useRef(0);
   const lastPulledAtRef = useRef(0);
   const hasPulledOnce = useRef(false);
   const initialPullDoneRef = useRef(false);
@@ -252,6 +306,15 @@ export const useNativeSync = (bookKey: string) => {
 
   const pushNow = useCallback(async () => {
     if (!isReady) return;
+    // Notes are pushed filtered by owner; a cached-but-unverified id could
+    // filter them with the wrong account and let the server stamp them with
+    // the current session's uid. Wait for the first whoami attempt to settle
+    // (success, guest or failure) — a failed attempt still lets old servers
+    // without /user/whoami push, as before.
+    if (!isCurrentUserIdSettled()) {
+      syncLog(bookKey, 'push:skip', { reason: 'identity-unverified' });
+      return;
+    }
     // Never push before the initial pull-on-open has resolved: pushing local
     // progress before the pull's remote merge lands would overwrite whatever
     // newer progress the server holds.
@@ -264,6 +327,7 @@ export const useNativeSync = (bookKey: string) => {
       return;
     }
 
+    const pushSeq = mutationSeqRef.current;
     const config = getConfig(bookKey);
     const book = getBookData(bookKey)?.book;
     if (!config || !book) return;
@@ -282,12 +346,13 @@ export const useNativeSync = (bookKey: string) => {
     const sentReadingSeconds = tracker.getPending();
     const readingSecondsPayload = tracker.toReadingSecondsPayload(book.hash);
     try {
-      const currentUserId = useMyBooksStatusStore.getState().currentUserId;
       // Never push back a note that belongs to someone else — it can only be
       // here because it was pulled in via showOtherAnnotations, and pushing
       // it would re-store it under this account's own records server-side.
+      // An unknown identity (should not happen: pushes are gated on it) is
+      // treated as "not ours", keeping foreign ink out of this account.
       const ownNotes = (config.booknotes ?? []).filter(
-        (note) => !note.userId || note.userId === String(currentUserId),
+        (note) => !note.userId || (ownerId !== null && note.userId === ownerId),
       );
       await pushSync({
         configs: [
@@ -303,18 +368,31 @@ export const useNativeSync = (bookKey: string) => {
             updatedAt: now,
           },
         ],
+        // Spread first, stamps last: a pulled note may still carry the
+        // snake-case stamps of an older pull, which would otherwise win over
+        // the fresh values the server compares.
         notes: ownNotes.map((note) => ({
+          ...note,
           book_hash: book.hash,
           meta_hash: book.metaHash,
           updated_at: note.updatedAt,
           deleted_at: note.deletedAt ?? null,
-          ...note,
         })),
         ...(readingSecondsPayload.length > 0 && { reading_seconds: readingSecondsPayload }),
       });
-      dirtyRef.current = false;
-      pendingSinceRef.current = 0;
-      debounceResetCountRef.current = 0;
+      if (mutationSeqRef.current === pushSeq) {
+        dirtyRef.current = false;
+        pendingSinceRef.current = 0;
+        debounceResetCountRef.current = 0;
+      } else {
+        // A stroke/annotation landed while this push was in flight: keep the
+        // dirty flag so the scheduled debounce pushes the newer snapshot.
+        syncLog(bookKey, 'push:done-with-newer-local', {
+          elapsedMs: Date.now() - now,
+          localSeq: mutationSeqRef.current,
+          pushedSeq: pushSeq,
+        });
+      }
       syncLog(bookKey, 'push:done', { elapsedMs: Date.now() - now });
       if (readingSecondsPayload.length > 0) {
         tracker.clearSent(sentReadingSeconds);
@@ -325,7 +403,10 @@ export const useNativeSync = (bookKey: string) => {
         const synced: BookConfig = {
           ...latest,
           lastSyncedAtConfig: now,
-          lastSyncedAtNotes: now,
+          // If a change landed during this push, its note was not in the
+          // payload: hold the watermark until the follow-up push covers it.
+          lastSyncedAtNotes:
+            mutationSeqRef.current === pushSeq ? now : (latest.lastSyncedAtNotes ?? 0),
           pendingReadingSeconds: tracker.getPending(),
         };
         lastPersistedPendingRef.current = JSON.stringify(synced.pendingReadingSeconds);
@@ -346,6 +427,7 @@ export const useNativeSync = (bookKey: string) => {
     }
   }, [
     isReady,
+    ownerId,
     bookKey,
     getConfig,
     getBookData,
@@ -445,19 +527,18 @@ export const useNativeSync = (bookKey: string) => {
       const remoteConfig = result.configs?.[0];
       const remoteNotes = result.notes ?? [];
 
-      const localUpdatedAt = config.updatedAt ?? 0;
-      const remoteUpdatedAt = remoteConfig?.updatedAt ?? remoteConfig?.updated_at ?? 0;
-      const remoteWins = !!remoteConfig && remoteUpdatedAt > localUpdatedAt;
-
-      // The comparison above (and everything derived from it) is computed
-      // against `config`, a snapshot taken *before* the network await. If a
-      // local write landed on this book while the request was in flight,
-      // that write is invisible here — and the wholesale `setConfig` below
-      // still overwrites the (now fresher) live config with a value built
-      // on top of this stale snapshot, silently reverting it.
+      // Everything below must merge into the *live* config, not the snapshot
+      // taken before the network await: strokes/notes committed while the
+      // request was in flight are only in the live config, and rebuilding
+      // booknotes from the stale snapshot would drop them.
       const liveConfigNow = getConfig(bookKey);
+      const baseConfig = liveConfigNow ?? config;
       const localChangedDuringFlight =
         !!liveConfigNow && liveConfigNow.location !== config.location;
+
+      const localUpdatedAt = baseConfig.updatedAt ?? 0;
+      const remoteUpdatedAt = remoteConfig?.updatedAt ?? remoteConfig?.updated_at ?? 0;
+      const remoteWins = !!remoteConfig && remoteUpdatedAt > localUpdatedAt;
 
       syncLog(bookKey, 'pull:response', {
         elapsedMs,
@@ -478,13 +559,13 @@ export const useNativeSync = (bookKey: string) => {
 
       const mergedConfig: BookConfig = remoteWins
         ? {
-            ...config,
-            progress: remoteConfig.progress ?? config.progress,
-            location: remoteConfig.location ?? config.location,
-            xpointer: remoteConfig.xpointer ?? config.xpointer,
+            ...baseConfig,
+            progress: remoteConfig.progress ?? baseConfig.progress,
+            location: remoteConfig.location ?? baseConfig.location,
+            xpointer: remoteConfig.xpointer ?? baseConfig.xpointer,
             updatedAt: remoteUpdatedAt,
           }
-        : { ...config };
+        : { ...baseConfig };
       mergedConfig.lastSyncedAtConfig = now;
 
       // `pullSync` is always called with since=0 (see above), so `remoteNotes`
@@ -504,16 +585,20 @@ export const useNativeSync = (bookKey: string) => {
       // `own=1` pulls only cover this account's own notes, so a note pulled
       // in earlier from another user (via showOtherAnnotations) is out of
       // scope for that query and must be left alone.
-      const currentUserId = useMyBooksStatusStore.getState().currentUserId;
       const remoteNoteIds = new Set(remoteNotes.map((n) => n.id));
-      const syncWatermark = config.lastSyncedAtNotes ?? 0;
+      const syncWatermark = baseConfig.lastSyncedAtNotes ?? 0;
 
       const byId = new Map<string, BookNote>();
-      for (const n of config.booknotes ?? []) {
-        const isOwn = !n.userId || n.userId === String(currentUserId);
+      for (const n of baseConfig.booknotes ?? []) {
+        const isOwn = !n.userId || (ownerId !== null && n.userId === ownerId);
         const inScope = showOtherAnnotations || isOwn;
         const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
-        const staleOnServer = inScope && !remoteNoteIds.has(n.id) && ts <= syncWatermark;
+        // Handwriting is never swept for being absent from a server snapshot:
+        // ink is expensive to recreate, deletions always arrive as tombstones,
+        // and an absent ink row means "not pushed yet" far more often than
+        // "deleted elsewhere". A full server wipe must not erase local drawings.
+        const staleOnServer =
+          inScope && n.type !== 'ink' && !remoteNoteIds.has(n.id) && ts <= syncWatermark;
         if (staleOnServer) continue;
         byId.set(n.id, n);
       }
@@ -522,18 +607,51 @@ export const useNativeSync = (bookKey: string) => {
         const remoteTs = Math.max(remote.updatedAt ?? 0, remote.deletedAt ?? 0);
         const localTs = local ? Math.max(local.updatedAt ?? 0, local.deletedAt ?? 0) : -1;
         if (remoteTs >= localTs) {
+          const remoteLostInk =
+            !!local?.ink?.length && !remote.deletedAt && (!remote.ink || remote.ink.length === 0);
+          // The wire field is `uid` (a number, but tolerate a numeric string
+          // from older serializers), not `user_id`. A row without a usable
+          // uid must not become unowned — that would make someone else's note
+          // look like ours; when it carries an author it is explicitly
+          // foreign, otherwise the note's previous stamp is kept.
+          const rawUid: unknown = remote.uid;
+          const remoteUid =
+            typeof rawUid === 'number'
+              ? rawUid
+              : typeof rawUid === 'string' && rawUid.trim() !== ''
+                ? Number(rawUid)
+                : NaN;
           byId.set(remote.id, {
             ...local,
             ...remote,
-            // The wire field is `uid` (a number), not `user_id` — see
-            // `BookDataRecord.uid`'s doc comment.
-            userId: remote.uid !== undefined ? String(remote.uid) : undefined,
+            // A live row without strokes must not wipe local ink: servers with
+            // a nullable column may hand back `ink: null` / `[]`, and an old
+            // client may push the note without the field.
+            ...(remoteLostInk ? { ink: local.ink } : {}),
+            userId:
+              Number.isSafeInteger(remoteUid) && remoteUid > 0
+                ? String(remoteUid)
+                : remote.author
+                  ? UNKNOWN_FOREIGN_AUTHOR_UID
+                  : (remote.userId ?? local?.userId),
             author: remote.author,
           } as BookNote);
         }
       }
       mergedConfig.booknotes = Array.from(byId.values());
-      mergedConfig.lastSyncedAtNotes = now;
+      // Do not move the "safe to sweep" watermark past notes the server has
+      // never seen: a local edit that has not been pushed yet would be swept
+      // as stale on the next pull (silent data loss).
+      // Ink is excluded: it is never swept for being absent remotely, so it
+      // must not pin the watermark that governs the other note types.
+      const hasUnpushedLocalNotes = (baseConfig.booknotes ?? []).some((n) => {
+        if (n.type === 'ink') return false;
+        const isOwn = !n.userId || (ownerId !== null && n.userId === ownerId);
+        const inScope = showOtherAnnotations || isOwn;
+        const ts = Math.max(n.updatedAt ?? 0, n.deletedAt ?? 0);
+        return inScope && !remoteNoteIds.has(n.id) && ts > syncWatermark;
+      });
+      mergedConfig.lastSyncedAtNotes = hasUnpushedLocalNotes ? syncWatermark : now;
 
       setConfig(bookKey, mergedConfig);
       const latest = getConfig(bookKey);
@@ -558,8 +676,8 @@ export const useNativeSync = (bookKey: string) => {
       // The remote config landing here doesn't otherwise reach the already-
       // rendered view (it only opens at `config.location` once, at mount),
       // so without this the pulled position is silently ignored on screen.
-      if (remoteWins && mergedConfig.location && mergedConfig.location !== config.location) {
-        syncLog(bookKey, 'pull:goTo', { from: config.location, to: mergedConfig.location });
+      if (remoteWins && mergedConfig.location && mergedConfig.location !== baseConfig.location) {
+        syncLog(bookKey, 'pull:goTo', { from: baseConfig.location, to: mergedConfig.location });
         void applyRemoteLocation(mergedConfig.location).catch((e) =>
           syncWarn(bookKey, 'pull:goTo-error', { error: String(e) }),
         );
@@ -584,6 +702,7 @@ export const useNativeSync = (bookKey: string) => {
     }
   }, [
     isReady,
+    ownerId,
     bookKey,
     getConfig,
     getBookData,
@@ -636,6 +755,7 @@ export const useNativeSync = (bookKey: string) => {
       pendingSinceRef.current = Date.now();
       debounceResetCountRef.current = 0;
     }
+    mutationSeqRef.current += 1;
     dirtyRef.current = true;
     debouncedPush();
   }, [debouncedPush, bookKey]);

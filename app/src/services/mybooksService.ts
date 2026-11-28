@@ -229,6 +229,11 @@ export interface MyBooksResponse<T = unknown> {
   pins?: MyBooksMetaItem[];
   folders?: MyBooksFolderNode[];
   user?: MyBooksUserInfo | MyBooksUserDetailInfo;
+  // /user/whoami — the only endpoint that returns the reader's numeric id
+  // (`/user/info` does not; see ensureCurrentUserId below). Guest/share
+  // access answers with a sentinel id plus `is_guest: true`.
+  userId?: number;
+  is_guest?: boolean;
   sys?: MyBooksSysInfo;
   avatar_url?: string;
   book_id?: number;
@@ -822,10 +827,162 @@ function updateSysInfo(sys?: MyBooksSysInfo): void {
 function updateUserPrefs(user?: MyBooksUserInfo): void {
   if (!user?.is_login) return;
   const store = useMyBooksStatusStore.getState();
-  store.setCurrentUserId(user.id);
+  // `/user/info` does not include `id` (the server's user dict has no id
+  // field), so at runtime this is usually undefined. Keep the known id
+  // instead of overwriting it — ensureCurrentUserId fills the gap from
+  // `/user/whoami`.
+  if (isValidUserId(user.id)) {
+    store.setCurrentUserId(user.id);
+  }
   if (user.show_other_annotations !== undefined) {
     store.setShowOtherAnnotations(user.show_other_annotations);
   }
+}
+
+const isValidUserId = (id: unknown): id is number =>
+  typeof id === 'number' && Number.isSafeInteger(id) && id > 0;
+
+function readCachedUserInfo(): MyBooksUserInfo | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(MYBOOKS_USER_INFO_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as MyBooksUserInfo) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Cache `/user/info`'s user object while keeping the id known from whoami. */
+function writeCachedUserInfo(user: MyBooksUserInfo, id?: number): void {
+  if (typeof window === 'undefined') return;
+  const knownId = isValidUserId(user.id) ? user.id : id;
+  localStorage.setItem(
+    MYBOOKS_USER_INFO_CACHE_KEY,
+    JSON.stringify(knownId !== undefined ? { ...user, id: knownId } : user),
+  );
+}
+
+/** Persist an authoritatively resolved id, overriding any cached one. */
+function writeCachedUserId(id: number): void {
+  if (typeof window === 'undefined') return;
+  const known = readCachedUserInfo();
+  // No cache (e.g. the embedded reader opens without /user/info): keep a
+  // minimal entry so the next cold start can show the reader's own notes
+  // before the network comes up. `readCachedCurrentUserId` requires
+  // `is_login: true`.
+  localStorage.setItem(
+    MYBOOKS_USER_INFO_CACHE_KEY,
+    JSON.stringify(known ? { ...known, id } : { id, is_login: true }),
+  );
+}
+
+let currentUserIdRequest: Promise<number | null> | null = null;
+let lastCurrentUserIdAttemptAt = 0;
+/** Bumped by resetCurrentUserId so an in-flight whoami cannot commit. */
+let currentUserIdEpoch = 0;
+/** True only after whoami confirmed the id in this process (cache is not proof). */
+let currentUserIdVerified = false;
+/**
+ * True once a whoami attempt finished for the current epoch (success, guest
+ * or failure). Pushes wait for this so they cannot be filtered with a stale
+ * cached id — while an old server that lacks /user/whoami still gets pushes
+ * after its first failed attempt.
+ */
+let currentUserIdSettled = false;
+// Offline / old servers (no /user/whoami) must not turn every status poll into
+// a fresh request; the reader's retry loop calls this about once a minute.
+const CURRENT_USER_ID_RETRY_MS = 30_000;
+
+const hasClientSession = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const token = localStorage.getItem('token');
+  return !!token && token !== 'guest' && localStorage.getItem('mybooks_is_guest') !== 'true';
+};
+
+/** Whether whoami has confirmed the current id in this process. */
+export const isCurrentUserIdVerified = (): boolean => currentUserIdVerified;
+
+/** Whether identity resolution finished for the current session (even if it failed). */
+export const isCurrentUserIdSettled = (): boolean => currentUserIdSettled;
+
+/**
+ * Forget the resolved reader id (login/logout/account switch).
+ *
+ * Clears the in-memory id, the cached user info (it belongs to the previous
+ * session and its id would otherwise be re-adopted), and the throttle, and
+ * invalidates any in-flight `/user/whoami` so a slow response for the old
+ * account cannot land after the switch.
+ */
+export function resetCurrentUserId(): void {
+  currentUserIdEpoch += 1;
+  currentUserIdRequest = null;
+  lastCurrentUserIdAttemptAt = 0;
+  currentUserIdVerified = false;
+  currentUserIdSettled = false;
+  useMyBooksStatusStore.getState().setCurrentUserId(null);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(MYBOOKS_USER_INFO_CACHE_KEY);
+  }
+}
+
+/**
+ * Resolve the signed-in reader's numeric id.
+ *
+ * `/user/info` does not carry it, and `/user/sign_in` only returns `err`, so
+ * the id has to come from `/user/whoami` (`{userId}`). Ownership checks are
+ * strict: a note stamped with a `userId` is foreign unless it matches this
+ * id, so without it every pulled drawing (and highlight edit) would look like
+ * someone else's and disappear from the canvas/sidebar.
+ *
+ * The id cached at startup is not trusted as proof: it is verified against
+ * whoami once per process (and after a login switch), so a cache left over
+ * from another session cannot permanently mis-own the reader's notes. While
+ * the server is unreachable the cached id is kept, so offline reading still
+ * shows the reader's own ink. Guest answers (`{userId: 999999, is_guest:
+ * true}`) are never adopted. A late response for a signed-out client session
+ * (logout raced /user/info) cannot repopulate the id.
+ */
+export async function ensureCurrentUserId(): Promise<number | null> {
+  const cached = useMyBooksStatusStore.getState().currentUserId;
+  const hasCached = isValidUserId(cached);
+  if (hasCached && currentUserIdVerified) return cached;
+  // Never (re)establish an identity for a client session that isn't logged in;
+  // logout clears the store id, and an in-flight /user/info must not undo that.
+  if (!hasClientSession()) return hasCached ? (cached as number) : null;
+  if (currentUserIdRequest) return currentUserIdRequest;
+  const keepCached = () => (hasCached ? (cached as number) : null);
+  if (Date.now() - lastCurrentUserIdAttemptAt < CURRENT_USER_ID_RETRY_MS) return keepCached();
+  lastCurrentUserIdAttemptAt = Date.now();
+  const epoch = currentUserIdEpoch;
+  currentUserIdRequest = (async () => {
+    try {
+      const response = await fetchMyBooks('/user/whoami');
+      // Guest/share access answers with a sentinel id; that is not an
+      // identity and must never be adopted.
+      if (response.is_guest === true) return keepCached();
+      const id = response.userId;
+      if (!isValidUserId(id)) return keepCached();
+      // A login/logout happened while the request was in flight.
+      if (epoch !== currentUserIdEpoch) return null;
+      useMyBooksStatusStore.getState().setCurrentUserId(id);
+      writeCachedUserId(id);
+      currentUserIdVerified = true;
+      return id;
+    } catch (e) {
+      console.warn(
+        '[MyBooks] whoami failed:',
+        e instanceof MyBooksApiError ? e.err : e instanceof Error ? e.message : String(e),
+      );
+      // Unreachable server: a previously known id is better than none.
+      return keepCached();
+    } finally {
+      if (epoch === currentUserIdEpoch) {
+        currentUserIdSettled = true;
+        currentUserIdRequest = null;
+      }
+    }
+  })();
+  return currentUserIdRequest;
 }
 
 export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
@@ -836,10 +993,15 @@ export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
     updateUserPrefs(user);
     if (typeof window !== 'undefined') {
       if (user?.is_login || user?.is_guest) {
-        localStorage.setItem(MYBOOKS_USER_INFO_CACHE_KEY, JSON.stringify(user));
+        const knownId = useMyBooksStatusStore.getState().currentUserId;
+        writeCachedUserInfo(user, isValidUserId(knownId) ? knownId : undefined);
       } else {
         localStorage.removeItem(MYBOOKS_USER_INFO_CACHE_KEY);
       }
+    }
+    if (user?.is_login && !isValidUserId(user.id)) {
+      // Fill `currentUserId` from the only endpoint that exposes it.
+      void ensureCurrentUserId();
     }
     if (!user?.is_login && !user?.is_guest) return null;
     return user;
@@ -848,10 +1010,9 @@ export async function getUserInfo(): Promise<MyBooksUserInfo | null> {
     // explicit error) — trust that over a possibly stale cache.
     if (error instanceof MyBooksApiError) throw error;
 
-    const cached =
-      typeof window !== 'undefined' ? localStorage.getItem(MYBOOKS_USER_INFO_CACHE_KEY) : null;
+    const cached = readCachedUserInfo();
     if (cached) {
-      return JSON.parse(cached) as MyBooksUserInfo;
+      return cached;
     }
     throw error;
   }
@@ -972,6 +1133,9 @@ export async function getUserDetailInfo(): Promise<MyBooksUserDetailResult | nul
   const response = await fetchMyBooks('/user/info', { detail: 1 });
   updateSysInfo(response.sys);
   updateUserPrefs(response.user);
+  if (response.user?.is_login && typeof response.user.id !== 'number') {
+    void ensureCurrentUserId();
+  }
   if (!response.user?.is_login && !response.user?.is_guest) return null;
   const result = { user: response.user as MyBooksUserDetailInfo, sys: response.sys ?? null };
   if (typeof window !== 'undefined') {

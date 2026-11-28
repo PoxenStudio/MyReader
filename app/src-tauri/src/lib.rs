@@ -458,14 +458,18 @@ pub fn run() {
     // `Download/`, and "All files access" (if already granted for the custom
     // library folder feature) covers the rest. The probe opens the exact log
     // file, so anything the log plugin can't open (e.g. a file left by a
-    // previous install, which fails with `EACCES`) falls back to the private
-    // per-app log dir instead of aborting startup. Decided once per launch.
+    // previous install, which fails with `EACCES`) falls back to a second file
+    // name in the same folder (`myreader-2.log`) — and only if that fails too
+    // to the private per-app log dir — instead of aborting startup or silently
+    // losing logs where the user can't find them. Decided once per launch.
     #[cfg(target_os = "android")]
     let log_target = match shared_log_dir::writable_shared_log_dir() {
-        Some(path) => tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
-            path,
-            file_name: Some(shared_log_dir::LOG_FILE_STEM.into()),
-        }),
+        Some((path, file_name)) => {
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                path,
+                file_name: Some(file_name),
+            })
+        }
         None => {
             tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None })
         }

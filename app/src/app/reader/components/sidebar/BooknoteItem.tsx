@@ -255,7 +255,7 @@ const BooknoteItem: React.FC<BooknoteItemProps> = ({ bookKey, item, isNearest, o
                 } as React.CSSProperties
               }
             >
-              {text || ''}
+              {text || (item.type === 'ink' ? _('Drawing') : '')}
             </span>
           </div>
         </div>
@@ -299,6 +299,11 @@ const BooknoteItem: React.FC<BooknoteItemProps> = ({ bookKey, item, isNearest, o
                 )}
                 {item.author.nickname && <span className='truncate'>{item.author.nickname}</span>}
                 <span aria-hidden='true'>·</span>
+              </span>
+            )}
+            {item.type === 'ink' && (
+              <span className='bg-base-300 shrink-0 rounded px-1 text-xs text-gray-500'>
+                {_('Drawing')}
               </span>
             )}
             <span className='truncate text-sm text-gray-500 sm:text-xs'>

@@ -26,6 +26,7 @@ import WindowButtons from '@/components/WindowButtons';
 import QuickActionMenu from './annotator/QuickActionMenu';
 import SidebarToggler from './SidebarToggler';
 import BookmarkToggler from './BookmarkToggler';
+import HandwritingToggler from './HandwritingToggler';
 import NotebookToggler from './NotebookToggler';
 import MyNexusToggler from './MyNexusToggler';
 import SettingsToggler from './SettingsToggler';
@@ -223,6 +224,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
               <VscLibrary size={iconSize18} className='fill-base-content' />
             </button>
             <BookmarkToggler bookKey={bookKey} />
+            <HandwritingToggler bookKey={bookKey} />
             <TranslationToggler bookKey={bookKey} />
           </div>
           {enableAnnotationQuickActions && (
@@ -255,6 +257,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
               onToggle={handleToggleDropdown}
             >
               <QuickActionMenu
+                bookKey={bookKey}
                 selectedAction={viewSettings.annotationQuickAction}
                 onActionSelect={handleAnnotationQuickActionSelect}
               />

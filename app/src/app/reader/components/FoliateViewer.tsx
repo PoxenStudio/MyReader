@@ -90,6 +90,7 @@ import {
   getTTSMiniPlayerBottomOffset,
   TTS_MINI_PLAYER_HEIGHT,
 } from '../utils/ttsMiniPlayerPosition';
+import { getDrawingDockClearance } from '../utils/drawingDock';
 
 declare global {
   interface Window {
@@ -153,13 +154,23 @@ const FoliateViewer: React.FC<{
   // settle too, or the preview position becomes real progress.
   const pendingPreviewSettleRef = useRef<{ at: number } | null>(null);
 
+  // The book document outlives this view: bookDataStore keeps it for the next
+  // open, so listeners left on its transformTarget would keep the closed view,
+  // its iframes and their listeners alive, one more set per open (#6710).
+  const removeTransformListenersRef = useRef<(() => void) | null>(null);
+  const unmountedRef = useRef(false);
+
   const autoScroll = useAutoScroll(bookKey, viewRef);
   const { registerSpeedListeners, overlayVisible: speedOverlayVisible } =
     useAutoScrollSpeedGesture(autoScroll);
 
   // A pending anti-flash timer must not fire setNavigating on an unmounted component.
   useEffect(() => {
+    unmountedRef.current = false;
     return () => {
+      unmountedRef.current = true;
+      removeTransformListenersRef.current?.();
+      removeTransformListenersRef.current = null;
       if (navSpinnerTimerRef.current) clearTimeout(navSpinnerTimerRef.current);
     };
   }, []);
@@ -757,13 +768,22 @@ const FoliateViewer: React.FC<{
 
       await view.open(bookDoc);
       const viewOpenedAt = performance.now();
+      // The reader can close while view.open() is pending. Cleanup has already
+      // removed the transform listeners, but this continuation would still
+      // register the view and run view.init(), loading raw (untransformed)
+      // sections into the cached BookDoc. Drop the doomed view instead.
+      if (unmountedRef.current) {
+        view.close?.();
+        view.remove();
+        return;
+      }
       // make sure we can listen renderer events after opening book
       viewRef.current = view;
       setFoliateView(bookKey, view);
 
       const { book } = view;
 
-      book.transformTarget?.addEventListener('load', async (event: Event) => {
+      const handleTransformLoad = async (event: Event) => {
         const { detail } = event as CustomEvent<{
           isScript: boolean;
           type: string;
@@ -789,12 +809,20 @@ const FoliateViewer: React.FC<{
             }
           });
         }
-      });
+      };
       const viewWidth = appService?.isMobile ? screen.width : window.innerWidth;
       const viewHeight = appService?.isMobile ? screen.height : window.innerHeight;
       const width = viewWidth - insets.left - insets.right;
       const height = viewHeight - insets.top - insets.bottom;
-      book.transformTarget?.addEventListener('data', getDocTransformHandler({ width, height }));
+      const handleTransformData = getDocTransformHandler({ width, height });
+      book.transformTarget?.addEventListener('load', handleTransformLoad);
+      book.transformTarget?.addEventListener('data', handleTransformData);
+      removeTransformListenersRef.current = () => {
+        book.transformTarget?.removeEventListener('load', handleTransformLoad);
+        book.transformTarget?.removeEventListener('data', handleTransformData);
+      };
+      // The reader can close while view.open() is pending; its cleanup has run.
+      if (unmountedRef.current) removeTransformListenersRef.current();
       view.renderer.setStyles?.(getStyles(viewSettings, undefined, getLoadedFonts()));
       applyTranslationStyle(viewSettings);
 
@@ -930,7 +958,13 @@ const FoliateViewer: React.FC<{
     const moreLeftInset = showDoubleBorderFooter ? 32 : 0;
     const topMargin = (showTopHeader ? insets.top : viewInsets.top) + moreTopInset;
     const rightMargin = insets.right + moreRightInset;
-    const bottomMargin = (showBottomFooter ? insets.bottom : viewInsets.bottom) + moreBottomInset;
+    // The drawing dock stays up for the whole drawing session, so the text
+    // makes room for it instead of running underneath.
+    const drawingDock = viewState?.drawingEnabled ? getDrawingDockClearance(gridInsets) : null;
+    const bottomMargin = Math.max(
+      (showBottomFooter ? insets.bottom : viewInsets.bottom) + moreBottomInset,
+      drawingDock?.bottom ?? 0,
+    );
     const leftMargin = insets.left + moreLeftInset;
     viewRef.current?.renderer.setAttribute('margin-top', `${topMargin}px`);
     viewRef.current?.renderer.setAttribute('margin-right', `${rightMargin}px`);
@@ -943,9 +977,10 @@ const FoliateViewer: React.FC<{
       const safeBottomPadding = appService?.hasSafeAreaInset ? gridInsets.bottom * 0.33 : 0;
       const footerBarHeight = safeBottomPadding + viewSettings.marginBottomPx;
       const scrollTop = headerVisible ? gridInsets.top + viewSettings.marginTopPx : 0;
-      const scrollBottom = footerVisible
-        ? Math.max(footerBarHeight, miniPlayerClearance)
-        : miniPlayerClearance;
+      const scrollBottom = Math.max(
+        footerVisible ? Math.max(footerBarHeight, miniPlayerClearance) : miniPlayerClearance,
+        drawingDock?.bottom ?? 0,
+      );
       setScrollMargins({ top: bookData?.isFixedLayout ? 0 : scrollTop, bottom: scrollBottom });
     } else {
       setScrollMargins({ top: 0, bottom: 0 });
@@ -1088,6 +1123,7 @@ const FoliateViewer: React.FC<{
     viewSettings?.scrolled,
     viewSettings?.noContinuousScroll,
     viewState?.ttsEnabled,
+    viewState?.drawingEnabled,
     // footerReservesBand inputs: the band must collapse/return live when the
     // user flips these settings.
     viewSettings?.showStickyProgressBar,

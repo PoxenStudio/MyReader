@@ -171,10 +171,26 @@ export const useBookDataStore = create<BookDataState>((set, get) => ({
       const dedupedBooknotes = Array.from(
         new Map(booknotes.map((item) => [`${item.id}-${item.type}-${item.cfi}`, item])).values(),
       );
+      // Handwriting is easy to lose and hard to redraw: a caller that built
+      // its list before the latest drawing must not delete that drawing. Ink
+      // deletions are tombstones (kept in the list), so an ink note missing
+      // from the incoming array is a stale snapshot, not a deletion. Prefer
+      // the newer revision when both sides have the same id.
+      const noteKey = (item: BookNote) => `${item.id}-${item.type}-${item.cfi}`;
+      const mergedByKey = new Map(dedupedBooknotes.map((item) => [noteKey(item), item]));
+      for (const current of book.config?.booknotes ?? []) {
+        if (current.type !== 'ink') continue;
+        const key = noteKey(current);
+        const incoming = mergedByKey.get(key);
+        if (!incoming || (current.updatedAt ?? 0) > (incoming.updatedAt ?? 0)) {
+          mergedByKey.set(key, current);
+        }
+      }
+      const mergedBooknotes = Array.from(mergedByKey.values());
       updatedConfig = {
         ...book.config,
         updatedAt: Date.now(),
-        booknotes: dedupedBooknotes,
+        booknotes: mergedBooknotes,
       };
       return {
         booksData: {
@@ -184,7 +200,7 @@ export const useBookDataStore = create<BookDataState>((set, get) => ({
             config: {
               ...book.config,
               updatedAt: Date.now(),
-              booknotes: dedupedBooknotes,
+              booknotes: mergedBooknotes,
             },
           },
         },

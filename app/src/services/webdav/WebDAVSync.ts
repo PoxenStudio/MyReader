@@ -131,11 +131,13 @@ const mergeNotes = (local: BookNote[], remote: BookNote[]): BookNote[] => {
     const rUpdated = r.updatedAt ?? 0;
     const lDeleted = l.deletedAt ?? 0;
     const rDeleted = r.deletedAt ?? 0;
-    if (rUpdated > lUpdated || rDeleted > lDeleted) {
-      byId.set(r.id, { ...l, ...r });
-    } else {
-      byId.set(r.id, { ...r, ...l });
+    const merged = rUpdated > lUpdated || rDeleted > lDeleted ? { ...l, ...r } : { ...r, ...l };
+    // A live remote record without strokes must not erase local handwriting;
+    // real deletions arrive as tombstones.
+    if (l.ink?.length && !merged.ink?.length && !merged.deletedAt) {
+      merged.ink = l.ink;
     }
+    byId.set(r.id, merged);
   }
   return Array.from(byId.values());
 };

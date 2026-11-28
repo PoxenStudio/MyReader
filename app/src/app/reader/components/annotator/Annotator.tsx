@@ -134,7 +134,10 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   }, []);
 
   const osPlatform = getOSPlatform();
-  const config = getConfig(bookKey)!;
+  // Reactive: note-writing handlers below derive their array from this
+  // config. Without a subscription they would keep writing the array they
+  // rendered with, silently dropping a drawing/annotation added since.
+  const config = useBookDataStore((state) => state.getConfig(bookKey))!;
   // Reactive: subscribe to THIS book's progress via the dedicated
   // progress store. This is the only piece of data we need to react to
   // per page turn — the `useEffect(..., [progress])` below uses it to
@@ -841,7 +844,21 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
       if (i < pending.length) {
         scheduledHandle = setTimeout(tick, TICK_GAP_MS);
       } else if (touched) {
-        const updatedConfig = updateBooknotes(bookKey, allAnnotations);
+        // Merge the back-filled pages into the LIVE note list, not the one
+        // captured when this effect was armed: the user may have drawn or
+        // highlighted in the meantime, and writing the old array back would
+        // delete that new note.
+        const latest = getConfig(bookKey);
+        if (!latest) return;
+        const pages = new Map<string, number>();
+        for (const annotation of allAnnotations) {
+          if (annotation.page) pages.set(annotation.id, annotation.page);
+        }
+        const merged = (latest.booknotes ?? []).map((note) => {
+          const page = pages.get(note.id);
+          return page ? { ...note, page } : note;
+        });
+        const updatedConfig = updateBooknotes(bookKey, merged);
         if (updatedConfig) {
           saveConfig(envConfig, bookKey, updatedConfig, settings);
         }
@@ -1628,7 +1645,8 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
 
     const config = getConfig(bookKey)!;
     const { booknotes: allNotes = [] } = config;
-    const booknotes = allNotes.filter((note) => !note.deletedAt);
+    // Handwriting has no text to export; skip it rather than emit blank quotes.
+    const booknotes = allNotes.filter((note) => note.type !== 'ink' && !note.deletedAt);
     if (booknotes.length === 0) {
       eventDispatcher.dispatch('toast', {
         type: 'info',

@@ -10,7 +10,10 @@ const h = vi.hoisted(() => {
   };
   const makeStore = <T,>(state: T): MockStore<T> => {
     const listeners = new Set<() => void>();
-    const store = (() => state) as MockStore<T>;
+    // Selector-aware like zustand's hook: the sync hook reads `currentUserId`
+    // through `useMyBooksStatusStore((s) => s.currentUserId)`.
+    const store = ((selector?: (state: T) => unknown) =>
+      selector ? selector(state) : state) as MockStore<T>;
     store.getState = () => state;
     store.subscribe = (listener) => {
       listeners.add(listener);
@@ -25,6 +28,7 @@ const h = vi.hoisted(() => {
       location: string;
       updatedAt: number;
       booknotes?: BookNote[];
+      lastSyncedAtNotes?: number;
       pendingReadingSeconds?: Record<string, number>;
     },
     progress: { location: 'local-loc' } as { location: string } | null,
@@ -64,8 +68,11 @@ const h = vi.hoisted(() => {
     setConfigMock: vi.fn(),
     saveConfigMock: vi.fn(async () => {}),
     goToMock: vi.fn(),
+    ensureCurrentUserIdMock: vi.fn(async (): Promise<number | null> => 1),
+    identityVerified: true,
+    identitySettled: true,
     mybooksStatus: {
-      currentUserId: 1,
+      currentUserId: 1 as number | null,
       showOtherAnnotations: true,
       sysInfo: null as { timezone?: string | null } | null,
     },
@@ -116,6 +123,12 @@ vi.mock('@/services/mybooks/syncClient', () => ({
   SyncApiError: class SyncApiError extends Error {},
 }));
 
+vi.mock('@/services/mybooksService', () => ({
+  ensureCurrentUserId: () => h.ensureCurrentUserIdMock(),
+  isCurrentUserIdVerified: () => h.identityVerified,
+  isCurrentUserIdSettled: () => h.identitySettled,
+}));
+
 vi.mock('../hooks/useWindowActiveChanged', () => ({
   useWindowActiveChanged: () => {},
 }));
@@ -147,6 +160,10 @@ beforeEach(() => {
   h.mybooksStatus.currentUserId = 1;
   h.mybooksStatus.showOtherAnnotations = true;
   h.mybooksStatus.sysInfo = null;
+  h.ensureCurrentUserIdMock.mockClear();
+  h.ensureCurrentUserIdMock.mockResolvedValue(1);
+  h.identityVerified = true;
+  h.identitySettled = true;
 });
 
 afterEach(() => {
@@ -168,6 +185,34 @@ const flushMicrotasks = async () => {
 };
 
 describe('useNativeSync', () => {
+  test('holds sync until the reader identity is resolved', async () => {
+    // A pull stamps `userId` onto the reader's own notes. Ownership checks are
+    // strict, so without the numeric id those notes (notably drawings) become
+    // invisible and stop being pushed. Sync therefore must not start before
+    // `/user/whoami` (via ensureCurrentUserId) has resolved the identity.
+    h.mybooksStatus.currentUserId = null;
+    // Resolve through the same store the hook reads, i.e. what the real
+    // ensureCurrentUserId does, rather than poking the field by hand.
+    h.ensureCurrentUserIdMock.mockImplementation(async () => {
+      h.mybooksStatus.currentUserId = 1;
+      return 1;
+    });
+
+    const { rerender } = renderHook(() => useNativeSync('book-key'));
+    await flushPushDebounce();
+
+    expect(h.ensureCurrentUserIdMock).toHaveBeenCalled();
+    // The mocked store doesn't re-render the hook by itself; the render after
+    // the id lands is what makes it sync-ready.
+    expect(h.pullSyncMock).not.toHaveBeenCalled();
+    expect(h.pushSyncMock).not.toHaveBeenCalled();
+
+    rerender();
+    await flushMicrotasks();
+
+    expect(h.pullSyncMock).toHaveBeenCalled();
+  });
+
   test('does not push before the initial pull-on-open has resolved', async () => {
     // Bug: opening a book fires the pull-once effect and the auto-push effect
     // in the same render (both keyed off progress?.location). If pushNow isn't
@@ -672,6 +717,54 @@ describe('useNativeSync', () => {
     );
   });
 
+  test('coerces a numeric-string uid instead of treating the note as foreign', async () => {
+    h.pullSyncMock.mockResolvedValue({
+      configs: null,
+      notes: [
+        {
+          id: 'n1',
+          book_hash: 'book-hash',
+          uid: '1',
+          updatedAt: 10,
+          note: 'mine',
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof h.pullSyncMock>>);
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const merged = h.setConfigMock.mock.calls
+      .map((call) => call[1] as { booknotes?: BookNote[] })
+      .find((config) => config?.booknotes);
+    expect(merged?.booknotes?.[0]).toMatchObject({ id: 'n1', userId: '1' });
+  });
+
+  test('treats an author-tagged row without a uid as foreign, never unowned', async () => {
+    // A row that carries author info is someone else's by definition; letting
+    // it land as "no userId" would make the strict ownership checks adopt it.
+    h.pullSyncMock.mockResolvedValue({
+      configs: null,
+      notes: [
+        {
+          id: 'n1',
+          book_hash: 'book-hash',
+          author: { nickname: 'Alice' },
+          updatedAt: 10,
+          note: 'theirs',
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof h.pullSyncMock>>);
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const merged = h.setConfigMock.mock.calls
+      .map((call) => call[1] as { booknotes?: BookNote[] })
+      .find((config) => config?.booknotes);
+    expect(merged?.booknotes?.[0]).toMatchObject({ id: 'n1', userId: 'foreign' });
+  });
+
   test('drops a locally-cached note the server no longer returns, once it was already synced', async () => {
     // Bug: pullNow's merge only ever adds/updates ids present in the
     // response — it never reconciles a local note whose id is *missing*
@@ -795,6 +888,28 @@ describe('useNativeSync', () => {
     );
   });
 
+  test('does not push while the identity is still unverified', async () => {
+    // A cached-but-unverified id could filter notes with the wrong account and
+    // let the server stamp them under the current session; pushes wait for the
+    // first whoami attempt to settle.
+    h.identitySettled = false;
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
+
+    const { rerender } = renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+    await flushPushDebounce();
+
+    expect(h.pushSyncMock).not.toHaveBeenCalled();
+
+    // A later local change (after identity settled) pushes normally.
+    h.identitySettled = true;
+    h.state.progress = { location: 'second-loc' };
+    rerender();
+    await flushPushDebounce();
+
+    expect(h.pushSyncMock).toHaveBeenCalled();
+  });
+
   test('does not push back a note that belongs to another user', async () => {
     h.pullSyncMock.mockResolvedValue({ configs: null, notes: null });
     h.state.config = {
@@ -816,5 +931,58 @@ describe('useNativeSync', () => {
     expect(h.pushSyncMock).toHaveBeenCalled();
     const payload = h.pushSyncMock.mock.calls[0]![0] as { notes: { id: string }[] };
     expect(payload.notes.map((n) => n.id)).toEqual(['mine', 'local']);
+  });
+
+  test('never sweeps a local drawing that the remote snapshot lacks', async () => {
+    const ink: BookNote = {
+      id: 'ink1',
+      type: 'ink',
+      cfi: 'epubcfi(/6/10)',
+      note: '',
+      createdAt: 1000,
+      updatedAt: 1500,
+      ink: [{ id: 's1', color: '#000', width: 0.004, points: [[0.1, 0.1]] }],
+    };
+    h.state.config = {
+      location: 'local-loc',
+      updatedAt: 1000,
+      lastSyncedAtNotes: 999_999, // older than the drawing, so the old sweep would drop it
+      booknotes: [ink],
+    };
+    h.pullSyncMock.mockResolvedValue({ configs: null, notes: [] });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const merged = h.setConfigMock.mock.calls
+      .map((call) => call[1] as { booknotes?: BookNote[] })
+      .find((config) => config?.booknotes);
+    expect(merged?.booknotes?.some((note) => note.id === 'ink1')).toBe(true);
+  });
+
+  test('keeps local strokes when a live remote row carries no ink', async () => {
+    const ink: BookNote = {
+      id: 'ink1',
+      type: 'ink',
+      cfi: 'epubcfi(/6/10)',
+      note: '',
+      createdAt: 1000,
+      updatedAt: 1000,
+      ink: [{ id: 's1', color: '#000', width: 0.004, points: [[0.1, 0.1]] }],
+    };
+    h.state.config = { location: 'local-loc', updatedAt: 1000, booknotes: [ink] };
+    h.pullSyncMock.mockResolvedValue({
+      configs: null,
+      notes: [{ ...ink, updatedAt: 5000, ink: [] }],
+    });
+
+    renderHook(() => useNativeSync('book-key'));
+    await flushMicrotasks();
+
+    const merged = h.setConfigMock.mock.calls
+      .map((call) => call[1] as { booknotes?: BookNote[] })
+      .find((config) => config?.booknotes);
+    const stored = merged?.booknotes?.find((note) => note.id === 'ink1');
+    expect(stored?.ink).toHaveLength(1);
   });
 });

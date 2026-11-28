@@ -85,6 +85,13 @@ describe('iframeEventHandlers click gestures', () => {
     vi.advanceTimersByTime(260);
 
     expect(postedTypes(postSpy)).toContain('iframe-single-click');
+    // Consumers that hit-test the reader cell (handwriting tap-to-edit) need
+    // window-space coordinates; without a frame the event's client point is it.
+    const click = postSpy.mock.calls
+      .map((call: unknown[]) => call[0] as Record<string, unknown>)
+      .find((message: Record<string, unknown>) => message['type'] === 'iframe-single-click');
+    expect(click?.['windowX']).toBe(100);
+    expect(click?.['windowY']).toBe(100);
   });
 
   test('a plain double-click posts iframe-double-click and not iframe-single-click', async () => {

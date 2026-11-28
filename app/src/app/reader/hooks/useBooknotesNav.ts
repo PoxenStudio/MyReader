@@ -4,6 +4,7 @@ import { useSidebarStore } from '@/store/sidebarStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useBookProgress } from '@/store/readerProgressStore';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { isOwnBooknoteId, useMyBooksStatusStore } from '@/store/mybooksStatusStore';
 import { createCfiLocationMatcher } from '@/utils/cfi';
 import { findTocItemBS } from '@/services/nav';
 import { BookNoteType } from '@/types/book';
@@ -29,11 +30,20 @@ export function useBooknotesNav(bookKey: string, toc: TOCItem[]) {
   const progress = useBookProgress(bookKey);
   const currentLocation = progress?.location;
 
+  const currentUserId = useMyBooksStatusStore((s) => s.currentUserId);
+
   // Get booknotes from config and filter by type
   const allBooknotes = useMemo(() => {
     const config = getConfig(bookKey);
-    return config?.booknotes?.filter((note) => !note.deletedAt) || [];
-  }, [bookKey, getConfig]);
+    return (
+      config?.booknotes?.filter(
+        (note) =>
+          !note.deletedAt &&
+          // Drawings stay private to their author, like the annotations list.
+          !(note.type === 'ink' && !isOwnBooknoteId(note.userId, currentUserId)),
+      ) || []
+    );
+  }, [bookKey, getConfig, currentUserId]);
 
   // Sort booknotes by CFI order
   const sortedBooknotes = useMemo(() => {
@@ -98,7 +108,10 @@ export function useBooknotesNav(bookKey: string, toc: TOCItem[]) {
   // Start navigation for a specific booknote type
   const startNavigation = useCallback(
     (type: BookNoteType) => {
-      const filtered = allBooknotes.filter((note) => note.type === type);
+      // Drawings live in the Annotations tab alongside highlights and notes.
+      const filtered = allBooknotes.filter(
+        (note) => note.type === type || (type === 'annotation' && note.type === 'ink'),
+      );
       if (filtered.length === 0) return;
 
       const sorted = [...filtered].sort((a, b) => CFI.compare(a.cfi, b.cfi));
@@ -158,7 +171,7 @@ export function useBooknotesNav(bookKey: string, toc: TOCItem[]) {
     [allBooknotes],
   );
   const annotationCount = useMemo(
-    () => allBooknotes.filter((n) => n.type === 'annotation').length,
+    () => allBooknotes.filter((n) => n.type === 'annotation' || n.type === 'ink').length,
     [allBooknotes],
   );
   const excerptCount = useMemo(

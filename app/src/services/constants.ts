@@ -1,4 +1,10 @@
 import {
+  DEFAULT_HANDWRITING_COLOR,
+  DEFAULT_HANDWRITING_WIDTH,
+  DEFAULT_MARKER_COLOR,
+  DEFAULT_MARKER_WIDTH,
+} from '@/services/handwriting/model';
+import {
   AnnotatorConfig,
   BookFont,
   BookLanguage,
@@ -243,6 +249,11 @@ export const DEFAULT_READSETTINGS: ReadSettings = {
   userHighlightColors: [],
   defaultHighlightLabels: {},
   customTtsHighlightColors: [],
+  handwritingColor: DEFAULT_HANDWRITING_COLOR,
+  handwritingWidth: DEFAULT_HANDWRITING_WIDTH,
+  handwritingTool: 'pen',
+  handwritingMarkerColor: DEFAULT_MARKER_COLOR,
+  handwritingMarkerWidth: DEFAULT_MARKER_WIDTH,
 };
 
 export const DEFAULT_MOBILE_READSETTINGS: Partial<ReadSettings> = {

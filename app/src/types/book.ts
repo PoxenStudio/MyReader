@@ -4,6 +4,7 @@ import { TTSHighlightGranularity } from '@/services/tts/types';
 import { TTSMediaMetadataMode } from '@/services/tts/types';
 import { TTSPlayerStyle } from '@/services/tts/types';
 import type { AnnotationLinkType } from '@/utils/deeplink';
+import type { InkStroke } from '@/services/handwriting/model';
 import { AnnotationToolType } from './annotator';
 
 export type BookFormat =
@@ -17,7 +18,7 @@ export type BookFormat =
   | 'FBZ'
   | 'TXT'
   | 'MD';
-export type BookNoteType = 'bookmark' | 'annotation' | 'excerpt';
+export type BookNoteType = 'bookmark' | 'annotation' | 'excerpt' | 'ink';
 export type ReadingStatus = 'unread' | 'reading' | 'finished' | 'abandoned';
 export type HighlightStyle = 'highlight' | 'underline' | 'squiggly';
 export type StorageType = 'local' | 'cloud';
@@ -181,6 +182,12 @@ export interface BookNote {
    * bookmarks and excerpts, and for fixed-layout formats (e.g. PDF).
    */
   global?: boolean;
+  /**
+   * Handwriting of an `ink` note: strokes pinned to the content at `cfi` (a
+   * reflowable book) or drawn on the page at `cfi` (fixed layout). See
+   * services/handwriting. Kept beside the PDF instead of written into it.
+   */
+  ink?: InkStroke[];
 
   createdAt: number;
   updatedAt: number;

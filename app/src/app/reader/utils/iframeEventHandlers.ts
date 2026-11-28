@@ -362,6 +362,9 @@ export const handleClick = (
         clientY: event.clientY,
         offsetX: event.offsetX,
         offsetY: event.offsetY,
+        // Window-space point, for consumers that hit-test the reader cell
+        // (handwriting tap-to-edit); client coordinates are iframe-local.
+        ...getWindowPoint(event),
         ...(media && { media }),
         ...getKeyStatus(event),
       },

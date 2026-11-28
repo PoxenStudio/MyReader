@@ -146,6 +146,11 @@ export const useAutoScroll = (
       if (scroller.active) scroller.stop();
       else startSession();
     };
+    // Drawing mode takes the page: stop for good rather than toggling.
+    const onStop = (event: CustomEvent) => {
+      if (event.detail?.bookKey !== bookKey) return;
+      scroller.stop();
+    };
     // Escape typed inside the book iframe arrives as a forwarded message.
     const onMessage = (msg: MessageEvent) => {
       if (msg.data?.type === 'iframe-keydown' && msg.data.key === 'Escape') scroller.stop();
@@ -158,10 +163,12 @@ export const useAutoScroll = (
       return true;
     };
     eventDispatcher.on('autoscroll-toggle', onToggle);
+    eventDispatcher.on('autoscroll-stop', onStop);
     eventDispatcher.onSync('iframe-single-click', onSingleClick);
     window.addEventListener('message', onMessage);
     return () => {
       eventDispatcher.off('autoscroll-toggle', onToggle);
+      eventDispatcher.off('autoscroll-stop', onStop);
       eventDispatcher.offSync('iframe-single-click', onSingleClick);
       window.removeEventListener('message', onMessage);
     };
