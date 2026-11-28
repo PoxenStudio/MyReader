@@ -28,13 +28,10 @@ Map.groupBy ??= (iterable, callbackfn) => {
   return map;
 };
 
-// Promise.withResolvers polyfill for pdf.js on older Android WebViews (<119)
-Promise.withResolvers ??= function <T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-};
+// NOTE: do not polyfill Promise.withResolvers here. foliate-js decides whether
+// pdf.js's worker (a separate global scope) needs that shim by probing
+// `typeof Promise.withResolvers` on the main thread. Installing it here masks
+// the probe on older Android WebViews, so the worker is spawned without the
+// shim and opening any PDF fails with "Promise.withResolvers is not a
+// function". foliate-js installs the polyfill for both scopes itself when a
+// PDF is opened (packages/foliate-js/pdf.js, WITH_RESOLVERS_POLYFILL).
