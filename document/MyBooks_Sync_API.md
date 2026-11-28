@@ -189,13 +189,32 @@ interface BookNote {
 Per-book reading progress and per-book view settings.
 
 ```ts
+interface RawLocationAnchor {
+  v: 2;
+  index: number;                 // spine index
+  rawOffset: number;             // character offset in the *untransformed* section text
+  rawFraction: number;           // rawOffset / raw text length (0..1)
+  rawQuote: string;              // raw text at the position, used to refine local mapping
+  sectionHash: string;           // hash of the raw section text, invalidates stale anchors
+  rawTextVersion: number;        // extraction rules version, same invalidation purpose
+  precision: 'exact' | 'approx';
+  updatedAt?: number;            // locationUpdatedAt this anchor describes
+}
+
 interface BookConfig {
   schemaVersion?: number;
   bookHash?: string;
   metaHash?: string;
   progress?: [number, number];   // [currentPage, totalPages]
-  location?: string;             // CFI of current location
+  location?: string;             // CFI of current location (device-dependent cache)
   xpointer?: string;             // XPointer of current location (KOReader interop)
+  // Position defined on the raw EPUB text so it is independent of each
+  // reader's content transforms (whitespace folding, 简繁, punctuation,
+  // proofread, …). This is the authoritative cross-device position when
+  // present; `location` is the same position expressed as a rendered CFI.
+  raw_anchor?: RawLocationAnchor | null;  // null = the author cleared it
+  locationUpdatedAt?: number;    // ms epoch, when `location`/`raw_anchor` last changed
+  migratedRemoteUpdatedAt?: number;       // last legacy record migrated from
   booknotes?: BookNote[];        // (legacy inline copy; primary source is `notes` category)
   rsvpPosition?: { cfi: string; wordText: string };
   searchConfig?: Partial<BookSearchConfig>;
@@ -207,6 +226,20 @@ interface BookConfig {
   lastPushedAtNotes?: number;
 }
 ```
+
+Timestamp semantics for `configs` (see `useNativeSync` in the app):
+
+- `updated_at` on the wire is `locationUpdatedAt` — the time the reading
+  position actually changed, not the time the client last pushed. Keepalives
+  that carry no position change omit `configs` entirely.
+- A pulled/applied position is written back with the record's own timestamp;
+  pulling does not make the local record "newest".
+- A client that does not send `raw_anchor` can advance `location` while the
+  server keeps an older `raw_anchor`. Consumers must ignore an anchor whose
+  `updatedAt` is older than the record's `updated_at`, or that has no
+  `updatedAt` at all (it cannot prove it describes this record), and fall back
+  to `location` under the normal LWW rule. `raw_anchor: null` means the author
+  cleared it; that is not a legacy record and gets no migration authority.
 
 ### 1.7 Sync cadence
 

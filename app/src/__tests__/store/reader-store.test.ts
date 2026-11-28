@@ -102,6 +102,7 @@ function seedViewState(key: string, overrides: Record<string, unknown> = {}) {
         syncing: false,
         gridInsets: null,
         previewMode: false,
+        progressSource: 'restore',
         viewSettings: null,
         ...overrides,
       },
@@ -309,6 +310,110 @@ describe('readerStore', () => {
         range,
         pageinfo: { current: 2, total: 10 },
       });
+      clearBookProgress('book-1');
+    });
+
+    test('stamps the location clock and drops a stale anchor so the position can sync', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: {
+          [id]: {
+            config: {
+              location: 'old-cfi',
+              locationUpdatedAt: 1000,
+              rawAnchor: { v: 2, index: 0, rawOffset: 1, rawFraction: 0.1 },
+              rawAnchorCleared: false,
+            },
+          },
+        },
+      } as never);
+      setBookProgress('book-1', {
+        location: 'old-cfi',
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 0, total: 5 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'new-cfi', null);
+
+      const config = (
+        useBookDataStore.getState().booksData[id] as {
+          config: {
+            location: string;
+            locationUpdatedAt?: number;
+            rawAnchor?: unknown;
+            rawAnchorCleared?: boolean;
+          };
+        }
+      ).config;
+      expect(config.location).toBe('new-cfi');
+      // A listening position is a real reading position: the sync hooks only
+      // push configs whose clock advanced past the last synced value.
+      expect(config.locationUpdatedAt).toBeGreaterThan(1000);
+      // The old anchor described the previous spot; the push path rebuilds one.
+      expect(config.rawAnchor).toBeUndefined();
+      expect(config.rawAnchorCleared).toBe(true);
+      // Source-gated sync effects treat only user/tts positions as real.
+      expect(getBookProgress('book-1')?.source).toBe('tts');
+      clearBookProgress('book-1');
+    });
+
+    test('does not advance the location clock when the sentence CFI did not move', () => {
+      seedViewState('book-1');
+      const id = getBookHash('book-1');
+      useBookDataStore.setState({
+        booksData: { [id]: { config: { location: 'same-cfi', locationUpdatedAt: 1234 } } },
+      } as never);
+      setBookProgress('book-1', {
+        location: 'same-cfi',
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 0, total: 5 },
+        index: 0,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'same-cfi', null);
+
+      const config = (
+        useBookDataStore.getState().booksData[id] as { config: { locationUpdatedAt?: number } }
+      ).config;
+      expect(config.locationUpdatedAt).toBe(1234);
+      clearBookProgress('book-1');
+    });
+
+    test('drops the previous section range when a move comes without one', () => {
+      seedViewState('book-1');
+      const oldRange = new Range();
+      setBookProgress('book-1', {
+        location: 'cfi-chapter-2',
+        range: oldRange,
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 1, total: 5 },
+        index: 1,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'cfi-chapter-3', null);
+
+      // Keeping the old range would let the push path build an anchor from a
+      // window that belongs to the previous section.
+      expect(getBookProgress('book-1')?.range).toBeUndefined();
+      clearBookProgress('book-1');
+    });
+
+    test('keeps the range when the same position lands again without one', () => {
+      seedViewState('book-1');
+      const range = new Range();
+      setBookProgress('book-1', {
+        location: 'cfi-chapter-2',
+        range,
+        pageinfo: { current: 1, total: 10 },
+        section: { current: 1, total: 5 },
+        index: 1,
+      } as unknown as BookProgress);
+
+      useReaderStore.getState().setProgressLocation('book-1', 'cfi-chapter-2', null);
+
+      expect(getBookProgress('book-1')?.range).toBe(range);
       clearBookProgress('book-1');
     });
 
@@ -564,6 +669,91 @@ describe('readerStore', () => {
 
       useReaderStore.getState().setViewInited('book-1', false);
       expect(useReaderStore.getState().viewStates['book-1']!.inited).toBe(false);
+    });
+  });
+
+  describe('setProgress source gating', () => {
+    const toc = { href: '#c1', label: 'C1', subitems: [] } as never;
+    const anchor = {
+      v: 2,
+      index: 0,
+      rawOffset: 5,
+      rawFraction: 0.1,
+      rawQuote: 'quote',
+      sectionHash: 'hash',
+      rawTextVersion: 1,
+      precision: 'exact',
+    } as const;
+
+    const setup = (config: Record<string, unknown>) => {
+      seedViewState('bookkey');
+      useBookDataStore.setState({
+        booksData: {
+          bookkey: {
+            id: 'bookkey',
+            book: null,
+            file: null,
+            bookDoc: null,
+            isFixedLayout: false,
+            config: { updatedAt: 1000, ...config },
+          },
+        },
+      } as never);
+    };
+    const call = (source?: 'user' | 'tts' | 'remote' | 'restore') =>
+      useReaderStore
+        .getState()
+        .setProgress(
+          'bookkey',
+          'cfi-new',
+          toc,
+          undefined,
+          { current: 1, total: 10 },
+          { current: 1, total: 10 },
+          { section: 0, total: 0 },
+          {} as Range,
+          0.5,
+          source,
+        );
+
+    test('remote/restore relocates do not write the config', () => {
+      setup({ location: 'cfi-old', rawAnchor: anchor });
+      call('remote');
+      call('restore');
+      const config = (
+        useBookDataStore.getState() as unknown as {
+          booksData: { bookkey: { config: { location: string; rawAnchor?: unknown } } };
+        }
+      ).booksData.bookkey!.config;
+      expect(config.location).toBe('cfi-old');
+      expect(config.rawAnchor).toEqual(anchor);
+    });
+
+    test('user/tts relocates persist and invalidate the stale anchor', () => {
+      for (const source of ['user', 'tts'] as const) {
+        useReaderStore.setState({ viewStates: {} });
+        useBookDataStore.setState({ booksData: {} });
+        setup({ location: 'cfi-old', rawAnchor: anchor });
+        call(source);
+        const config = (
+          useBookDataStore.getState() as unknown as {
+            booksData: {
+              bookkey: {
+                config: {
+                  location: string;
+                  rawAnchor?: unknown;
+                  rawAnchorCleared?: boolean;
+                  locationUpdatedAt?: number;
+                };
+              };
+            };
+          }
+        ).booksData.bookkey!.config;
+        expect(config.location).toBe('cfi-new');
+        expect(config.rawAnchor).toBeUndefined();
+        expect(config.rawAnchorCleared).toBe(true);
+        expect(config.locationUpdatedAt).toBeGreaterThan(1000);
+      }
     });
   });
 });

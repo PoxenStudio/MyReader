@@ -3,11 +3,12 @@ import { expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import FoliateViewer from '@/app/reader/components/FoliateViewer';
 
-const { readerState, openGate } = vi.hoisted(() => {
+const { readerState, bookDataState, openGate } = vi.hoisted(() => {
   return {
     openGate: { pending: null as Promise<void> | null, started: false },
     readerState: {
       setProgress: vi.fn(),
+      setProgressSource: vi.fn(),
       getViewState: () => ({}),
       getViewSettings: () => ({ writingMode: 'auto' }),
       getView: () => null,
@@ -17,15 +18,26 @@ const { readerState, openGate } = vi.hoisted(() => {
       getProgress: () => null,
       setViewSettings: () => {},
     },
+    bookDataState: {
+      getConfig: () => null,
+      setConfig: vi.fn(),
+      getBookData: () => null,
+      saveConfig: vi.fn(),
+    },
   };
 });
 
 vi.mock('@/store/readerStore', () => ({
-  useReaderStore: (select: (s: typeof readerState) => unknown) => select(readerState),
+  useReaderStore: Object.assign(
+    (select: (s: typeof readerState) => unknown) => select(readerState),
+    { getState: () => readerState },
+  ),
 }));
 vi.mock('@/store/bookDataStore', () => ({
-  useBookDataStore: (select: (s: { getBookData: () => unknown }) => unknown) =>
-    select({ getBookData: () => null }),
+  useBookDataStore: Object.assign(
+    (select: (s: typeof bookDataState) => unknown) => select(bookDataState),
+    { getState: () => bookDataState },
+  ),
 }));
 vi.mock('@/store/parallelViewStore', () => ({ useParallelViewStore: () => () => [] }));
 vi.mock('@/store/settingsStore', () => ({
@@ -46,6 +58,11 @@ vi.mock('@/store/customFontStore', () => ({
   }),
 }));
 vi.mock('@/context/EnvContext', () => ({ useEnv: () => ({ envConfig: {}, appService: {} }) }));
+// FoliateViewer gates raw-anchor work on `useMyBooksSyncReady`, which reads
+// the auth context; this test only cares about listener teardown.
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({ status: 'logged_in', isGuest: false }),
+}));
 vi.mock('next/navigation', () => ({ useSearchParams: () => null }));
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (text: string) => text }));
 vi.mock('@/libs/document', () => ({

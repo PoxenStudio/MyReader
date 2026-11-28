@@ -13,6 +13,28 @@ import {
 } from './useTouchInterceptor';
 import { hasVerticalPanning } from './usePagination';
 
+// Reader gestures happen inside the section iframe and never bubble to the
+// container, so this relay is the only place that can turn a real touch/wheel
+// into "the user is driving" for the sync source state machine.
+const markUserInput = (bookKey: string) => {
+  const state = useReaderStore.getState().getViewState(bookKey);
+  if (state && state.progressSource !== 'user') {
+    useReaderStore.getState().setProgressSource(bookKey, 'user');
+  }
+};
+
+const IFRAME_USER_INPUT_TYPES = new Set([
+  'iframe-touchstart',
+  'iframe-touchmove',
+  'iframe-touchend',
+  'iframe-touchcancel',
+  'iframe-wheel',
+  'iframe-mousedown',
+  'iframe-keydown',
+  'iframe-single-click',
+  'iframe-double-click',
+]);
+
 export const useMouseEvent = (
   bookKey: string,
   handlePageFlip: (msg: MessageEvent | React.MouseEvent<HTMLDivElement, MouseEvent>) => void,
@@ -36,6 +58,7 @@ export const useMouseEvent = (
   const handleMouseEvent = (msg: MessageEvent | React.MouseEvent<HTMLDivElement, MouseEvent>) => {
     if (msg instanceof MessageEvent) {
       if (msg.data && msg.data.bookKey === bookKey) {
+        if (IFRAME_USER_INPUT_TYPES.has(msg.data.type)) markUserInput(bookKey);
         if (msg.data.type === 'iframe-wheel') {
           if (msg.data.ctrlKey) {
             // Pinch/ctrl-wheel zoom is not a page-turn gesture — drop any
@@ -482,6 +505,7 @@ export const useTouchEvent = (bookKey: string) => {
 
   const handleTouch = (msg: MessageEvent) => {
     if (msg.data && msg.data.bookKey === bookKey) {
+      if (IFRAME_USER_INPUT_TYPES.has(msg.data.type)) markUserInput(bookKey);
       if (msg.data.type === 'iframe-touchstart') {
         onTouchStart(msg.data);
       } else if (msg.data.type === 'iframe-touchmove') {
